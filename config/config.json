@@ -1,0 +1,24 @@
+﻿{
+  "database": {
+    "host": "localhost",
+    "port": 33060,
+    "database": "guacamole_portal_db",
+    "user": "root",
+    "password": "xran"
+  },
+  "api": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "prefix": "/api/remote-apps",
+    "cors_origins": [
+      "http://localhost:8000",
+      "http://127.0.0.1:8000"
+    ]
+  },
+  "guacamole": {
+    "json_secret_key": "4c0b569e4c96df157eee1b65dd0e4d41",
+    "internal_url": "http://localhost:8080/guacamole",
+    "external_url": "http://localhost:8080/guacamole",
+    "token_expire_minutes": 5
+  }
+}

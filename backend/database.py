@@ -1,0 +1,66 @@
+﻿"""
+数据库连接管理
+
+复用 my_reservation 的连接模式: 同步 mysql-connector-python
+"""
+
+import json
+import os
+from pathlib import Path
+
+import mysql.connector
+
+
+def load_config() -> dict:
+    """加载配置文件，敏感值支持环境变量覆盖"""
+    config_path = Path(__file__).parent.parent / "config" / "config.json"
+    with open(config_path, "r", encoding="utf-8-sig") as f:
+        config = json.load(f)
+
+    # 环境变量覆盖敏感配置
+    config["database"]["password"] = os.environ.get(
+        "PORTAL_DB_PASSWORD", config["database"]["password"]
+    )
+    config["guacamole"]["json_secret_key"] = os.environ.get(
+        "GUACAMOLE_JSON_SECRET_KEY", config["guacamole"]["json_secret_key"]
+    )
+    return config
+
+
+CONFIG = load_config()
+
+
+class Database:
+    """数据库连接管理"""
+
+    def __init__(self):
+        self.config = CONFIG["database"]
+
+    def get_connection(self):
+        return mysql.connector.connect(
+            host=self.config["host"],
+            port=self.config["port"],
+            database=self.config["database"],
+            user=self.config["user"],
+            password=self.config["password"],
+            charset='utf8mb4',
+            use_unicode=True,
+        )
+
+    def execute_query(self, query: str, params=None, fetch_one: bool = False):
+        """执行查询，返回字典列表或单条字典"""
+        conn = self.get_connection()
+        cursor = None
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(query, params or {})
+            if fetch_one:
+                return cursor.fetchone()
+            return cursor.fetchall()
+        finally:
+            if cursor is not None:
+                cursor.close()
+            conn.close()
+
+
+db = Database()

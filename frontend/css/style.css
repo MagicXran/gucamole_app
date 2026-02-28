@@ -1,0 +1,152 @@
+﻿/* ============================================
+   RemoteApp 门户 - 样式
+   ============================================ */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #f0f2f5;
+    color: #333;
+    min-height: 100vh;
+}
+
+/* Header */
+.header {
+    background: linear-gradient(135deg, #1a73e8, #0d47a1);
+    color: #fff;
+    padding: 2rem;
+    text-align: center;
+}
+
+.header__title {
+    font-size: 1.8rem;
+    font-weight: 600;
+}
+
+.header__subtitle {
+    margin-top: 0.4rem;
+    font-size: 0.95rem;
+    opacity: 0.85;
+}
+
+/* Container */
+.container {
+    max-width: 1000px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+}
+
+/* App Grid */
+.app-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1.25rem;
+}
+
+/* Card */
+.app-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    border: 2px solid transparent;
+}
+
+.app-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+    border-color: #1a73e8;
+}
+
+.app-card:active {
+    transform: translateY(0);
+}
+
+.app-card__icon {
+    font-size: 2.5rem;
+    margin-bottom: 0.75rem;
+    display: block;
+}
+
+.app-card__name {
+    font-size: 1rem;
+    font-weight: 500;
+    color: #333;
+}
+
+.app-card__protocol {
+    font-size: 0.75rem;
+    color: #999;
+    margin-top: 0.3rem;
+    text-transform: uppercase;
+}
+
+/* Loading / Empty / Error */
+.loading,
+.empty {
+    text-align: center;
+    padding: 3rem;
+    color: #888;
+    font-size: 1rem;
+}
+
+.error-msg {
+    text-align: center;
+    padding: 1.5rem;
+    background: #fff3f3;
+    border: 1px solid #ffcdd2;
+    border-radius: 8px;
+    color: #c62828;
+    margin-top: 1rem;
+}
+
+/* Overlay */
+.overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.overlay__content {
+    background: #fff;
+    padding: 2rem 3rem;
+    border-radius: 12px;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.overlay__content p {
+    margin-top: 1rem;
+    font-size: 1rem;
+    color: #333;
+}
+
+/* Spinner */
+.spinner {
+    width: 40px;
+    height: 40px;
+    margin: 0 auto;
+    border: 4px solid #e0e0e0;
+    border-top-color: #1a73e8;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}

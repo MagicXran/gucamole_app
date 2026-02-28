@@ -1,0 +1,36 @@
+services:
+  guacd:
+    container_name: guacd
+    image: guacamole/guacd
+    restart: unless-stopped
+
+  guac-sql:
+    container_name: guac-sql
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: xran
+      MYSQL_DATABASE: guacamole_db
+      MYSQL_USER: guacamole_user
+      MYSQL_PASSWORD: xran
+    volumes:
+      - ./initdb.sql:/docker-entrypoint-initdb.d/initdb.sql
+      - /home/xran/data:/var/lib/mysql
+    ports:
+      - "127.0.0.1:33060:3306"
+
+  guac_web:
+    container_name: guac_web
+    image: guacamole/guacamole
+    restart: unless-stopped
+    ports:
+      - 8080:8080
+    environment:
+      MYSQL_DATABASE: guacamole_db
+      MYSQL_HOSTNAME: guac-sql
+      MYSQL_PASSWORD: xran
+      MYSQL_USER: guacamole_user
+      GUACD_HOSTNAME: guacd
+    depends_on:
+      - guac-sql
+      - guacd

@@ -32,6 +32,7 @@
       MYSQL_USER: guacamole_user
       GUACD_HOSTNAME: guacd
       JSON_SECRET_KEY: "${GUACAMOLE_JSON_SECRET_KEY}"
+      WEBAPP_CONTEXT: "ROOT"
     volumes:
       - ./branding/portal-branding.jar:/etc/guacamole/extensions/portal-branding.jar:ro
     depends_on:

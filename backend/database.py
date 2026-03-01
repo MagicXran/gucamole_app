@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 import mysql.connector
+from mysql.connector import pooling
 
 
 def load_config() -> dict:
@@ -31,13 +32,14 @@ CONFIG = load_config()
 
 
 class Database:
-    """数据库连接管理"""
+    """数据库连接管理 (带连接池，支持并发)"""
 
     def __init__(self):
         self.config = CONFIG["database"]
-
-    def get_connection(self):
-        return mysql.connector.connect(
+        self._pool = pooling.MySQLConnectionPool(
+            pool_name="portal_pool",
+            pool_size=8,
+            pool_reset_session=True,
             host=self.config["host"],
             port=self.config["port"],
             database=self.config["database"],
@@ -46,6 +48,9 @@ class Database:
             charset='utf8mb4',
             use_unicode=True,
         )
+
+    def get_connection(self):
+        return self._pool.get_connection()
 
     def execute_query(self, query: str, params=None, fetch_one: bool = False):
         """执行查询，返回字典列表或单条字典"""

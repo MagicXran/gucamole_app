@@ -29,6 +29,40 @@ guac_service = GuacamoleService(
 )
 
 
+def _build_all_connections(user_id: int) -> dict:
+    """查询该用户所有可用应用，构建完整的 connections dict。
+
+    将所有应用打包到一个 token 中，确保同一用户的所有标签
+    共享同一个 Guacamole session（解决 localStorage 多标签冲突）。
+    """
+    query = """
+        SELECT a.id, a.hostname, a.port, a.rdp_username, a.rdp_password,
+               a.domain, a.security, a.ignore_cert,
+               a.remote_app, a.remote_app_dir, a.remote_app_args
+        FROM remote_app a
+        JOIN remote_app_acl acl ON a.id = acl.app_id
+        WHERE acl.user_id = %(user_id)s AND a.is_active = 1
+    """
+    apps = db.execute_query(query, {"user_id": user_id})
+    connections = {}
+    for app in apps:
+        conn = GuacamoleCrypto.build_rdp_connection(
+            name=f"app_{app['id']}",
+            hostname=app["hostname"],
+            port=app["port"],
+            username=app.get("rdp_username") or "",
+            password=app.get("rdp_password") or "",
+            domain=app.get("domain") or "",
+            security=app.get("security") or "nla",
+            ignore_cert=bool(app.get("ignore_cert", True)),
+            remote_app=app.get("remote_app") or "",
+            remote_app_dir=app.get("remote_app_dir") or "",
+            remote_app_args=app.get("remote_app_args") or "",
+        )
+        connections.update(conn)
+    return connections
+
+
 @router.get("/", response_model=List[RemoteAppResponse])
 async def list_apps(user_id: int = 1):
     """获取当前用户可访问的 RemoteApp 列表"""
@@ -60,47 +94,36 @@ async def launch_app(app_id: int, user_id: int = 1):
             detail="无权访问该应用",
         )
 
-    # 2. 查询应用连接参数
-    app_query = """
-        SELECT id, name, protocol, hostname, port,
-               rdp_username, rdp_password, domain, security,
-               ignore_cert, remote_app, remote_app_dir, remote_app_args
-        FROM remote_app
-        WHERE id = %(app_id)s AND is_active = 1
+    # 2. 验证目标应用存在
+    app_check = """
+        SELECT id FROM remote_app WHERE id = %(app_id)s AND is_active = 1
     """
-    app = db.execute_query(app_query, {"app_id": app_id}, fetch_one=True)
+    app = db.execute_query(app_check, {"app_id": app_id}, fetch_one=True)
     if not app:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="应用不存在或已禁用",
         )
 
-    # 3. 构建 Guacamole 连接参数
-    # Guacamole 前端 btoa() 不支持非 Latin1 字符，连接标识符必须是纯 ASCII
-    connection_name = f"app_{app['id']}"
-    connections = GuacamoleCrypto.build_rdp_connection(
-        name=connection_name,
-        hostname=app["hostname"],
-        port=app["port"],
-        username=app.get("rdp_username") or "",
-        password=app.get("rdp_password") or "",
-        domain=app.get("domain") or "",
-        security=app.get("security") or "nla",
-        ignore_cert=bool(app.get("ignore_cert", True)),
-        remote_app=app.get("remote_app") or "",
-        remote_app_dir=app.get("remote_app_dir") or "",
-        remote_app_args=app.get("remote_app_args") or "",
-    )
+    # 3. 构建该用户所有可用应用的连接参数
+    #    全部打包到一个 token，确保多标签共享同一 session
+    connection_name = f"app_{app_id}"
+    connections = _build_all_connections(user_id)
+    if connection_name not in connections:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="连接构建异常",
+        )
 
-    # 4. 加密 → 换 token → 拿 URL
-    guac_username = f"portal_user_{user_id}"
+    # 4. 复用或创建 session → 拿 URL
+    guac_username = f"portal_u{user_id}"
     try:
         redirect_url = await guac_service.launch_connection(
             username=guac_username,
             connections=connections,
             target_connection_name=connection_name,
         )
-    except Exception as e:
+    except Exception:
         logger.exception("启动 Guacamole 连接失败: app_id=%d", app_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

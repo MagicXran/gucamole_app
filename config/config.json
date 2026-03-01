@@ -1,6 +1,6 @@
 ﻿{
   "database": {
-    "host": "localhost",
+    "host": "127.0.0.1",
     "port": 33060,
     "database": "guacamole_portal_db",
     "user": "root",
@@ -19,6 +19,6 @@
     "json_secret_key": "4c0b569e4c96df157eee1b65dd0e4d41",
     "internal_url": "http://localhost:8080/guacamole",
     "external_url": "http://localhost:8080/guacamole",
-    "token_expire_minutes": 5
+    "token_expire_minutes": 30
   }
 }

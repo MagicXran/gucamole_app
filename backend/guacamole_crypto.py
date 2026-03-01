@@ -137,9 +137,11 @@ class GuacamoleCrypto:
             "port": str(port),
             "security": security,
             "ignore-cert": "true" if ignore_cert else "false",
+            # GUACAMOLE-2123: GFX Pipeline 可能导致 RemoteApp 窗口不更新
+            "disable-gfx": "true",
+            "resize-method": "display-update",
         }
 
-        # 只添加非空参数
         if username:
             params["username"] = username
         if password:

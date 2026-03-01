@@ -1,11 +1,11 @@
 ﻿services:
   guacd:
-    container_name: guacd
+    container_name: guacd_app
     image: guacamole/guacd:1.6.0
     restart: unless-stopped
 
   guac-sql:
-    container_name: guac-sql
+    container_name: guac-sql_app
     image: mysql:8.0
     restart: unless-stopped
     environment:
@@ -15,11 +15,11 @@
       MYSQL_USER: guacamole_user
       MYSQL_PASSWORD: "${GUAC_DB_PASSWORD}"
     volumes:
-      - ./initdb.sql:/docker-entrypoint-initdb.d/initdb.sql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/initdb.sql
       - guac-db-data:/var/lib/mysql
 
   guac_web:
-    container_name: guac_web
+    container_name: guac_web_app
     image: guacamole/guacamole:1.6.0
     restart: unless-stopped
     ports:
@@ -29,7 +29,7 @@
       MYSQL_DATABASE: guacamole_db
       MYSQL_HOSTNAME: guac-sql
       MYSQL_PASSWORD: "${GUAC_DB_PASSWORD}"
-      MYSQL_USER: guacamole_user
+      MYSQL_USERNAME: guacamole_user
       GUACD_HOSTNAME: guacd
       JSON_SECRET_KEY: "${GUACAMOLE_JSON_SECRET_KEY}"
     depends_on:

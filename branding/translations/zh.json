@@ -1,0 +1,10 @@
+{
+    "APP": {
+        "NAME": "远程应用平台"
+    },
+    "CLIENT": {
+        "TEXT_CLIENT_STATUS_CONNECTING": "正在连接服务器...",
+        "TEXT_CLIENT_STATUS_WAITING": "已连接服务器，正在等待应答...",
+        "TEXT_CLIENT_STATUS_UNSTABLE": "网络连接似乎不稳定。"
+    }
+}

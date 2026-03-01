@@ -1,0 +1,9 @@
+{
+    "guacamoleVersion": "*",
+    "name": "Portal Branding",
+    "namespace": "portal-branding",
+    "translations": [
+        "translations/en.json",
+        "translations/zh.json"
+    ]
+}

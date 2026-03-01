@@ -1,0 +1,10 @@
+{
+    "APP": {
+        "NAME": "Remote App Portal"
+    },
+    "CLIENT": {
+        "TEXT_CLIENT_STATUS_CONNECTING": "Connecting to server...",
+        "TEXT_CLIENT_STATUS_WAITING": "Connected to server. Waiting for response...",
+        "TEXT_CLIENT_STATUS_UNSTABLE": "The network connection appears unstable."
+    }
+}

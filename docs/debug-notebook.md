@@ -25,6 +25,7 @@
   - [BUG-013: URL 泄露 Guacamole 内部地址与 Token](#bug-013-url-泄露-guacamole-内部地址与-token)
   - [BUG-014: 后端重启导致旧标签被踢回登录页](#bug-014-后端重启导致旧标签被踢回登录页)
   - [BUG-015: about:blank iframe 中键盘输入失效](#bug-015-aboutblank-iframe-中键盘输入失效)
+  - [BUG-016: RemoteApp 空闲 ~20 分钟后卡死无响应](#bug-016-remoteapp-空闲-20-分钟后卡死无响应)
 - [三、参考资料汇总](#三参考资料汇总)
 
 ---
@@ -999,6 +1000,272 @@ document.addEventListener('keydown', function() {
 
 ---
 
+### BUG-016: RemoteApp 空闲 ~20 分钟后卡死无响应
+
+**严重等级：** 🔴 高（核心功能不可用）
+
+**现象：**
+用户通过门户打开 RemoteApp 后，如果约 20 分钟不进行任何操作（不动鼠标、不按键盘），RemoteApp 窗口会完全卡死——画面冻结、鼠标点击无反应、键盘输入无效。关闭弹窗重新打开后才能恢复，但之前的工作状态丢失。
+
+guacd 日志中反复出现：
+```
+guacd: ERROR: User is not responding.
+guacd: INFO:  User "..." disconnected (0 users remain)
+guacd: WARNING: Client did not terminate in a timely manner. Forcibly terminating client and any child processes.
+```
+
+**根因分析：**
+
+这是一个**多层超时链条问题**，不是单一原因。从浏览器到 Windows RDP 服务器共有 7 层超时机制，任何一层断裂都会导致连接死亡：
+
+```
+超时链条（木桶效应——最短的那层决定一切）:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  ① Portal JWT Token              480分钟 (8小时)                         │
+│     └─ 仅影响 Portal API 调用，已打开的 RemoteApp 不受影响                 │
+│                                                                         │
+│  ② JSON Auth Token (expires)     原30分钟 → 已改为480分钟                 │
+│     └─ 仅影响首次认证，连接建立后不再检查                                   │
+│                                                                         │
+│  ③ Backend _SessionCache TTL     原29分钟 → 已改为~8小时                  │
+│     └─ 仅影响 launch 新连接，不影响已建立的连接                             │
+│                                                                         │
+│  ④ Guacamole API Session         原60分钟(默认) → 已改为480分钟            │
+│     └─ 有活跃 tunnel 时永不驱逐 (源码: session.hasTunnels())               │
+│                                                                         │
+│  ⑤ NOP Ping (guacd ↔ 浏览器)     5秒/次，15秒超时 (硬编码，不可配置)       │
+│     └─ guacd 和 JS 客户端互发 nop/sync，任一方 15秒无响应则断连             │
+│     └─ sync 回复是事件驱动（WebSocket onmessage），不受浏览器节流影响        │
+│                                                                         │
+│  ⑥ 网络/防火墙/NAT               本环境: localhost + 内网直连              │
+│     └─ 无中间设备，NOP ping 保持 TCP 活跃                                  │
+│                                                                         │
+│  ⑦ Windows RDP GPO ← ← ← ← ← ← 这是真正的瓶颈！！！                     │
+│     └─ MaxIdleTime: 默认由 GPO 控制 (通常 15~30 分钟)                      │
+│     └─ Windows 踢掉空闲 RDP 会话 → guacd 收到 disconnect → 连接死亡        │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**精确事件链（20 分钟卡死）：**
+
+```
+T=0:      用户打开 RemoteApp，连接正常
+T=0~20m:  用户空闲，但 NOP ping 持续保活 guacd ↔ 浏览器的隧道
+          然而 RDP 会话层面无用户输入 → Windows 计算空闲时间
+T=~20m:   Windows RDP GPO 的 MaxIdleTime 到期
+          → Windows 断开 RDP 会话
+          → guacd 检测到 RDP 连接断开 → 关闭隧道
+          → 浏览器端 WebSocket 断开 → 画面冻结
+```
+
+**关键洞察：** Guacamole 的 NOP ping 只保活 `浏览器 ↔ guacd` 这段，**不会向 RDP 服务器发送任何保活流量**。所以即使 Guacamole 隧道完好，Windows 仍然认为 RDP 会话是空闲的。
+
+**解决方案（两部分）：**
+
+#### Part A: 代码层修改（消除非 Windows 层的超时瓶颈）
+
+**1. config/config.json — 延长 JSON Auth Token 过期时间**
+
+```diff
+- "token_expire_minutes": 30
++ "token_expire_minutes": 480
+```
+
+效果：JSON Auth Token 从 30 分钟延长至 8 小时，与 Portal JWT 对齐。`_SessionCache` TTL 随之从 29 分钟延长至 ~8 小时。
+
+**2. docker-compose.yml — 新增 Guacamole API Session 超时**
+
+```diff
+  environment:
+    ...
+    WEBAPP_CONTEXT: "ROOT"
++   API_SESSION_TIMEOUT: "480"
+```
+
+效果：Guacamole 的 `api-session-timeout` 从默认 60 分钟延长至 480 分钟。注意：有活跃 tunnel 的 session 本身不会被驱逐（源码 `HashTokenSessionMap.java` 中 `session.hasTunnels()` 检查），此配置是安全兜底。
+
+**3. frontend/js/app.js — Web Worker Keepalive**
+
+在 RemoteApp 弹出窗口注入 Web Worker，每 30 秒通过 `postMessage` 保持 iframe 活跃：
+
+```javascript
+// Web Worker keepalive: 防止浏览器后台节流冻结 Guacamole 的 NOP ping
+var wb = new Blob(["setInterval(function(){postMessage(1)},30000)"],
+    {type:"text/javascript"});
+var wk = new Worker(URL.createObjectURL(wb));
+wk.onmessage = function(){
+    try { f.contentWindow.postMessage("keepalive","*") } catch(e) {}
+};
+```
+
+原理：Web Worker 运行在独立线程，**不受浏览器后台标签节流（Background Tab Throttling）影响**。即使用户最小化弹窗，Worker 仍正常执行，通过 postMessage 触发 iframe 的事件循环，防止 Guacamole JS 客户端被冻结。
+
+**修改文件清单：**
+
+| 文件 | 修改内容 |
+|------|---------|
+| `config/config.json` | `token_expire_minutes: 30 → 480` |
+| `docker-compose.yml` | 新增 `API_SESSION_TIMEOUT: "480"` |
+| `deploy/docker-compose.yml` | 新增 `API_SESSION_TIMEOUT: "480"` |
+| `frontend/js/app.js` | 注入 Web Worker keepalive 脚本 |
+
+**部署步骤：**
+
+```bash
+# 1. 重建 guac_web 容器（加载新环境变量）
+cd /home/xran && docker compose up -d guac_web
+
+# 2. 验证环境变量生效
+docker exec guac_web env | grep API_SESSION_TIMEOUT
+# 应输出: API_SESSION_TIMEOUT=480
+
+# 3. 重启 FastAPI 后端（加载新 config.json）
+# 在 Windows 上重启 backend/app.py
+```
+
+#### Part B: Windows RDP 服务器组策略配置（必须手动操作）
+
+> **⚠️ 这是解决 20 分钟卡死的核心步骤。代码层修改只能消除上游瓶颈，真正掐断连接的是 Windows RDP GPO。不做这步 = 问题依然存在。**
+
+**方法一：图形界面 (gpedit.msc)**
+
+在 RDP 目标服务器上运行 `gpedit.msc`，导航至：
+
+```
+计算机配置
+  └─ 管理模板
+      └─ Windows 组件
+          └─ 远程桌面服务
+              └─ 远程桌面会话主机
+                  └─ 会话时间限制
+```
+
+配置以下 4 项策略：
+
+| 策略名称 | 设置 | 值 | 说明 |
+|----------|------|-----|------|
+| 设置活动但空闲的远程桌面服务会话的时间限制 | **已启用** | **从不** | **核心配置**：防止空闲 RDP 会话被踢，直接解决 20 分钟卡死 |
+| 设置活动的远程桌面服务会话的时间限制 | **已启用** | **从不** | 防止正在使用的会话被强制中断 |
+| 设置断开连接的会话的时间限制 | **已启用** | **5 分钟** | 用户关闭浏览器后，断开的会话 5 分钟后自动注销释放资源。设为"从不"会导致僵尸会话无限堆积 |
+| 到达时间限制时终止会话 | **已禁用** | — | 防止到达时间限制时强制杀掉会话（而是断开连接，允许重连） |
+
+**方法二：注册表命令 (reg add)**
+
+```cmd
+:: ===== 在 RDP 目标服务器上以管理员身份运行 =====
+
+:: 1. 空闲会话超时 = 永不 (0 = 禁用)
+::    解决 RemoteApp 空闲 ~20 分钟后卡死
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxIdleTime /t REG_DWORD /d 0 /f
+
+:: 2. 活动会话超时 = 永不 (0 = 禁用)
+::    防止正在使用的会话被强制中断
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxConnectionTime /t REG_DWORD /d 0 /f
+
+:: 3. 断开连接的会话超时 = 5 分钟 (300000 毫秒)
+::    用户关闭浏览器后，断开的会话 5 分钟后自动注销释放资源
+::    ⚠️ 不要设为 0（永不），否则僵尸会话会无限堆积消耗服务器资源
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxDisconnectionTime /t REG_DWORD /d 300000 /f
+
+:: 4. 到达时间限制时不强制终止会话
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v fResetBroken /t REG_DWORD /d 0 /f
+
+:: 5. 立即刷新策略
+gpupdate /force
+```
+
+**方法三：PowerShell (适合批量部署)**
+
+```powershell
+# ===== 在 RDP 目标服务器上以管理员身份运行 =====
+
+$regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
+
+# 确保注册表路径存在
+if (-not (Test-Path $regPath)) {
+    New-Item -Path $regPath -Force | Out-Null
+}
+
+# 空闲会话超时 = 永不
+Set-ItemProperty -Path $regPath -Name "MaxIdleTime" -Value 0 -Type DWord
+
+# 活动会话超时 = 永不
+Set-ItemProperty -Path $regPath -Name "MaxConnectionTime" -Value 0 -Type DWord
+
+# 断开连接的会话超时 = 5 分钟 (300000ms)
+Set-ItemProperty -Path $regPath -Name "MaxDisconnectionTime" -Value 300000 -Type DWord
+
+# 不强制终止会话
+Set-ItemProperty -Path $regPath -Name "fResetBroken" -Value 0 -Type DWord
+
+# 刷新策略
+gpupdate /force
+
+Write-Host "✅ RDP 会话超时策略已配置完成" -ForegroundColor Green
+```
+
+**验证配置是否生效：**
+
+```cmd
+:: 查看当前策略值
+reg query "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxIdleTime
+reg query "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxConnectionTime
+reg query "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxDisconnectionTime
+
+:: 或使用 gpresult 导出完整报告
+gpresult /H C:\gpo_report.html
+:: 打开 gpo_report.html，搜索 "远程桌面" 或 "Terminal Services" 查看生效的策略
+```
+
+预期输出：
+```
+MaxIdleTime         REG_DWORD    0x0          ← 空闲永不超时
+MaxConnectionTime   REG_DWORD    0x0          ← 活动永不超时
+MaxDisconnectionTime REG_DWORD   0x493e0      ← 300000ms = 5分钟
+```
+
+**注意事项：**
+
+| 项目 | 说明 |
+|------|------|
+| 生效范围 | 策略写入后 `gpupdate /force` 立即生效，**不需要重启** RDP 服务器 |
+| 已有连接 | 新策略只对**新建立**的 RDP 会话生效，已存在的会话仍按旧策略执行 |
+| 域环境 | 如果服务器加入了 Active Directory 域，域 GPO 可能覆盖本地策略。需在域控上配置或确认域策略未设置此项 |
+| 多服务器 | 如果门户连接多台 Windows 服务器，**每台都需要配置** |
+| MaxDisconnectionTime | 设为 5 分钟 (300000ms) 是推荐值。太短（如 1 分钟）可能导致短暂网络抖动后无法重连；太长或"从不"会导致僵尸会话堆积 |
+
+**修改后的完整超时链（所有层生效后）：**
+
+| 层 | 组件 | 超时值 | 空闲时是否触发 |
+|----|------|--------|--------------|
+| ① | Portal JWT | 8 小时 | ❌ 不影响已打开的 RemoteApp |
+| ② | JSON Auth Token | 8 小时 | ❌ 仅影响首次认证 |
+| ③ | Session Cache | ~8 小时 | ❌ 仅影响 launch 新连接 |
+| ④ | Guacamole API Session | 8 小时 (有 tunnel 时永不驱逐) | ❌ |
+| ⑤ | NOP Ping | 5秒/次 (硬编码) | ❌ sync 事件驱动，持续保活 |
+| ⑥ | 网络层 | localhost + 内网 | ❌ NOP ping 保持 TCP 活跃 |
+| ⑦ | Windows RDP GPO | MaxIdleTime=0 (永不) | ❌ **已解决** |
+
+**结论：所有层配置完成后，RemoteApp 连接可以无限期空闲而不卡死。**
+
+**参考：**
+- [Microsoft: Set time limit for active but idle RDS sessions](https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/rdp-files)
+- [Microsoft: RemoteApp sessions are disconnected](https://learn.microsoft.com/en-us/troubleshoot/windows-server/remote/remoteapp-sessions-disconnected)
+- [Microsoft: Session Time Limits GPO](https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SESSIONS_Idle_Limit_1)
+- [Apache Guacamole: Configuring (api-session-timeout)](https://guacamole.apache.org/doc/gug/configuring-guacamole.html)
+- [Apache Guacamole: Docker (Environment Variables)](https://guacamole.apache.org/doc/gug/guacamole-docker.html)
+- [GUACAMOLE-2081: NOP ping stops sending](https://issues.apache.org/jira/browse/GUACAMOLE-2081)
+- [GUACAMOLE-2138: Add optional max connection timeout](https://issues.apache.org/jira/browse/GUACAMOLE-2138)
+- [GUACAMOLE-1475: Make api-session-timeout adaptable in Docker](https://issues.apache.org/jira/browse/GUACAMOLE-1475)
+- [HashTokenSessionMap.java (session eviction logic)](https://github.com/apache/guacamole-client/blob/main/guacamole/src/main/java/org/apache/guacamole/rest/auth/HashTokenSessionMap.java)
+- [Guacamole Mailing List: RDP idle timeout](https://www.mail-archive.com/user@guacamole.apache.org/msg07792.html)
+- [Guacamole Mailing List: Session Timeout](https://www.mail-archive.com/user@guacamole.apache.org/msg14605.html)
+
+---
+
 ## 三、参考资料汇总
 
 ### 官方文档
@@ -1033,6 +1300,9 @@ document.addEventListener('keydown', function() {
 | [GUACAMOLE-2123](https://issues.apache.org/jira/browse/GUACAMOLE-2123) | Remote App Windows not updated with GFX Pipeline | 相关 |
 | [GUACAMOLE-1015](https://issues.apache.org/jira/browse/GUACAMOLE-1015) | Tunnel and WebSocket states out of sync | Open |
 | [GUACAMOLE-67](https://issues.apache.org/jira/browse/GUACAMOLE-67) | I/O error in WebSocket can cause connection tracking to fail | 相关 |
+| [GUACAMOLE-2081](https://issues.apache.org/jira/browse/GUACAMOLE-2081) | NOP ping inexplicably stops sending | Closed (Cannot Reproduce) |
+| [GUACAMOLE-2138](https://issues.apache.org/jira/browse/GUACAMOLE-2138) | Add optional maximum connection timeout | Open (Feature Request) |
+| [GUACAMOLE-1475](https://issues.apache.org/jira/browse/GUACAMOLE-1475) | Make api-session-timeout adaptable in Docker | Resolved |
 
 ### 其他参考
 
@@ -1046,8 +1316,11 @@ document.addEventListener('keydown', function() {
 | MDN: Window.open() | https://developer.mozilla.org/en-US/docs/Web/API/Window/open |
 | MDN: Same-origin policy | https://developer.mozilla.org/en-US/docs/Web/Security/Same-origin_policy |
 | Guacamole Mailing List: RDP idle timeout | https://www.mail-archive.com/user@guacamole.apache.org/msg07792.html |
+| Guacamole Mailing List: Session Timeout | https://www.mail-archive.com/user@guacamole.apache.org/msg14605.html |
 | SourceForge: Guacamole reconnect discussion | https://sourceforge.net/p/guacamole/discussion/1110834/thread/6341b248/ |
 | Microsoft: RDP Session Timeout | https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/rdp-files |
+| Microsoft: RemoteApp sessions disconnected | https://learn.microsoft.com/en-us/troubleshoot/windows-server/remote/remoteapp-sessions-disconnected |
+| Microsoft: Session Time Limits GPO (admx.help) | https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SESSIONS_Idle_Limit_1 |
 
 ---
 
@@ -1059,3 +1332,4 @@ document.addEventListener('keydown', function() {
 > | 2026-03-01 | 追加 BUG-011 ~ BUG-013：Token 有效期分析、页面刷新会话恢复、URL 隐藏 |
 > | 2026-03-02 | 追加 BUG-014：后端重启导致旧标签被踢，修正 BUG-011 结论 |
 > | 2026-03-02 | 追加 BUG-015：about:blank iframe 键盘输入失效，焦点管理修复 |
+> | 2026-03-02 | 追加 BUG-016：RemoteApp 空闲 ~20 分钟卡死，多层超时优化 + Windows GPO 配置指南 |

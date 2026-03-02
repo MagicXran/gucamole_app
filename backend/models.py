@@ -24,3 +24,24 @@ class LaunchResponse(BaseModel):
     """启动连接响应"""
     redirect_url: str = Field(..., description="Guacamole 客户端重定向 URL")
     connection_name: str = Field(..., description="连接名称")
+
+
+class LoginRequest(BaseModel):
+    """登录请求"""
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    """登录响应"""
+    token: str
+    user_id: int
+    username: str
+    display_name: str
+
+
+class UserInfo(BaseModel):
+    """JWT 中的用户信息"""
+    user_id: int
+    username: str
+    display_name: str = ""

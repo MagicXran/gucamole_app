@@ -150,3 +150,124 @@ body {
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
+
+/* ---- Header Inner (with user info) ---- */
+.header__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+.header__user {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.9rem;
+}
+
+.header__logout {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    padding: 0.35rem 0.8rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: background 0.2s;
+}
+
+.header__logout:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* ---- Login Page ---- */
+.login-body {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+}
+
+.login-card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 2.5rem;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    text-align: center;
+}
+
+.login-card__title {
+    font-size: 1.5rem;
+    color: #1a73e8;
+    margin-bottom: 0.3rem;
+}
+
+.login-card__subtitle {
+    font-size: 0.85rem;
+    color: #888;
+    margin-bottom: 1.5rem;
+}
+
+.login-form__group {
+    margin-bottom: 1rem;
+    text-align: left;
+}
+
+.login-form__group label {
+    display: block;
+    font-size: 0.85rem;
+    color: #555;
+    margin-bottom: 0.3rem;
+}
+
+.login-form__group input {
+    width: 100%;
+    padding: 0.65rem 0.8rem;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+}
+
+.login-form__group input:focus {
+    outline: none;
+    border-color: #1a73e8;
+    box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.15);
+}
+
+.login-form__error {
+    background: #fff3f3;
+    border: 1px solid #ffcdd2;
+    border-radius: 6px;
+    color: #c62828;
+    padding: 0.5rem;
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+}
+
+.login-form__btn {
+    width: 100%;
+    padding: 0.7rem;
+    background: #1a73e8;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.login-form__btn:hover {
+    background: #1557b0;
+}
+
+.login-form__btn:disabled {
+    background: #93c5fd;
+    cursor: not-allowed;
+}

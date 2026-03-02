@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.database import CONFIG
+from backend.auth import router as auth_router
 from backend.router import router
 
 # 日志配置
@@ -38,6 +39,7 @@ app.add_middleware(
 )
 
 # API 路由
+app.include_router(auth_router)
 app.include_router(router)
 
 # 静态文件（前端）

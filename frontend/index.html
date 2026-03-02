@@ -8,8 +8,16 @@
 </head>
 <body>
     <header class="header">
-        <h1 class="header__title">RemoteApp 门户</h1>
-        <p class="header__subtitle">点击卡片启动远程应用</p>
+        <div class="header__inner">
+            <div>
+                <h1 class="header__title">RemoteApp 门户</h1>
+                <p class="header__subtitle">点击卡片启动远程应用</p>
+            </div>
+            <div class="header__user" id="user-info" style="display:none;">
+                <span id="user-display-name"></span>
+                <button class="header__logout" onclick="logout()">退出</button>
+            </div>
+        </div>
     </header>
 
     <main class="container">

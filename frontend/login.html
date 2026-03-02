@@ -1,0 +1,28 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - RemoteApp 门户</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="login-body">
+    <div class="login-card">
+        <h1 class="login-card__title">RemoteApp 门户</h1>
+        <p class="login-card__subtitle">请登录以访问远程应用</p>
+        <form id="login-form" class="login-form">
+            <div class="login-form__group">
+                <label for="username">用户名</label>
+                <input type="text" id="username" name="username" required autocomplete="username" autofocus>
+            </div>
+            <div class="login-form__group">
+                <label for="password">密码</label>
+                <input type="password" id="password" name="password" required autocomplete="current-password">
+            </div>
+            <div id="login-error" class="login-form__error" style="display:none;"></div>
+            <button type="submit" class="login-form__btn">登录</button>
+        </form>
+    </div>
+    <script src="js/login.js"></script>
+</body>
+</html>

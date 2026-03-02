@@ -20,5 +20,9 @@
     "internal_url": "http://localhost:8080",
     "external_url": "http://localhost:8080",
     "token_expire_minutes": 30
+  },
+  "auth": {
+    "jwt_secret": "f7a3d9e2c1b5084a6e3f1d8b2a5c7e09",
+    "token_expire_minutes": 480
   }
 }

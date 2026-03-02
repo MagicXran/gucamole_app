@@ -63,6 +63,29 @@ CREATE TABLE IF NOT EXISTS token_cache (
     created_at  DOUBLE       NOT NULL                 COMMENT 'Unix timestamp (秒)'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 给 PoC 用户 (user_id=1) 分配所有应用
+-- Portal 用户表
+CREATE TABLE IF NOT EXISTS portal_user (
+    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
+    username        VARCHAR(64)   NOT NULL UNIQUE       COMMENT '登录用户名',
+    password_hash   VARCHAR(200)  NOT NULL              COMMENT 'bcrypt 哈希',
+    display_name    VARCHAR(100)  DEFAULT ''             COMMENT '显示名称',
+    is_active       TINYINT(1)    DEFAULT 1,
+    created_at      DATETIME      DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 默认管理员 (密码: admin123，生产环境请立即修改)
+INSERT IGNORE INTO portal_user (id, username, password_hash, display_name)
+VALUES (1, 'admin', '$2b$12$.zHt5ZnYYg9BLJ8sXI84U.Doz2rhgbAbghicuxjUNz5vN3lFdlytu', '管理员');
+
+-- 测试用户 (密码: test123)
+INSERT IGNORE INTO portal_user (id, username, password_hash, display_name)
+VALUES (2, 'test', '$2b$12$L91JPIXfv6upob1STuLlJuIZqese8iUsJdf9G/YwYCw3mIzm7TJs6', '测试用户');
+
+-- 给 admin (user_id=1) 分配所有应用
 INSERT IGNORE INTO remote_app_acl (user_id, app_id)
 SELECT 1, id FROM remote_app;
+
+-- 给 test (user_id=2) 只分配记事本
+INSERT IGNORE INTO remote_app_acl (user_id, app_id)
+SELECT 2, id FROM remote_app WHERE name = '记事本';

@@ -3,7 +3,23 @@
  */
 
 const API_BASE = '/api/remote-apps';
-const CURRENT_USER_ID = 1;  // PoC 固定用户
+
+// ---- 认证工具函数 ----
+function getToken() { return localStorage.getItem('portal_token'); }
+function getUser() {
+    try { return JSON.parse(localStorage.getItem('portal_user')); }
+    catch (e) { return null; }
+}
+function authHeaders() { return { 'Authorization': 'Bearer ' + getToken() }; }
+function logout() {
+    localStorage.removeItem('portal_token');
+    localStorage.removeItem('portal_user');
+    window.location.href = '/login.html';
+}
+function requireAuth() {
+    if (!getToken()) { window.location.href = '/login.html'; return false; }
+    return true;
+}
 
 // 图标映射
 const ICON_MAP = {
@@ -21,7 +37,8 @@ const ICON_MAP = {
  * 获取应用列表
  */
 async function fetchApps() {
-    const resp = await fetch(`${API_BASE}/?user_id=${CURRENT_USER_ID}`);
+    const resp = await fetch(`${API_BASE}/`, { headers: authHeaders() });
+    if (resp.status === 401) { logout(); return []; }
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     return await resp.json();
 }
@@ -60,9 +77,12 @@ async function launchApp(appId, appName) {
     win.document.close();
 
     try {
-        var resp = await fetch(API_BASE + '/launch/' + appId + '?user_id=' + CURRENT_USER_ID, {
+        var resp = await fetch(API_BASE + '/launch/' + appId, {
             method: 'POST',
+            headers: authHeaders(),
         });
+
+        if (resp.status === 401) { win.close(); logout(); return; }
 
         if (!resp.ok) {
             var err = await resp.json().catch(function() { return {}; });
@@ -150,6 +170,17 @@ function showError(msg) {
  * 初始化
  */
 async function init() {
+    if (!requireAuth()) return;
+
+    // 显示用户信息
+    var user = getUser();
+    if (user) {
+        var nameEl = document.getElementById('user-display-name');
+        var infoEl = document.getElementById('user-info');
+        if (nameEl) nameEl.textContent = user.display_name || user.username;
+        if (infoEl) infoEl.style.display = 'flex';
+    }
+
     const loading = document.getElementById('loading');
     const empty = document.getElementById('empty');
 

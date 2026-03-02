@@ -5,12 +5,13 @@ FastAPI 路由 - RemoteApp 门户 API
 import logging
 from typing import List
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from backend.database import db, CONFIG
-from backend.models import RemoteAppResponse, LaunchResponse
+from backend.models import RemoteAppResponse, LaunchResponse, UserInfo
 from backend.guacamole_crypto import GuacamoleCrypto
 from backend.guacamole_service import GuacamoleService
+from backend.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def _build_all_connections(user_id: int) -> dict:
 
 
 @router.get("/", response_model=List[RemoteAppResponse])
-async def list_apps(user_id: int = 1):
+async def list_apps(user: UserInfo = Depends(get_current_user)):
     """获取当前用户可访问的 RemoteApp 列表"""
     query = """
         SELECT a.id, a.name, a.icon, a.protocol, a.hostname,
@@ -76,11 +77,11 @@ async def list_apps(user_id: int = 1):
           AND a.is_active = 1
         ORDER BY a.name
     """
-    return db.execute_query(query, {"user_id": user_id})
+    return db.execute_query(query, {"user_id": user.user_id})
 
 
 @router.post("/launch/{app_id}", response_model=LaunchResponse)
-async def launch_app(app_id: int, user_id: int = 1):
+async def launch_app(app_id: int, user: UserInfo = Depends(get_current_user)):
     """启动 RemoteApp，返回 Guacamole 重定向 URL"""
 
     # 1. ACL 权限校验
@@ -88,7 +89,7 @@ async def launch_app(app_id: int, user_id: int = 1):
         SELECT 1 FROM remote_app_acl
         WHERE user_id = %(user_id)s AND app_id = %(app_id)s
     """
-    acl = db.execute_query(acl_query, {"user_id": user_id, "app_id": app_id}, fetch_one=True)
+    acl = db.execute_query(acl_query, {"user_id": user.user_id, "app_id": app_id}, fetch_one=True)
     if not acl:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -109,7 +110,7 @@ async def launch_app(app_id: int, user_id: int = 1):
     # 3. 构建该用户所有可用应用的连接参数
     #    全部打包到一个 token，确保多标签共享同一 session
     connection_name = f"app_{app_id}"
-    connections = _build_all_connections(user_id)
+    connections = _build_all_connections(user.user_id)
     if connection_name not in connections:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -117,7 +118,7 @@ async def launch_app(app_id: int, user_id: int = 1):
         )
 
     # 4. 复用或创建 session → 拿 URL
-    guac_username = f"portal_u{user_id}"
+    guac_username = f"portal_u{user.user_id}"
     try:
         redirect_url = await guac_service.launch_connection(
             username=guac_username,

@@ -19,7 +19,7 @@
     "json_secret_key": "4c0b569e4c96df157eee1b65dd0e4d41",
     "internal_url": "http://localhost:8080",
     "external_url": "http://localhost:8080",
-    "token_expire_minutes": 30
+    "token_expire_minutes": 480
   },
   "auth": {
     "jwt_secret": "f7a3d9e2c1b5084a6e3f1d8b2a5c7e09",

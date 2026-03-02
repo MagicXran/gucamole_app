@@ -106,6 +106,13 @@ async function launchApp(appId, appName) {
             'var f=document.getElementById("guac");' +
             'document.body.addEventListener("click",function(){f.focus()});' +
             'document.addEventListener("keydown",function(){f.focus()},true);' +
+            // Web Worker keepalive: 防止浏览器后台节流冻结 Guacamole 的 NOP ping
+            'var wb=new Blob(["setInterval(function(){postMessage(1)},30000)"],' +
+            '{type:"text/javascript"});' +
+            'var wk=new Worker(URL.createObjectURL(wb));' +
+            'wk.onmessage=function(){' +
+            '  try{f.contentWindow.postMessage("keepalive","*")}catch(e){}' +
+            '};' +
             '</script>' +
             '</body></html>'
         );

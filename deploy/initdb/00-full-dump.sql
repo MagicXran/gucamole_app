@@ -1,4 +1,4 @@
--- MySQL dump 10.13  Distrib 8.4.8, for Linux (x86_64)
+﻿-- MySQL dump 10.13  Distrib 8.4.8, for Linux (x86_64)
 --
 -- Host: localhost    Database: guacamole_db
 -- ------------------------------------------------------
@@ -196,7 +196,7 @@ CREATE TABLE `guacamole_connection_history` (
   CONSTRAINT `guacamole_connection_history_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `guacamole_user` (`user_id`) ON DELETE SET NULL,
   CONSTRAINT `guacamole_connection_history_ibfk_2` FOREIGN KEY (`connection_id`) REFERENCES `guacamole_connection` (`connection_id`) ON DELETE SET NULL,
   CONSTRAINT `guacamole_connection_history_ibfk_3` FOREIGN KEY (`sharing_profile_id`) REFERENCES `guacamole_sharing_profile` (`sharing_profile_id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=47 DEFAULT CHARSET=utf8mb3;
+) ENGINE=InnoDB AUTO_INCREMENT=52 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -607,7 +607,7 @@ CREATE TABLE `guacamole_user_history` (
   KEY `end_date` (`end_date`),
   KEY `user_start_date` (`user_id`,`start_date`),
   CONSTRAINT `guacamole_user_history_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `guacamole_user` (`user_id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=74 DEFAULT CHARSET=utf8mb3;
+) ENGINE=InnoDB AUTO_INCREMENT=92 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -684,6 +684,36 @@ CREATE DATABASE /*!32312 IF NOT EXISTS*/ `guacamole_portal_db` /*!40100 DEFAULT 
 USE `guacamole_portal_db`;
 
 --
+-- Table structure for table `portal_user`
+--
+
+DROP TABLE IF EXISTS `portal_user`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `portal_user` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `username` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '登录用户名',
+  `password_hash` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'bcrypt 哈希',
+  `display_name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT '' COMMENT '显示名称',
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `username` (`username`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `portal_user`
+--
+
+LOCK TABLES `portal_user` WRITE;
+/*!40000 ALTER TABLE `portal_user` DISABLE KEYS */;
+INSERT INTO `portal_user` VALUES (1,'admin','$2b$12$.zHt5ZnYYg9BLJ8sXI84U.Doz2rhgbAbghicuxjUNz5vN3lFdlytu','管理员',1,'2026-03-02 15:53:32','2026-03-02 15:53:32'),(2,'test','$2b$12$L91JPIXfv6upob1STuLlJuIZqese8iUsJdf9G/YwYCw3mIzm7TJs6','测试用户',1,'2026-03-02 15:53:33','2026-03-02 15:53:33');
+/*!40000 ALTER TABLE `portal_user` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
 -- Table structure for table `remote_app`
 --
 
@@ -739,7 +769,7 @@ CREATE TABLE `remote_app_acl` (
   UNIQUE KEY `uk_user_app` (`user_id`,`app_id`),
   KEY `app_id` (`app_id`),
   CONSTRAINT `remote_app_acl_ibfk_1` FOREIGN KEY (`app_id`) REFERENCES `remote_app` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -748,7 +778,7 @@ CREATE TABLE `remote_app_acl` (
 
 LOCK TABLES `remote_app_acl` WRITE;
 /*!40000 ALTER TABLE `remote_app_acl` DISABLE KEYS */;
-INSERT INTO `remote_app_acl` VALUES (1,1,1,'2026-03-01 22:37:57'),(2,1,2,'2026-03-01 22:37:57'),(3,1,3,'2026-03-01 22:37:57');
+INSERT INTO `remote_app_acl` VALUES (1,1,1,'2026-03-01 22:37:57'),(2,1,2,'2026-03-01 22:37:57'),(3,1,3,'2026-03-01 22:37:57'),(5,2,1,'2026-03-02 15:53:53');
 /*!40000 ALTER TABLE `remote_app_acl` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -786,4 +816,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-03-02 15:06:29
+-- Dump completed on 2026-03-02 17:14:57

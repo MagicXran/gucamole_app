@@ -54,6 +54,7 @@ services:
       GUACD_HOSTNAME: guacd
       JSON_SECRET_KEY: ${JSON_SECRET_KEY}
       WEBAPP_CONTEXT: "ROOT"
+      API_SESSION_TIMEOUT: "480"
     depends_on:
       guac-sql:
         condition: service_healthy

@@ -26,6 +26,7 @@ guac_service = GuacamoleService(
     internal_url=_guac_cfg["internal_url"],
     external_url=_guac_cfg["external_url"],
     expire_minutes=_guac_cfg["token_expire_minutes"],
+    db=db,
 )
 
 

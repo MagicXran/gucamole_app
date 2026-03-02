@@ -1,0 +1,65 @@
+﻿# Guacamole RemoteApp Portal — 一键部署
+# 使用方法: docker compose up -d
+#
+# 首次启动时 MySQL 会自动导入 initdb/ 下的 SQL 文件。
+# 如需重新初始化数据库，删除 mysql_data volume 后重建:
+#   docker compose down -v && docker compose up -d
+
+name: nercar-portal
+
+services:
+  guacd:
+    container_name: nercar-portal-guacd
+    image: guacamole/guacd:latest
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+
+  guac-sql:
+    container_name: nercar-portal-guac-sql
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "127.0.0.1:33060:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  guac_web:
+    container_name: nercar-portal-guac-web
+    build:
+      context: .
+      dockerfile: guac_web.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: ${TZ}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_HOSTNAME: guac-sql
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      GUACD_HOSTNAME: guacd
+      JSON_SECRET_KEY: ${JSON_SECRET_KEY}
+      WEBAPP_CONTEXT: "ROOT"
+    depends_on:
+      guac-sql:
+        condition: service_healthy
+      guacd:
+        condition: service_started
+
+volumes:
+  mysql_data:
+    name: guacamole_mysql_data

@@ -67,5 +67,19 @@ class Database:
                 cursor.close()
             conn.close()
 
+    def execute_update(self, query: str, params=None) -> int:
+        """执行写操作 (INSERT/UPDATE/DELETE)，返回影响行数"""
+        conn = self.get_connection()
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(query, params or {})
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            if cursor is not None:
+                cursor.close()
+            conn.close()
+
 
 db = Database()

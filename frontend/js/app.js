@@ -4,6 +4,13 @@
 
 const API_BASE = '/api/remote-apps';
 
+// ---- HTML 转义 (防 XSS) ----
+function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+}
+
 // ---- 认证工具函数 ----
 function getToken() { return localStorage.getItem('portal_token'); }
 function getUser() {
@@ -23,23 +30,23 @@ function requireAuth() {
 
 // 图标映射
 const ICON_MAP = {
-    'desktop':   '🖥️',
-    'edit':      '📝',
-    'calculate': '🔢',
-    'folder':    '📁',
-    'terminal':  '💻',
-    'browser':   '🌐',
-    'database':  '🗄️',
-    'chart':     '📊',
+    'desktop':   '\u{1F5A5}\uFE0F',
+    'edit':      '\u{1F4DD}',
+    'calculate': '\u{1F522}',
+    'folder':    '\u{1F4C1}',
+    'terminal':  '\u{1F4BB}',
+    'browser':   '\u{1F310}',
+    'database':  '\u{1F5C4}\uFE0F',
+    'chart':     '\u{1F4CA}',
 };
 
 /**
  * 获取应用列表
  */
 async function fetchApps() {
-    const resp = await fetch(`${API_BASE}/`, { headers: authHeaders() });
+    var resp = await fetch(API_BASE + '/', { headers: authHeaders() });
     if (resp.status === 401) { logout(); return []; }
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     return await resp.json();
 }
 
@@ -56,10 +63,12 @@ async function launchApp(appId, appName) {
         return;
     }
 
+    var safeName = escapeHtml(appName);
+
     // 立即写入加载状态页面
     win.document.write(
         '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">' +
-        '<title>' + appName + ' - \u52A0\u8F7D\u4E2D...</title>' +
+        '<title>' + safeName + ' - \u52A0\u8F7D\u4E2D...</title>' +
         '<style>' +
         '*{margin:0;padding:0}' +
         'body{display:flex;align-items:center;justify-content:center;height:100vh;' +
@@ -71,7 +80,7 @@ async function launchApp(appId, appName) {
         '@keyframes spin{to{transform:rotate(360deg)}}' +
         '</style></head><body>' +
         '<div style="text-align:center"><div class="spinner"></div>' +
-        '<p>\u6B63\u5728\u542F\u52A8 ' + appName + '...</p></div>' +
+        '<p>\u6B63\u5728\u542F\u52A8 ' + safeName + '...</p></div>' +
         '</body></html>'
     );
     win.document.close();
@@ -96,16 +105,18 @@ async function launchApp(appId, appName) {
         win.document.open();
         win.document.write(
             '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">' +
-            '<title>' + appName + '</title>' +
+            '<title>' + safeName + '</title>' +
             '<style>html,body{margin:0;padding:0;overflow:hidden}</style></head>' +
-            '<body><iframe id="guac" src="' + data.redirect_url + '" ' +
+            '<body><iframe id="guac" src="' + escapeHtml(data.redirect_url) + '" ' +
             'style="width:100vw;height:100vh;border:none" ' +
             'allow="clipboard-read;clipboard-write" ' +
             'onload="this.focus()"></iframe>' +
             '<script>' +
             'var f=document.getElementById("guac");' +
             'document.body.addEventListener("click",function(){f.focus()});' +
-            'document.addEventListener("keydown",function(){f.focus()},true);' +
+            'document.addEventListener("keydown",function(e){' +
+            '  if(document.activeElement!==f){e.preventDefault();f.focus();}' +
+            '},true);' +
             // Web Worker keepalive: 防止浏览器后台节流冻结 Guacamole 的 NOP ping
             'var wb=new Blob(["setInterval(function(){postMessage(1)},30000)"],' +
             '{type:"text/javascript"});' +
@@ -118,6 +129,7 @@ async function launchApp(appId, appName) {
         );
         win.document.close();
     } catch (e) {
+        var safeMsg = escapeHtml(e.message || '未知错误');
         win.document.open();
         win.document.write(
             '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">' +
@@ -130,7 +142,7 @@ async function launchApp(appId, appName) {
             '</style></head><body>' +
             '<div style="text-align:center">' +
             '<p style="font-size:1.2rem">\u542F\u52A8\u5931\u8D25</p>' +
-            '<p style="margin-top:.5rem;color:#aaa">' + e.message + '</p>' +
+            '<p style="margin-top:.5rem;color:#aaa">' + safeMsg + '</p>' +
             '</div></body></html>'
         );
         win.document.close();
@@ -138,27 +150,37 @@ async function launchApp(appId, appName) {
 }
 
 /**
- * 渲染卡片
+ * 渲染卡片 (DOM API 构建，防止 XSS)
  */
 function renderCards(apps) {
-    const grid = document.getElementById('app-grid');
+    var grid = document.getElementById('app-grid');
     grid.innerHTML = '';
 
-    apps.forEach(app => {
-        const card = document.createElement('div');
+    apps.forEach(function(app) {
+        var card = document.createElement('div');
         card.className = 'app-card';
-        card.onclick = () => launchApp(app.id, app.name);
+        card.onclick = function() { launchApp(app.id, app.name); };
 
-        const icon = ICON_MAP[app.icon] || ICON_MAP['desktop'];
-        const appLabel = app.remote_app
+        var icon = ICON_MAP[app.icon] || ICON_MAP['desktop'];
+        var appLabel = app.remote_app
             ? app.remote_app.replace(/^\|\|/, '')
             : '远程桌面';
 
-        card.innerHTML = `
-            <span class="app-card__icon">${icon}</span>
-            <div class="app-card__name">${app.name}</div>
-            <div class="app-card__protocol">${app.protocol.toUpperCase()} · ${appLabel}</div>
-        `;
+        var iconSpan = document.createElement('span');
+        iconSpan.className = 'app-card__icon';
+        iconSpan.textContent = icon;
+
+        var nameDiv = document.createElement('div');
+        nameDiv.className = 'app-card__name';
+        nameDiv.textContent = app.name;
+
+        var protoDiv = document.createElement('div');
+        protoDiv.className = 'app-card__protocol';
+        protoDiv.textContent = app.protocol.toUpperCase() + ' \u00B7 ' + appLabel;
+
+        card.appendChild(iconSpan);
+        card.appendChild(nameDiv);
+        card.appendChild(protoDiv);
         grid.appendChild(card);
     });
 }
@@ -167,10 +189,10 @@ function renderCards(apps) {
  * 显示错误
  */
 function showError(msg) {
-    const el = document.getElementById('error');
+    var el = document.getElementById('error');
     el.textContent = msg;
     el.style.display = 'block';
-    setTimeout(() => { el.style.display = 'none'; }, 5000);
+    setTimeout(function() { el.style.display = 'none'; }, 5000);
 }
 
 /**
@@ -188,11 +210,11 @@ async function init() {
         if (infoEl) infoEl.style.display = 'flex';
     }
 
-    const loading = document.getElementById('loading');
-    const empty = document.getElementById('empty');
+    var loading = document.getElementById('loading');
+    var empty = document.getElementById('empty');
 
     try {
-        const apps = await fetchApps();
+        var apps = await fetchApps();
         loading.style.display = 'none';
 
         if (apps.length === 0) {
@@ -203,7 +225,7 @@ async function init() {
         renderCards(apps);
     } catch (e) {
         loading.style.display = 'none';
-        showError(`加载应用列表失败: ${e.message}`);
+        showError('加载应用列表失败: ' + (e.message || '未知错误'));
     }
 }
 

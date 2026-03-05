@@ -3,11 +3,13 @@ Portal 用户认证模块 - JWT 登录与验证
 """
 
 import logging
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from backend.database import db, CONFIG
@@ -23,6 +25,36 @@ JWT_EXPIRE_MINUTES = _auth_cfg.get("token_expire_minutes", 480)
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+# ---- 速率限制 (滑动窗口, 内存实现) ----
+
+class _RateLimiter:
+    """IP 级滑动窗口速率限制器"""
+
+    def __init__(self, max_attempts: int = 5, window_seconds: int = 60):
+        self._max = max_attempts
+        self._window = window_seconds
+        self._lock = threading.Lock()
+        self._attempts: dict[str, list[float]] = {}
+
+    def check(self, key: str) -> bool:
+        """检查是否允许请求。返回 True 表示放行，False 表示限流。"""
+        now = time.time()
+        cutoff = now - self._window
+        with self._lock:
+            timestamps = self._attempts.get(key, [])
+            # 清理过期记录
+            timestamps = [t for t in timestamps if t > cutoff]
+            if len(timestamps) >= self._max:
+                self._attempts[key] = timestamps
+                return False
+            timestamps.append(now)
+            self._attempts[key] = timestamps
+            return True
+
+
+_login_limiter = _RateLimiter(max_attempts=5, window_seconds=60)
 
 
 def _verify_password(plain: str, hashed: str) -> bool:
@@ -72,8 +104,16 @@ def get_current_user(
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(req: LoginRequest):
+def login(req: LoginRequest, request: Request):
     """用户登录，返回 JWT"""
+    # 速率限制: 每个 IP 每分钟最多 5 次登录尝试
+    client_ip = request.client.host if request.client else "unknown"
+    if not _login_limiter.check(client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="登录尝试过于频繁，请 1 分钟后再试",
+        )
+
     query = """
         SELECT id, username, password_hash, display_name
         FROM portal_user

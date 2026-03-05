@@ -34,9 +34,16 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CONFIG["api"]["cors_origins"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+
+# 健康检查
+@app.get("/health", tags=["ops"])
+def health():
+    return {"status": "ok"}
+
 
 # API 路由
 app.include_router(auth_router)

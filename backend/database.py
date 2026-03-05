@@ -25,6 +25,9 @@ def load_config() -> dict:
     config["guacamole"]["json_secret_key"] = os.environ.get(
         "GUACAMOLE_JSON_SECRET_KEY", config["guacamole"]["json_secret_key"]
     )
+    config["auth"]["jwt_secret"] = os.environ.get(
+        "PORTAL_JWT_SECRET", config["auth"]["jwt_secret"]
+    )
     return config
 
 

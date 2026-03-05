@@ -66,7 +66,7 @@ def _build_all_connections(user_id: int) -> dict:
 
 
 @router.get("/", response_model=List[RemoteAppResponse])
-async def list_apps(user: UserInfo = Depends(get_current_user)):
+def list_apps(user: UserInfo = Depends(get_current_user)):
     """获取当前用户可访问的 RemoteApp 列表"""
     query = """
         SELECT a.id, a.name, a.icon, a.protocol, a.hostname,

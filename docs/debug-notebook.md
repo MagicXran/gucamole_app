@@ -26,6 +26,7 @@
   - [BUG-014: 后端重启导致旧标签被踢回登录页](#bug-014-后端重启导致旧标签被踢回登录页)
   - [BUG-015: about:blank iframe 中键盘输入失效](#bug-015-aboutblank-iframe-中键盘输入失效)
   - [BUG-016: RemoteApp 空闲 ~20 分钟后卡死无响应](#bug-016-remoteapp-空闲-20-分钟后卡死无响应)
+  - [BUG-017: Admin 修改应用后 Launch 仍用旧参数（Session 缓存未失效）](#bug-017-admin-修改应用后-launch-仍用旧参数session-缓存未失效)
 - [三、参考资料汇总](#三参考资料汇总)
 
 ---
@@ -1266,6 +1267,86 @@ MaxDisconnectionTime REG_DWORD   0x493e0      ← 300000ms = 5分钟
 
 ---
 
+### BUG-017: Admin 修改应用后 Launch 仍用旧参数（Session 缓存未失效）
+
+**日期**: 2026-03-08
+**严重程度**: 🔴 高 — 管理后台修改应用配置后用户无法正常连接
+**表现**: 管理员在后台修改 `remote_app` 表的应用信息（如 hostname、密码、remote_app 路径等），用户刷新页面后点击 Launch，Guacamole 报错：`No readable active connection for tunnel.`
+
+#### 根因分析
+
+这是一个**缓存失效策略缺失**的经典 bug。问题出在 Guacamole JSON Auth 的 token 设计与 Portal 的缓存策略之间的配合断层：
+
+```
+数据流分析:
+
+1. Admin 修改 remote_app 表          → DB 数据已更新 ✅
+2. GET /api/apps/ (列表刷新)         → 每次都 SELECT → 显示新数据 ✅
+3. POST /launch/{id}                 → _build_all_connections() 读到新参数 ✅
+4. GuacamoleService.launch_connection()
+   → _SessionCache.get(username)     → 缓存命中 → 返回旧 token ❌
+                                        ↑ 旧参数已加密烘焙进 token
+5. 旧 token 中的连接参数与实际 DB 不一致 → Guacamole 报错 ❌
+```
+
+**核心机制**: Guacamole JSON Auth 的连接参数（hostname、port、密码、remote_app 路径等）在 `POST /api/tokens` 创建 token 时被**加密烘焙**进 JSON payload。token 一旦创建，内含的连接参数就**不可变**。
+
+**缓存层**: `_SessionCache` 是双层缓存（内存 dict + DB `token_cache` 表），TTL ≈ 479 分钟（约 8 小时）。在 TTL 内，`launch_connection()` 直接复用旧 token，**完全不看新传入的 connections 参数**。
+
+**断层**: `admin_router.py` 的 `update_app` / `delete_app` / `update_acl` 修改了 DB 数据，但**完全不知道 `GuacamoleService` 和 `_SessionCache` 的存在** —— 两个模块之间零耦合，写入端没有触发缓存失效的通道。
+
+#### 解决方案
+
+**原则**: 写入端负责失效缓存（Write-Through Invalidation）。
+
+1. **给 `_SessionCache` 添加 `invalidate_all()` 方法** — 清空内存 dict + DELETE 全表 token_cache
+2. **给 `GuacamoleService` 暴露 `invalidate_all_sessions()` 方法** — 调用 `_cache.invalidate_all()`
+3. **`admin_router.py` 在 4 个写操作后调用** — `create_app` / `update_app` / `delete_app` / `update_acl`
+
+```python
+# guacamole_service.py - _SessionCache
+def invalidate_all(self):
+    """清空全部缓存（admin 修改应用/权限后调用）"""
+    with self._lock:
+        self._memory.clear()
+    try:
+        self._db.execute_update("DELETE FROM token_cache")
+    except Exception:
+        logger.warning("token_cache 全量清除失败")
+
+# guacamole_service.py - GuacamoleService
+def invalidate_all_sessions(self):
+    """清空所有用户的 Guacamole session 缓存"""
+    self._cache.invalidate_all()
+    logger.info("已清空全部 Guacamole session 缓存")
+
+# admin_router.py - 在每个写操作后
+from backend.router import guac_service
+# ... update_app / delete_app / create_app / update_acl 中:
+guac_service.invalidate_all_sessions()
+```
+
+**为什么用全量清除而非按用户精确清除**:
+- Admin 操作频率极低（一天几次），全清的代价只是下次 launch 多一次 token 创建
+- 修改一个 app 可能影响多个用户（通过 ACL 关联），精确清除需要额外查询
+- 代码简洁，不容易出 bug
+
+#### 架构教训
+
+| 教训 | 说明 |
+|------|------|
+| **缓存 = 数据的影子** | 有缓存的地方就必须有失效策略。设计缓存时第一个问题不是"怎么存"而是"什么时候清" |
+| **写入端必须知道缓存** | 如果模块 A 写 DB、模块 B 缓存 DB 数据，A 和 B 之间必须有失效通道 |
+| **加密 token 是不可变快照** | JSON Auth token 内含的参数一旦加密就不可修改，修改源数据后必须重新创建 token |
+| **"两层不同步"比"没缓存"更危险** | 没缓存只是慢，缓存和 DB 不同步会导致业务错误 |
+
+#### 关联
+
+- 与 [BUG-008](#bug-008-容器重建后旧-token-缓存导致登录页) 同源：都是 `_SessionCache` 与实际状态不同步
+- 与 [BUG-014](#bug-014-后端重启导致旧标签被踢回登录页) 互补：014 是缓存丢失（后端重启清内存），017 是缓存该清未清
+
+---
+
 ## 三、参考资料汇总
 
 ### 官方文档
@@ -1333,3 +1414,4 @@ MaxDisconnectionTime REG_DWORD   0x493e0      ← 300000ms = 5分钟
 > | 2026-03-02 | 追加 BUG-014：后端重启导致旧标签被踢，修正 BUG-011 结论 |
 > | 2026-03-02 | 追加 BUG-015：about:blank iframe 键盘输入失效，焦点管理修复 |
 > | 2026-03-02 | 追加 BUG-016：RemoteApp 空闲 ~20 分钟卡死，多层超时优化 + Windows GPO 配置指南 |
+> | 2026-03-08 | 追加 BUG-017：Admin 修改应用后缓存未失效，Session 缓存失效策略修复 |

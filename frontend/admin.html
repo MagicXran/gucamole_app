@@ -1,0 +1,328 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理后台 - RemoteApp 门户</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ---- Admin 页面专用样式 ---- */
+        .admin-container {
+            max-width: 1100px;
+            margin: 1.5rem auto;
+            padding: 0 1.5rem;
+        }
+        .tab-bar {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid #e0e0e0;
+            margin-bottom: 1.5rem;
+        }
+        .tab-bar__item {
+            padding: 0.7rem 1.5rem;
+            cursor: pointer;
+            font-size: 0.95rem;
+            color: #666;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: color 0.2s, border-color 0.2s;
+            background: none;
+            border-top: none; border-left: none; border-right: none;
+        }
+        .tab-bar__item:hover { color: #1a73e8; }
+        .tab-bar__item--active {
+            color: #1a73e8;
+            border-bottom-color: #1a73e8;
+            font-weight: 500;
+        }
+        .tab-panel { display: none; }
+        .tab-panel--active { display: block; }
+
+        /* 表格 */
+        .admin-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .admin-table th, .admin-table td {
+            padding: 0.65rem 0.8rem;
+            text-align: left;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 0.9rem;
+        }
+        .admin-table th {
+            background: #f8f9fa;
+            font-weight: 500;
+            color: #555;
+        }
+        .admin-table tr:hover { background: #f5f8ff; }
+
+        /* 按钮 */
+        .btn {
+            padding: 0.35rem 0.75rem;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: background 0.2s;
+        }
+        .btn--primary { background: #1a73e8; color: #fff; }
+        .btn--primary:hover { background: #1557b0; }
+        .btn--danger { background: #e74c3c; color: #fff; }
+        .btn--danger:hover { background: #c0392b; }
+        .btn--small { padding: 0.25rem 0.5rem; font-size: 0.8rem; }
+        .btn--outline {
+            background: transparent;
+            border: 1px solid #ddd;
+            color: #555;
+        }
+        .btn--outline:hover { background: #f5f5f5; }
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        /* 模态框 */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.4);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 2000;
+        }
+        .modal {
+            background: #fff;
+            border-radius: 12px;
+            padding: 1.5rem 2rem;
+            width: 100%;
+            max-width: 520px;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }
+        .modal__title {
+            font-size: 1.15rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+            color: #333;
+        }
+        .modal__actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+            margin-top: 1.25rem;
+        }
+
+        /* 表单 */
+        .form-group {
+            margin-bottom: 0.8rem;
+        }
+        .form-group label {
+            display: block;
+            font-size: 0.85rem;
+            color: #555;
+            margin-bottom: 0.2rem;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 0.5rem 0.65rem;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            box-sizing: border-box;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #1a73e8;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0 1rem;
+        }
+        .form-group--checkbox {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .form-group--checkbox input { width: auto; }
+
+        /* ACL 矩阵 */
+        .acl-matrix {
+            width: 100%; border-collapse: collapse;
+            background: #fff; border-radius: 8px; overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .acl-matrix th, .acl-matrix td {
+            padding: 0.5rem 0.65rem; text-align: center;
+            border-bottom: 1px solid #f0f0f0; font-size: 0.85rem;
+        }
+        .acl-matrix th { background: #f8f9fa; font-weight: 500; color: #555; }
+        .acl-matrix td:first-child, .acl-matrix th:first-child { text-align: left; }
+        .acl-matrix input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+        .acl-save-bar {
+            margin-top: 1rem;
+            display: flex; justify-content: flex-end;
+        }
+
+        /* 审计筛选 */
+        .filter-bar {
+            display: flex; gap: 0.75rem; align-items: flex-end;
+            margin-bottom: 1rem; flex-wrap: wrap;
+        }
+        .filter-bar .form-group { margin-bottom: 0; }
+        .filter-bar .form-group input, .filter-bar .form-group select {
+            width: auto; min-width: 120px;
+        }
+        .pagination {
+            display: flex; justify-content: center; align-items: center;
+            gap: 0.5rem; margin-top: 1rem;
+        }
+        .pagination span { font-size: 0.85rem; color: #666; }
+
+        /* 状态标签 */
+        .badge { padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.75rem; }
+        .badge--active { background: #e8f5e9; color: #2e7d32; }
+        .badge--inactive { background: #fce4ec; color: #c62828; }
+        .badge--admin { background: #e3f2fd; color: #1565c0; }
+
+        /* Toast */
+        .toast {
+            position: fixed; bottom: 2rem; right: 2rem;
+            padding: 0.75rem 1.25rem; border-radius: 8px;
+            color: #fff; font-size: 0.9rem; z-index: 3000;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+            animation: toast-in 0.3s;
+        }
+        .toast--success { background: #2e7d32; }
+        .toast--error { background: #c62828; }
+        @keyframes toast-in { from { opacity: 0; transform: translateY(1rem); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header__inner">
+            <div>
+                <h1 class="header__title">RemoteApp 管理后台</h1>
+                <p class="header__subtitle">应用、用户、权限与审计管理</p>
+            </div>
+            <div class="header__user" id="user-info" style="display:none;">
+                <a href="/" style="color:#fff;text-decoration:none;margin-right:0.5rem;">返回门户</a>
+                <span id="user-display-name"></span>
+                <button class="header__logout" onclick="logout()">退出</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="admin-container">
+        <!-- Tab Bar -->
+        <div class="tab-bar" id="tab-bar">
+            <button class="tab-bar__item tab-bar__item--active" data-tab="apps">应用管理</button>
+            <button class="tab-bar__item" data-tab="users">用户管理</button>
+            <button class="tab-bar__item" data-tab="acl">权限管理</button>
+            <button class="tab-bar__item" data-tab="audit">审计日志</button>
+        </div>
+
+        <!-- 应用管理 Tab -->
+        <div class="tab-panel tab-panel--active" id="panel-apps">
+            <div class="toolbar">
+                <h2 style="font-size:1.1rem;color:#333;">应用列表</h2>
+                <button class="btn btn--primary" onclick="showAppModal()">新建应用</button>
+            </div>
+            <table class="admin-table" id="apps-table">
+                <thead>
+                    <tr>
+                        <th>ID</th><th>名称</th><th>主机</th><th>端口</th>
+                        <th>RemoteApp</th><th>状态</th><th>操作</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- 用户管理 Tab -->
+        <div class="tab-panel" id="panel-users">
+            <div class="toolbar">
+                <h2 style="font-size:1.1rem;color:#333;">用户列表</h2>
+                <button class="btn btn--primary" onclick="showUserModal()">新建用户</button>
+            </div>
+            <table class="admin-table" id="users-table">
+                <thead>
+                    <tr>
+                        <th>ID</th><th>用户名</th><th>显示名</th>
+                        <th>角色</th><th>状态</th><th>操作</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- 权限管理 Tab -->
+        <div class="tab-panel" id="panel-acl">
+            <div class="toolbar">
+                <h2 style="font-size:1.1rem;color:#333;">权限矩阵</h2>
+                <div></div>
+            </div>
+            <div id="acl-content"></div>
+        </div>
+
+        <!-- 审计日志 Tab -->
+        <div class="tab-panel" id="panel-audit">
+            <div class="toolbar">
+                <h2 style="font-size:1.1rem;color:#333;">审计日志</h2>
+                <div></div>
+            </div>
+            <div class="filter-bar" id="audit-filters">
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" id="filter-username" placeholder="筛选用户">
+                </div>
+                <div class="form-group">
+                    <label>动作</label>
+                    <select id="filter-action">
+                        <option value="">全部</option>
+                        <option value="login">登录</option>
+                        <option value="login_failed">登录失败</option>
+                        <option value="launch_app">启动应用</option>
+                        <option value="admin_create_app">创建应用</option>
+                        <option value="admin_update_app">修改应用</option>
+                        <option value="admin_delete_app">删除应用</option>
+                        <option value="admin_create_user">创建用户</option>
+                        <option value="admin_update_user">修改用户</option>
+                        <option value="admin_delete_user">删除用户</option>
+                        <option value="admin_update_acl">修改权限</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>开始日期</label>
+                    <input type="date" id="filter-date-start">
+                </div>
+                <div class="form-group">
+                    <label>结束日期</label>
+                    <input type="date" id="filter-date-end">
+                </div>
+                <button class="btn btn--primary" onclick="loadAuditLogs(1)">查询</button>
+            </div>
+            <table class="admin-table" id="audit-table">
+                <thead>
+                    <tr>
+                        <th>时间</th><th>用户</th><th>动作</th>
+                        <th>目标</th><th>IP</th><th>详情</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <div class="pagination" id="audit-pagination"></div>
+        </div>
+    </div>
+
+    <!-- 模态框容器 -->
+    <div id="modal-container"></div>
+
+    <script src="js/admin.js"></script>
+</body>
+</html>

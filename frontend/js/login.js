@@ -44,6 +44,7 @@
                 user_id: data.user_id,
                 username: data.username,
                 display_name: data.display_name,
+                is_admin: data.is_admin || false,
             }));
             window.location.href = '/';
         } catch (err) {

@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.database import CONFIG
 from backend.auth import router as auth_router
 from backend.router import router
+from backend.admin_router import router as admin_router
 
 # 日志配置
 logging.basicConfig(
@@ -48,6 +49,7 @@ def health():
 # API 路由
 app.include_router(auth_router)
 app.include_router(router)
+app.include_router(admin_router)
 
 # 静态文件（前端）
 frontend_path = Path(__file__).parent.parent / "frontend"

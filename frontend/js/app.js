@@ -50,12 +50,19 @@ async function fetchApps() {
     return await resp.json();
 }
 
+// ---- 防重复点击锁 ----
+var _launchLock = {};
+
 /**
  * 启动应用
  * 使用 about:blank + iframe 隐藏 Guacamole 内部 URL，
  * 防止用户复制地址栏中的 token 和连接信息。
  */
 async function launchApp(appId, appName) {
+    // 3 秒内同一应用不可重复点击
+    if (_launchLock[appId] && Date.now() - _launchLock[appId] < 3000) return;
+    _launchLock[appId] = Date.now();
+
     // 同步打开 about:blank —— 必须在 click 事件同步调用栈中，否则被弹窗拦截器阻止
     var win = window.open('about:blank', '_blank');
     if (!win) {
@@ -146,6 +153,8 @@ async function launchApp(appId, appName) {
             '</div></body></html>'
         );
         win.document.close();
+    } finally {
+        delete _launchLock[appId];
     }
 }
 
@@ -208,6 +217,12 @@ async function init() {
         var infoEl = document.getElementById('user-info');
         if (nameEl) nameEl.textContent = user.display_name || user.username;
         if (infoEl) infoEl.style.display = 'flex';
+
+        // 管理员显示管理入口
+        var adminLink = document.getElementById('admin-link');
+        if (adminLink && user.is_admin) {
+            adminLink.style.display = 'inline';
+        }
     }
 
     var loading = document.getElementById('loading');

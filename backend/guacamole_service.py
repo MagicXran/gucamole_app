@@ -126,6 +126,15 @@ class _SessionCache:
         except Exception:
             pass
 
+    def invalidate_all(self):
+        """清空全部缓存（admin 修改应用/权限后调用）"""
+        with self._lock:
+            self._memory.clear()
+        try:
+            self._db.execute_update("DELETE FROM token_cache")
+        except Exception:
+            logger.warning("token_cache 全量清除失败")
+
 
 class GuacamoleService:
     """Guacamole 连接启动服务"""
@@ -146,6 +155,11 @@ class GuacamoleService:
             ttl_seconds=expire_minutes * 60 - 60,
             db=db,
         )
+
+    def invalidate_all_sessions(self):
+        """清空所有用户的 Guacamole session 缓存"""
+        self._cache.invalidate_all()
+        logger.info("已清空全部 Guacamole session 缓存")
 
     async def _validate_token(self, auth_token: str) -> bool:
         """向 Guacamole 验证 authToken 是否仍然有效
@@ -214,6 +228,7 @@ class GuacamoleService:
         username: str,
         connections: dict,
         target_connection_name: str,
+        external_url: str = "",
     ) -> str:
         """启动连接: 复用或创建 session → 拼 URL
 
@@ -257,8 +272,9 @@ class GuacamoleService:
             identifier_raw.encode('utf-8')
         ).decode('ascii')
 
+        base_url = external_url.rstrip('/') if external_url else self.external_url
         redirect_url = (
-            f"{self.external_url}/#/client/{identifier}"
+            f"{base_url}/#/client/{identifier}"
             f"?token={cached['auth_token']}"
         )
         return redirect_url

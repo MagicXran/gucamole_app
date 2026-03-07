@@ -14,6 +14,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from backend.database import db, CONFIG
 from backend.models import LoginRequest, LoginResponse, UserInfo
+from backend.audit import log_action
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +63,13 @@ def _verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
-def _create_token(user_id: int, username: str, display_name: str) -> str:
+def _create_token(user_id: int, username: str, display_name: str, is_admin: bool) -> str:
     """生成 JWT"""
     payload = {
         "user_id": user_id,
         "username": username,
         "display_name": display_name,
+        "is_admin": is_admin,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -90,6 +92,7 @@ def get_current_user(
             user_id=payload["user_id"],
             username=payload["username"],
             display_name=payload.get("display_name", ""),
+            is_admin=payload.get("is_admin", False),
         )
     except jwt.ExpiredSignatureError:
         raise HTTPException(
@@ -101,6 +104,16 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="无效的认证令牌",
         )
+
+
+def require_admin(user: UserInfo = Depends(get_current_user)) -> UserInfo:
+    """FastAPI 依赖: 要求管理员权限"""
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="需要管理员权限",
+        )
+    return user
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -115,21 +128,35 @@ def login(req: LoginRequest, request: Request):
         )
 
     query = """
-        SELECT id, username, password_hash, display_name
+        SELECT id, username, password_hash, display_name, is_admin
         FROM portal_user
         WHERE username = %(username)s AND is_active = 1
     """
     user = db.execute_query(query, {"username": req.username}, fetch_one=True)
     if not user or not _verify_password(req.password, user["password_hash"]):
+        # 审计: 登录失败
+        log_action(
+            user_id=0, username=req.username, action="login_failed",
+            ip_address=client_ip,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误",
         )
 
-    token = _create_token(user["id"], user["username"], user["display_name"])
+    is_admin = bool(user.get("is_admin", 0))
+    token = _create_token(user["id"], user["username"], user["display_name"], is_admin)
+
+    # 审计: 登录成功
+    log_action(
+        user_id=user["id"], username=user["username"], action="login",
+        ip_address=client_ip,
+    )
+
     return LoginResponse(
         token=token,
         user_id=user["id"],
         username=user["username"],
         display_name=user["display_name"],
+        is_admin=is_admin,
     )

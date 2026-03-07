@@ -28,6 +28,20 @@ def load_config() -> dict:
     config["auth"]["jwt_secret"] = os.environ.get(
         "PORTAL_JWT_SECRET", config["auth"]["jwt_secret"]
     )
+
+    # 环境变量覆盖连接地址（Docker 部署时容器名替代 localhost）
+    config["database"]["host"] = os.environ.get(
+        "PORTAL_DB_HOST", config["database"]["host"]
+    )
+    config["database"]["port"] = int(os.environ.get(
+        "PORTAL_DB_PORT", config["database"]["port"]
+    ))
+    config["guacamole"]["internal_url"] = os.environ.get(
+        "GUACAMOLE_INTERNAL_URL", config["guacamole"]["internal_url"]
+    )
+    config["guacamole"]["external_url"] = os.environ.get(
+        "GUACAMOLE_EXTERNAL_URL", config["guacamole"]["external_url"]
+    )
     return config
 
 

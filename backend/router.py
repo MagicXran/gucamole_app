@@ -5,13 +5,14 @@ FastAPI 路由 - RemoteApp 门户 API
 import logging
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from backend.database import db, CONFIG
 from backend.models import RemoteAppResponse, LaunchResponse, UserInfo
 from backend.guacamole_crypto import GuacamoleCrypto
 from backend.guacamole_service import GuacamoleService
 from backend.auth import get_current_user
+from backend.audit import log_action
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,11 @@ def list_apps(user: UserInfo = Depends(get_current_user)):
 
 
 @router.post("/launch/{app_id}", response_model=LaunchResponse)
-async def launch_app(app_id: int, user: UserInfo = Depends(get_current_user)):
+async def launch_app(
+    app_id: int,
+    request: Request,
+    user: UserInfo = Depends(get_current_user),
+):
     """启动 RemoteApp，返回 Guacamole 重定向 URL"""
 
     # 1. ACL 权限校验
@@ -98,7 +103,7 @@ async def launch_app(app_id: int, user: UserInfo = Depends(get_current_user)):
 
     # 2. 验证目标应用存在
     app_check = """
-        SELECT id FROM remote_app WHERE id = %(app_id)s AND is_active = 1
+        SELECT id, name FROM remote_app WHERE id = %(app_id)s AND is_active = 1
     """
     app = db.execute_query(app_check, {"app_id": app_id}, fetch_one=True)
     if not app:
@@ -118,12 +123,18 @@ async def launch_app(app_id: int, user: UserInfo = Depends(get_current_user)):
         )
 
     # 4. 复用或创建 session → 拿 URL
+    #    动态跟随请求的 Host，确保 redirect 指向客户端实际访问的地址
+    host = request.headers.get("host") or request.headers.get("x-forwarded-host", "")
+    scheme = request.headers.get("x-forwarded-proto", "http")
+    dynamic_external_url = f"{scheme}://{host}/guacamole" if host else ""
+
     guac_username = f"portal_u{user.user_id}"
     try:
         redirect_url = await guac_service.launch_connection(
             username=guac_username,
             connections=connections,
             target_connection_name=connection_name,
+            external_url=dynamic_external_url,
         )
     except Exception:
         logger.exception("启动 Guacamole 连接失败: app_id=%d", app_id)
@@ -131,6 +142,14 @@ async def launch_app(app_id: int, user: UserInfo = Depends(get_current_user)):
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="远程连接服务暂时不可用",
         )
+
+    # 5. 审计: 启动应用
+    client_ip = request.client.host if request.client else "unknown"
+    log_action(
+        user_id=user.user_id, username=user.username, action="launch_app",
+        target_type="app", target_id=app_id, target_name=app["name"],
+        ip_address=client_ip,
+    )
 
     return LaunchResponse(
         redirect_url=redirect_url,

@@ -23,6 +23,7 @@ class LaunchResponse(BaseModel):
     """启动连接响应"""
     redirect_url: str = Field(..., description="Guacamole 客户端重定向 URL")
     connection_name: str = Field(..., description="连接名称")
+    session_id: str = Field("", description="实时监控会话 ID")
 
 
 class LoginRequest(BaseModel):

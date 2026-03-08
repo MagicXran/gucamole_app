@@ -201,6 +201,43 @@
         .toast--success { background: #2e7d32; }
         .toast--error { background: #c62828; }
         @keyframes toast-in { from { opacity: 0; transform: translateY(1rem); } to { opacity: 1; transform: translateY(0); } }
+
+        /* 监控卡片 */
+        .monitor-card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 1rem 1.25rem;
+            min-width: 140px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .monitor-card__icon {
+            font-size: 1.6rem;
+            width: 2.2rem;
+            text-align: center;
+        }
+        .monitor-card__info { line-height: 1.4; }
+        .monitor-card__name {
+            font-size: 0.85rem;
+            color: #555;
+        }
+        .monitor-card__count {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #333;
+        }
+        .monitor-card__count--active { color: #2e7d32; }
+        .monitor-card__dot {
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            margin-left: 0.3rem;
+            vertical-align: middle;
+        }
+        .monitor-card__dot--green { background: #4caf50; box-shadow: 0 0 4px #4caf50; }
+        .monitor-card__dot--gray { background: #bbb; }
     </style>
 </head>
 <body>
@@ -221,14 +258,41 @@
     <div class="admin-container">
         <!-- Tab Bar -->
         <div class="tab-bar" id="tab-bar">
-            <button class="tab-bar__item tab-bar__item--active" data-tab="apps">应用管理</button>
+            <button class="tab-bar__item tab-bar__item--active" data-tab="monitor">实时监控</button>
+            <button class="tab-bar__item" data-tab="apps">应用管理</button>
             <button class="tab-bar__item" data-tab="users">用户管理</button>
             <button class="tab-bar__item" data-tab="acl">权限管理</button>
             <button class="tab-bar__item" data-tab="audit">审计日志</button>
         </div>
 
+        <!-- 实时监控 Tab -->
+        <div class="tab-panel tab-panel--active" id="panel-monitor">
+            <div class="toolbar">
+                <h2 style="font-size:1.1rem;color:#333;">实时监控</h2>
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <span id="monitor-summary" style="font-size:0.85rem;color:#666;"></span>
+                    <select id="monitor-interval" style="padding:0.25rem 0.5rem;border:1px solid #ddd;border-radius:6px;font-size:0.8rem;">
+                        <option value="10">10s 刷新</option>
+                        <option value="30" selected>30s 刷新</option>
+                        <option value="60">60s 刷新</option>
+                    </select>
+                </div>
+            </div>
+            <div id="monitor-cards" style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;"></div>
+            <h3 style="font-size:1rem;color:#444;margin-bottom:0.75rem;">活跃会话</h3>
+            <table class="admin-table" id="monitor-table">
+                <thead>
+                    <tr>
+                        <th>用户</th><th>应用</th><th>开始时间</th>
+                        <th>持续时间</th><th>最后心跳</th><th>状态</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
         <!-- 应用管理 Tab -->
-        <div class="tab-panel tab-panel--active" id="panel-apps">
+        <div class="tab-panel" id="panel-apps">
             <div class="toolbar">
                 <h2 style="font-size:1.1rem;color:#333;">应用列表</h2>
                 <button class="btn btn--primary" onclick="showAppModal()">新建应用</button>

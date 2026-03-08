@@ -59,7 +59,7 @@ async function api(method, path, body) {
 // ============================================
 // Tab 切换
 // ============================================
-var _currentTab = 'apps';
+var _currentTab = 'monitor';
 var _tabLoaded = {};
 
 function switchTab(tab) {
@@ -72,10 +72,13 @@ function switchTab(tab) {
     document.querySelectorAll('.tab-panel').forEach(function(p) {
         p.classList.toggle('tab-panel--active', p.id === 'panel-' + tab);
     });
+    // 管理 auto-refresh
+    _manageMonitorRefresh(tab === 'monitor');
     // 首次加载数据
     if (!_tabLoaded[tab]) {
         _tabLoaded[tab] = true;
-        if (tab === 'apps') loadApps();
+        if (tab === 'monitor') loadMonitor();
+        else if (tab === 'apps') loadApps();
         else if (tab === 'users') loadUsers();
         else if (tab === 'acl') loadAcl();
         else if (tab === 'audit') loadAuditLogs(1);
@@ -615,6 +618,157 @@ function renderAuditPagination(total, page, pageSize) {
 
 
 // ============================================
+// 实时监控
+// ============================================
+
+var ICON_MAP = {
+    'desktop':   '\u{1F5A5}\uFE0F',
+    'edit':      '\u{1F4DD}',
+    'calculate': '\u{1F522}',
+    'folder':    '\u{1F4C1}',
+    'terminal':  '\u{1F4BB}',
+    'browser':   '\u{1F310}',
+    'database':  '\u{1F5C4}\uFE0F',
+    'chart':     '\u{1F4CA}',
+};
+
+var _monitorTimer = null;
+
+function _manageMonitorRefresh(active) {
+    if (_monitorTimer) {
+        clearInterval(_monitorTimer);
+        _monitorTimer = null;
+    }
+    if (active) {
+        var sel = document.getElementById('monitor-interval');
+        var sec = parseInt(sel ? sel.value : 30) || 30;
+        _monitorTimer = setInterval(loadMonitor, sec * 1000);
+        // 切换刷新间隔时重启定时器
+        if (sel && !sel._bound) {
+            sel._bound = true;
+            sel.addEventListener('change', function() {
+                _manageMonitorRefresh(true);
+            });
+        }
+    }
+}
+
+async function loadMonitor() {
+    try {
+        var overview = await api('GET', '/monitor/overview');
+        var detail = await api('GET', '/monitor/sessions');
+        if (overview) renderMonitorCards(overview);
+        if (detail) renderMonitorSessions(detail.sessions || []);
+    } catch (e) {
+        showToast('加载监控数据失败: ' + e.message, 'error');
+    }
+}
+
+function renderMonitorCards(data) {
+    var container = document.getElementById('monitor-cards');
+    container.innerHTML = '';
+
+    // 总览摘要
+    var summary = document.getElementById('monitor-summary');
+    if (summary) {
+        summary.textContent = '在线 ' + data.total_online + ' 人 / ' + data.total_sessions + ' 个会话';
+    }
+
+    (data.apps || []).forEach(function(app) {
+        var card = document.createElement('div');
+        card.className = 'monitor-card';
+
+        var iconEl = document.createElement('span');
+        iconEl.className = 'monitor-card__icon';
+        iconEl.textContent = ICON_MAP[app.icon] || ICON_MAP['desktop'];
+
+        var info = document.createElement('div');
+        info.className = 'monitor-card__info';
+
+        var nameEl = document.createElement('div');
+        nameEl.className = 'monitor-card__name';
+        nameEl.textContent = app.app_name;
+
+        var countEl = document.createElement('div');
+        countEl.className = 'monitor-card__count' + (app.active_count > 0 ? ' monitor-card__count--active' : '');
+        countEl.textContent = app.active_count + ' ';
+
+        var dot = document.createElement('span');
+        dot.className = 'monitor-card__dot ' + (app.active_count > 0 ? 'monitor-card__dot--green' : 'monitor-card__dot--gray');
+        countEl.appendChild(dot);
+
+        info.appendChild(nameEl);
+        info.appendChild(countEl);
+        card.appendChild(iconEl);
+        card.appendChild(info);
+        container.appendChild(card);
+    });
+}
+
+function formatDuration(seconds) {
+    if (!seconds || seconds < 0) return '0s';
+    var h = Math.floor(seconds / 3600);
+    var m = Math.floor((seconds % 3600) / 60);
+    var s = seconds % 60;
+    if (h > 0) return h + 'h ' + m + 'm';
+    if (m > 0) return m + 'm ' + s + 's';
+    return s + 's';
+}
+
+function renderMonitorSessions(sessions) {
+    var tbody = document.querySelector('#monitor-table tbody');
+    tbody.innerHTML = '';
+
+    if (!sessions.length) {
+        var tr = document.createElement('tr');
+        var td = document.createElement('td');
+        td.colSpan = 6;
+        td.style.textAlign = 'center';
+        td.style.color = '#999';
+        td.textContent = '当前无活跃会话';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+    }
+
+    sessions.forEach(function(s) {
+        var tr = document.createElement('tr');
+
+        var userTd = document.createElement('td');
+        userTd.textContent = s.display_name || s.username;
+        tr.appendChild(userTd);
+
+        var appTd = document.createElement('td');
+        appTd.textContent = s.app_name;
+        tr.appendChild(appTd);
+
+        var startTd = document.createElement('td');
+        startTd.textContent = s.started_at || '';
+        startTd.style.fontSize = '0.8rem';
+        tr.appendChild(startTd);
+
+        var durTd = document.createElement('td');
+        durTd.textContent = formatDuration(s.duration_seconds);
+        tr.appendChild(durTd);
+
+        var hbTd = document.createElement('td');
+        hbTd.textContent = s.last_heartbeat || '';
+        hbTd.style.fontSize = '0.8rem';
+        tr.appendChild(hbTd);
+
+        var statusTd = document.createElement('td');
+        var badge = document.createElement('span');
+        badge.className = 'badge badge--active';
+        badge.textContent = '在线';
+        statusTd.appendChild(badge);
+        tr.appendChild(statusTd);
+
+        tbody.appendChild(tr);
+    });
+}
+
+
+// ============================================
 // 工具函数
 // ============================================
 
@@ -670,9 +824,10 @@ function init() {
         if (tab) switchTab(tab);
     });
 
-    // 加载默认 tab
-    _tabLoaded['apps'] = true;
-    loadApps();
+    // 加载默认 tab (实时监控)
+    _tabLoaded['monitor'] = true;
+    loadMonitor();
+    _manageMonitorRefresh(true);
 }
 
 document.addEventListener('DOMContentLoaded', init);

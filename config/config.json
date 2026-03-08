@@ -30,5 +30,10 @@
   "auth": {
     "jwt_secret": "f7a3d9e2c1b5084a6e3f1d8b2a5c7e09",
     "token_expire_minutes": 480
+  },
+  "monitor": {
+    "heartbeat_interval_seconds": 30,
+    "session_timeout_seconds": 120,
+    "cleanup_interval_seconds": 60
   }
 }

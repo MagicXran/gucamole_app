@@ -3,6 +3,7 @@ FastAPI 路由 - RemoteApp 门户 API
 """
 
 import logging
+import uuid
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -166,7 +167,22 @@ async def launch_app(
         ip_address=client_ip,
     )
 
+    # 6. 创建活跃会话记录 (实时监控)
+    session_id = str(uuid.uuid4())
+    try:
+        db.execute_update(
+            """
+            INSERT INTO active_session (session_id, user_id, app_id)
+            VALUES (%(sid)s, %(uid)s, %(aid)s)
+            """,
+            {"sid": session_id, "uid": user.user_id, "aid": app_id},
+        )
+    except Exception:
+        logger.warning("插入 active_session 失败 (不影响连接)", exc_info=True)
+        session_id = ""
+
     return LaunchResponse(
         redirect_url=redirect_url,
         connection_name=connection_name,
+        session_id=session_id,
     )

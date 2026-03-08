@@ -131,6 +131,24 @@ async function launchApp(appId, appName) {
             'wk.onmessage=function(){' +
             '  try{f.contentWindow.postMessage("keepalive","*")}catch(e){}' +
             '};' +
+            // 实时监控: 心跳 + 关闭检测
+            'var _sid="' + (data.session_id || '') + '";' +
+            'var _token="' + getToken() + '";' +
+            'if(_sid){' +
+            '  var _hbUrl="/api/monitor/heartbeat";' +
+            '  var _endUrl="/api/monitor/session-end";' +
+            '  setInterval(function(){' +
+            '    fetch(_hbUrl,{method:"POST",' +
+            '      headers:{"Authorization":"Bearer "+_token,"Content-Type":"application/json"},' +
+            '      body:JSON.stringify({session_id:_sid})' +
+            '    }).catch(function(){});' +
+            '  },30000);' +
+            '  window.addEventListener("beforeunload",function(){' +
+            '    navigator.sendBeacon(_endUrl,' +
+            '      new Blob([JSON.stringify({session_id:_sid})],{type:"application/json"})' +
+            '    );' +
+            '  });' +
+            '}' +
             '</script>' +
             '</body></html>'
         );

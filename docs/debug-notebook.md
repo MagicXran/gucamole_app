@@ -27,6 +27,8 @@
   - [BUG-015: about:blank iframe 中键盘输入失效](#bug-015-aboutblank-iframe-中键盘输入失效)
   - [BUG-016: RemoteApp 空闲 ~20 分钟后卡死无响应](#bug-016-remoteapp-空闲-20-分钟后卡死无响应)
   - [BUG-017: Admin 修改应用后 Launch 仍用旧参数（Session 缓存未失效）](#bug-017-admin-修改应用后-launch-仍用旧参数session-缓存未失效)
+  - [BUG-018: 多用户并发打开应用时第二个用户跳 Guacamole 登录页](#bug-018-多用户并发打开应用时第二个用户跳-guacamole-登录页)
+  - [BUG-019: Guacamole BAN Extension 锁定 Portal 容器 IP 导致全员瘫痪](#bug-019-guacamole-ban-extension-锁定-portal-容器-ip-导致全员瘫痪)
 - [三、参考资料汇总](#三参考资料汇总)
 
 ---
@@ -1347,6 +1349,159 @@ guac_service.invalidate_all_sessions()
 
 ---
 
+### BUG-018: 多用户并发打开应用时第二个用户跳 Guacamole 登录页
+
+| 字段 | 值 |
+|------|-----|
+| 严重程度 | **高** |
+| 发现日期 | 2026-03-08 |
+| 影响范围 | 多用户并发使用系统 |
+| 状态 | ✅ 已修复 |
+
+**现象：**
+
+admin 和 test 账户分别在正常模式和隐身模式登录 Portal（localStorage 完全隔离），先打开的用户正常，后打开的用户 iframe 直接跳到 Guacamole 原生登录页。
+
+Guacamole 日志：
+```
+portal_u2 has logged out, or their session has expired or been terminated
+```
+
+**根因分析：**
+
+`_SessionCache` 内存缓存命中时不验证 Guacamole 端 token 有效性（**僵尸 token**）。
+
+```python
+# BUG: 内存缓存命中时盲信复用，不验证 Guacamole 端
+if cached:
+    if cached.get("needs_validation"):
+        # 只有 DB 恢复的 token 才验证
+        await self._validate_token(...)
+    else:
+        # 内存缓存 → 直接复用！完全不验证！
+        logger.debug("复用内存 session: username=%s", username)
+```
+
+故障场景：
+1. 之前的测试中 portal_u2 创建过 session → token 被内存缓存
+2. Guacamole 端 session 因不活动超时、容器重建等原因失效
+3. Python 后端未重启 → 内存缓存 TTL 未到期 → 仍持有旧 token
+4. portal_u2 再次 launch → 内存缓存命中 → 返回僵尸 token
+5. iframe 加载 Guacamole → token 无效 → 显示登录页
+
+**为什么 admin 成功而 test 失败？**
+
+admin（portal_u1）可能没有旧缓存，或旧缓存已过 TTL → 创建新 session → 成功。
+test（portal_u2）有之前测试残留的缓存 → 命中僵尸 token → 失败。
+
+**解决方案：**
+
+修改 `launch_connection()` 中的缓存策略：所有缓存 token（无论内存还是 DB）在使用前都通过 `_validate_token()` 验证 Guacamole 端有效性。失效时自动 invalidate 并创建新 session。
+
+```python
+# 修复后: 所有缓存 token 都验证
+if cached:
+    if await self._validate_token(cached["auth_token"]):
+        # token 有效，复用
+        ...
+    else:
+        self._cache.invalidate(username)
+        cached = None
+        # 自动回退到创建新 session
+```
+
+**代价：每次 launch 多一次 HTTP 验证调用（~3ms 内网延迟）。**
+在正确性和性能之间，正确性永远优先。
+
+**修改文件：**
+- `backend/guacamole_service.py` — `launch_connection()` 方法
+
+**教训：**
+
+| 原则 | 内容 |
+|------|------|
+| **缓存必须可验证** | 内存缓存不等于"一定有效"，任何层的缓存都应有验证手段 |
+| **失效来源不可预测** | Guacamole 端 session 可能因多种原因失效（超时/重建/内部清理），缓存层不能假设外部系统状态不变 |
+| **优先正确性** | 一次 3ms 的验证调用 vs 用户看到登录页 → 选择明显 |
+
+#### 关联
+
+- 与 [BUG-014](#bug-014-后端重启导致旧标签被踢回登录页) 互补：014 是缓存丢失（后端重启清内存），018 是缓存有但 Guacamole 端已失效
+- 与 [BUG-017](#bug-017-admin-修改应用后-launch-仍用旧参数session-缓存未失效) 同类：都是缓存与实际状态不同步
+
+---
+
+### BUG-019: Guacamole BAN Extension 锁定 Portal 容器 IP 导致全员瘫痪
+
+| 字段 | 值 |
+|------|-----|
+| 严重程度 | **致命** |
+| 发现日期 | 2026-03-08 |
+| 影响范围 | 所有用户无法使用系统 |
+| 状态 | ✅ 已修复 |
+
+**现象：**
+
+Docker 日志大量报错：
+```
+InMemoryAuthenticationFailureTracker - Authentication has failed for address "172.21.0.6" (current total failures: 5/5).
+InMemoryAuthenticationFailureTracker - Blocking authentication attempt from address "172.21.0.6" due to number of authentication failures.
+```
+
+所有用户无法打开任何应用，Portal 后端向 Guacamole 发起的 JSON auth token 请求全部被拒绝。
+
+**根因分析：**
+
+```
+BUG-018 → 用户看到 Guacamole 登录页
+  → 用户输入 admin/xxx 尝试登录（这是 MySQL auth，不是 Portal auth）
+    → 认证失败 5 次
+      → InMemoryAuthenticationFailureTracker 锁定 172.21.0.6（portal-backend 容器 IP）
+        → Portal 后端的所有 POST /api/tokens 请求被拒绝
+          → 全员瘫痪
+```
+
+**致命设计缺陷：** Guacamole 1.6.0 默认启用 BAN extension（暴力破解保护），按 IP 追踪失败次数。但在 Docker 反代架构中，所有 Portal 请求都经过 portal-backend 容器发出，共享同一个 Docker 内网 IP（`172.21.0.6`）。任何认证失败都会累加到同一个 IP 的计数器上。一旦达到阈值（默认 5 次），不是只封坏人，而是把**整个系统**封了。
+
+**解决方案：**
+
+在 `deploy/docker-compose.yml` 中为 guac-web 添加：
+```yaml
+BAN_ENABLED: "false"
+```
+
+在我们的架构中禁用 BAN extension 是安全的，因为：
+1. Guacamole Web UI 不对外暴露（Nginx 反代，只有 Portal 才能调 Guacamole API）
+2. Portal 有自己的 JWT 认证 + 密码哈希，已在外层做了安全防护
+3. BAN extension 在单一 IP 反代架构下不但无用，反而是自杀式设计
+
+**BAN Extension 环境变量参考（Guacamole 1.6.0）：**
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `BAN_ENABLED` | `true` | 是否启用 BAN extension |
+| `BAN_MAX_ATTEMPTS` | `5` | 失败次数阈值，`0` 等效禁用 |
+| `BAN_ADDRESS_DURATION` | `300` | IP 封锁时长（秒），默认 5 分钟 |
+| `BAN_MAX_ADDRESSES` | `10485760` | 最大追踪 IP 数 |
+
+**修改文件：**
+- `deploy/docker-compose.yml` — guac-web 环境变量添加 `BAN_ENABLED: "false"`
+
+**教训：**
+
+| 原则 | 内容 |
+|------|------|
+| **反代架构下安全组件的盲区** | IP-based 限流在反代后面毫无意义，所有请求共享同一 IP |
+| **默认启用 ≠ 适用所有架构** | Guacamole Docker 默认启用 BAN，但没考虑容器化反代场景 |
+| **层次化安全** | 安全措施应在正确的层次实施：Portal 层做认证限流，不需要 Guacamole 层再做 |
+
+#### 关联
+
+- 由 [BUG-018](#bug-018-同一浏览器多账号登录导致-guacamole-session-互踢) 触发：session 失效 → 用户误操作 → 触发 BAN
+- 参考: [Guacamole 1.6.0 BAN Extension 文档](https://guacamole.apache.org/doc/1.6.0/gug/auth-ban.html)
+
+---
+
 ## 三、参考资料汇总
 
 ### 官方文档
@@ -1359,6 +1514,7 @@ guac_service.invalidate_all_sessions()
 | 协议指令参考 | https://guacamole.apache.org/doc/gug/protocol-reference.html |
 | JSON 认证 | https://guacamole.apache.org/doc/gug/json-auth.html |
 | 配置参数 | https://guacamole.apache.org/doc/gug/configuring-guacamole.html |
+| BAN Extension（暴力破解保护） | https://guacamole.apache.org/doc/1.6.0/gug/auth-ban.html |
 | Docker 部署 | https://guacamole.apache.org/doc/gug/guacamole-docker.html |
 | 反向代理 | https://guacamole.apache.org/doc/gug/reverse-proxy.html |
 | 扩展开发 | https://guacamole.apache.org/doc/gug/guacamole-ext.html |
@@ -1415,3 +1571,4 @@ guac_service.invalidate_all_sessions()
 > | 2026-03-02 | 追加 BUG-015：about:blank iframe 键盘输入失效，焦点管理修复 |
 > | 2026-03-02 | 追加 BUG-016：RemoteApp 空闲 ~20 分钟卡死，多层超时优化 + Windows GPO 配置指南 |
 > | 2026-03-08 | 追加 BUG-017：Admin 修改应用后缓存未失效，Session 缓存失效策略修复 |
+> | 2026-03-08 | 追加 BUG-018：同一浏览器多账号 localStorage 互踢（设计限制）；BUG-019：BAN Extension 锁定容器 IP 致全员瘫痪（已修复） |

@@ -232,10 +232,7 @@ class GuacamoleService:
     ) -> str:
         """启动连接: 复用或创建 session → 拼 URL
 
-        三级回退策略:
-        1. 内存缓存命中 → 直接复用 (最快，零额外开销)
-        2. 数据库缓存命中 → 验证 Guacamole 有效性 → 恢复到内存
-        3. 无缓存 → 创建新 session → 写入双层缓存
+        策略: 缓存命中 → 验证 Guacamole 端有效性 → 失效则创建新 session
         """
         if target_connection_name not in connections:
             raise ValueError(
@@ -246,18 +243,20 @@ class GuacamoleService:
         cached = self._cache.get(username)
 
         if cached:
-            if cached.get("needs_validation"):
-                if await self._validate_token(cached["auth_token"]):
+            # 无论来自内存还是 DB，都验证 Guacamole 端 token 有效性
+            if await self._validate_token(cached["auth_token"]):
+                if cached.get("needs_validation"):
                     self._cache.promote(username, cached)
                     logger.info("从数据库恢复 session: username=%s", username)
                 else:
-                    self._cache.invalidate(username)
-                    cached = None
-                    logger.info(
-                        "数据库缓存 token 已失效: username=%s", username
-                    )
+                    logger.debug("复用缓存 session: username=%s", username)
             else:
-                logger.debug("复用内存 session: username=%s", username)
+                self._cache.invalidate(username)
+                cached = None
+                logger.info(
+                    "缓存 token 在 Guacamole 端已失效，将重建: username=%s",
+                    username,
+                )
 
         if not cached:
             auth_token, data_source = await self._create_session(

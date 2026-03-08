@@ -54,6 +54,9 @@ services:
       JSON_SECRET_KEY: ${JSON_SECRET_KEY}
       WEBAPP_CONTEXT: "guacamole"
       API_SESSION_TIMEOUT: "480"
+      # 禁用暴力破解保护 — Docker 架构下所有请求来自同一容器 IP，
+      # 一旦触发会封锁整个 portal-backend，导致全员瘫痪
+      BAN_ENABLED: "false"
     depends_on:
       guac-sql:
         condition: service_healthy

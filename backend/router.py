@@ -47,8 +47,19 @@ def _build_all_connections(user_id: int) -> dict:
         WHERE acl.user_id = %(user_id)s AND a.is_active = 1
     """
     apps = db.execute_query(query, {"user_id": user_id})
+
+    # Drive redirection 全局配置
+    drive_cfg = CONFIG.get("guacamole", {}).get("drive", {})
+    drive_enabled = drive_cfg.get("enabled", False)
+    drive_name = drive_cfg.get("name", "GuacDrive")
+    drive_base = drive_cfg.get("base_path", "/drive")
+    drive_create = drive_cfg.get("create_path", True)
+
     connections = {}
     for app in apps:
+        # Per-user 隔离: /drive/portal_u{user_id}
+        user_drive_path = f"{drive_base}/portal_u{user_id}" if drive_enabled else ""
+
         conn = GuacamoleCrypto.build_rdp_connection(
             name=f"app_{app['id']}",
             hostname=app["hostname"],
@@ -61,6 +72,10 @@ def _build_all_connections(user_id: int) -> dict:
             remote_app=app.get("remote_app") or "",
             remote_app_dir=app.get("remote_app_dir") or "",
             remote_app_args=app.get("remote_app_args") or "",
+            enable_drive=drive_enabled,
+            drive_name=drive_name,
+            drive_path=user_drive_path,
+            create_drive_path=drive_create,
         )
         connections.update(conn)
     return connections

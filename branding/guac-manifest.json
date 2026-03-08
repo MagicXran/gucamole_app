@@ -5,5 +5,11 @@
     "translations": [
         "translations/en.json",
         "translations/zh.json"
+    ],
+    "css": [
+        "css/portal.css"
+    ],
+    "js": [
+        "js/portal-menu-lock.js"
     ]
 }

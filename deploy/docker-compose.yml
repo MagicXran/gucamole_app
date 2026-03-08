@@ -12,9 +12,12 @@ services:
     container_name: nercar-portal-guacd
     image: guacamole/guacd:latest
     restart: unless-stopped
+    user: root  # /drive volume 需要写权限; guacd 仅在内网不对外暴露
     environment:
       TZ: ${TZ}
       GUACD_LOG_LEVEL: debug
+    volumes:
+      - guacd_drive:/drive
 
   guac-sql:
     container_name: nercar-portal-guac-sql
@@ -98,3 +101,5 @@ services:
 volumes:
   mysql_data:
     name: guacamole_mysql_data
+  guacd_drive:
+    name: guacamole_guacd_drive

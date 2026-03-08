@@ -1,0 +1,14 @@
+/*
+ * Portal Branding — 隐藏 Guacamole 客户端菜单
+ *
+ * 目的: 防止用户通过 Ctrl+Shift+Alt 打开菜单后导航到 Guacamole 首页，
+ *       绕过 Portal 的权限控制。
+ *
+ * 文件传输不受影响: 用户通过 RemoteApp 的 "另存为" 对话框访问
+ *                   \\tsclient\GuacDrive\ 即可。
+ */
+
+/* 完全隐藏 Guacamole 侧边菜单 */
+#guac-menu {
+    display: none !important;
+}

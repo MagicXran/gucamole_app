@@ -113,6 +113,10 @@ class GuacamoleCrypto:
         remote_app: str = "",
         remote_app_dir: str = "",
         remote_app_args: str = "",
+        enable_drive: bool = False,
+        drive_name: str = "GuacDrive",
+        drive_path: str = "",
+        create_drive_path: bool = True,
     ) -> dict:
         """构建 RDP 连接参数
 
@@ -128,6 +132,10 @@ class GuacamoleCrypto:
             remote_app: RemoteApp 名称，如 "||notepad"
             remote_app_dir: RemoteApp 工作目录
             remote_app_args: RemoteApp 命令行参数
+            enable_drive: 启用虚拟磁盘（文件传输）
+            drive_name: 虚拟磁盘在 RDP 中显示的名称
+            drive_path: guacd 服务器上的存储路径（per-user）
+            create_drive_path: 自动创建不存在的路径
 
         Returns:
             {name: {protocol, parameters}} 格式的 dict，可直接合并到 connections
@@ -154,6 +162,14 @@ class GuacamoleCrypto:
             params["remote-app-dir"] = remote_app_dir
         if remote_app_args:
             params["remote-app-args"] = remote_app_args
+
+        # Drive redirection: guacd 模拟虚拟磁盘，通过 RDP RDPDR 映射到远程会话
+        # 远程端通过 \\tsclient\{drive_name} 访问；Download 子文件夹自动触发浏览器下载
+        if enable_drive and drive_path:
+            params["enable-drive"] = "true"
+            params["drive-name"] = drive_name
+            params["drive-path"] = drive_path
+            params["create-drive-path"] = "true" if create_drive_path else "false"
 
         return {
             name: {

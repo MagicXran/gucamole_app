@@ -12,3 +12,24 @@
 #guac-menu {
     display: none !important;
 }
+
+/*
+ * 隐藏断连/错误通知中的 "首页" 和 "登出" 按钮
+ *
+ * 目的: Portal 模式下用户不应导航到 Guacamole 首页或从 Guacamole 登出，
+ *       只保留 "重新连接" 按钮。
+ *
+ * DOM 结构 (guacNotification.html):
+ *   .notification > .buttons > button[ng-class="action.className"]
+ *
+ * className 来源 (guacClientNotification.js):
+ *   NAVIGATE_HOME_ACTION.className = "home button"
+ *   LOGOUT_ACTION.className        = "logout button"
+ *   RECONNECT_ACTION.className     = "reconnect button" (保留)
+ *
+ * 无需 JS 补刀: 与 menu.shown 不同，notification 按钮没有隐藏状态副作用。
+ */
+.notification .buttons button.home,
+.notification .buttons button.logout {
+    display: none !important;
+}

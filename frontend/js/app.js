@@ -298,17 +298,26 @@ async function loadFiles(path) {
 
 function renderBreadcrumb(path) {
     var el = document.getElementById('files-breadcrumb');
-    var html = '<a onclick="loadFiles(\'\')">根目录</a>';
+    el.innerHTML = '';
+    var root = document.createElement('a');
+    root.textContent = '根目录';
+    root.onclick = function() { loadFiles(''); };
+    el.appendChild(root);
+
     if (path) {
         var parts = path.split('/').filter(function(p) { return p; });
         var acc = '';
         parts.forEach(function(part) {
             acc += (acc ? '/' : '') + part;
-            var p = acc;
-            html += '<span>/</span><a onclick="loadFiles(\'' + escapeHtml(p) + '\')">' + escapeHtml(part) + '</a>';
+            var sep = document.createElement('span');
+            sep.textContent = '/';
+            el.appendChild(sep);
+            var link = document.createElement('a');
+            link.textContent = part;
+            link.onclick = (function(p) { return function() { loadFiles(p); }; })(acc);
+            el.appendChild(link);
         });
     }
-    el.innerHTML = html;
 }
 
 function renderFileTable(items) {
@@ -592,6 +601,7 @@ async function uploadFile(file, targetDir) {
             }
         }
     } catch (e) {
+        if (!_uploads[id]) return;  // 已被 cancelUpload() 清理
         if (e.name === 'AbortError') {
             _uploads[id].status = 'cancelled';
         } else {

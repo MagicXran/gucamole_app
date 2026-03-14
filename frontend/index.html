@@ -22,14 +22,53 @@
         </div>
     </header>
 
+    <nav class="portal-tabs" id="portal-tabs">
+        <button class="portal-tabs__btn portal-tabs__btn--active" data-tab="apps">应用</button>
+        <button class="portal-tabs__btn" data-tab="files">我的空间</button>
+    </nav>
+
     <main class="container">
-        <div id="app-grid" class="app-grid">
-            <!-- 卡片由 JS 动态渲染 -->
+        <div id="apps-panel">
+            <div id="app-grid" class="app-grid">
+                <!-- 卡片由 JS 动态渲染 -->
+            </div>
+            <div id="loading" class="loading">加载中...</div>
+            <div id="empty" class="empty" style="display:none;">暂无可用应用</div>
+            <div id="error" class="error-msg" style="display:none;"></div>
         </div>
-        <div id="loading" class="loading">加载中...</div>
-        <div id="empty" class="empty" style="display:none;">暂无可用应用</div>
-        <div id="error" class="error-msg" style="display:none;"></div>
+
+        <div id="files-panel" style="display:none;">
+            <div class="files-tip" id="files-tip">
+                <div class="files-tip__content">
+                    <strong>使用说明</strong>
+                    <ul>
+                        <li>取回文件：远程应用中 "另存为" → <code>\\tsclient\GuacDrive\</code> → 此处下载</li>
+                        <li>发送文件：此处上传 → 远程应用中从 <code>\\tsclient\GuacDrive\</code> 打开</li>
+                        <li>大型仿真结果：建议将输出目录设为 <code>\\tsclient\GuacDrive\Output\</code>，运行期间自动传入</li>
+                    </ul>
+                </div>
+                <button class="files-tip__close" onclick="closeTip()">收起</button>
+            </div>
+
+            <div class="files-quota" id="files-quota"></div>
+
+            <div class="files-toolbar">
+                <div class="files-breadcrumb" id="files-breadcrumb"></div>
+                <div style="display:flex;gap:0.4rem;">
+                    <button class="btn btn--outline" onclick="createFolder()">新建文件夹</button>
+                    <button class="btn btn--primary" onclick="triggerUpload()">上传文件</button>
+                    <input type="file" id="file-input" multiple style="display:none">
+                </div>
+            </div>
+
+            <table class="files-table" id="files-table">
+                <thead><tr><th>名称</th><th>大小</th><th>修改时间</th><th>操作</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
     </main>
+
+    <div class="files-dropzone" id="files-dropzone">拖放文件到此处上传</div>
 
     <!-- 启动中遮罩 -->
     <div id="launch-overlay" class="overlay" style="display:none;">

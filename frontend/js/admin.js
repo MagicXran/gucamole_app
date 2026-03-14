@@ -285,6 +285,13 @@ function renderUsersTable() {
         }
         tr.appendChild(roleTd);
 
+        // 空间
+        var spaceTd = document.createElement('td');
+        spaceTd.style.fontSize = '0.82rem';
+        spaceTd.style.color = '#555';
+        spaceTd.textContent = (u.used_display || '0 B') + ' / ' + (u.quota_display || '-');
+        tr.appendChild(spaceTd);
+
         // 状态
         var statusTd = document.createElement('td');
         var badge = document.createElement('span');
@@ -327,6 +334,8 @@ function showUserModal(u) {
             formGroup('用户名', 'user-username', '', 'text', true)) +
         formGroup(isEdit ? '新密码（留空不改）' : '密码', 'user-password', '', 'password', !isEdit) +
         formGroup('显示名称', 'user-display', isEdit ? u.display_name : '') +
+        formGroupSelect('个人空间配额', 'user-quota', ['默认(10GB)', '5 GB', '10 GB', '20 GB', '50 GB', '100 GB', '不限制'],
+            isEdit && u.quota_bytes ? _quotaBytesToLabel(u.quota_bytes) : '默认(10GB)') +
         '<div class="form-group form-group--checkbox">' +
         '<input type="checkbox" id="user-is-admin"' + (isEdit && u.is_admin ? ' checked' : '') + '>' +
         '<label for="user-is-admin">管理员</label>' +
@@ -349,6 +358,10 @@ function showUserModal(u) {
 
 async function saveUser(userId) {
     var data = {};
+
+    // 配额
+    var quotaVal = document.getElementById('user-quota').value;
+    data.quota_gb = _quotaLabelToGb(quotaVal);
 
     if (userId) {
         // 编辑
@@ -533,6 +546,9 @@ var ACTION_LABELS = {
     'admin_update_user': '修改用户',
     'admin_delete_user': '禁用用户',
     'admin_update_acl': '修改权限',
+    'file_upload': '上传文件',
+    'file_download': '下载文件',
+    'file_delete': '删除文件',
 };
 
 function renderAuditTable(items) {
@@ -796,6 +812,28 @@ function formGroupSelect(label, id, options, selected) {
 function closeModal(event) {
     if (event && event.target !== event.currentTarget) return;
     document.getElementById('modal-container').innerHTML = '';
+}
+
+
+// ---- 配额转换 ----
+
+function _quotaBytesToLabel(bytes) {
+    if (!bytes) return '默认(10GB)';
+    var gb = bytes / 1073741824;
+    if (gb >= 9000) return '不限制';
+    if (gb <= 5) return '5 GB';
+    if (gb <= 10) return '10 GB';
+    if (gb <= 20) return '20 GB';
+    if (gb <= 50) return '50 GB';
+    if (gb <= 100) return '100 GB';
+    return '不限制';
+}
+
+function _quotaLabelToGb(label) {
+    if (label === '不限制') return 9999;
+    if (label === '默认(10GB)') return 0;
+    var m = label.match(/(\d+)/);
+    return m ? parseInt(m[1]) : 0;
 }
 
 

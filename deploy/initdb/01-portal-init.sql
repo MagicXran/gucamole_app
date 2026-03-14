@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS portal_user (
     password_hash   VARCHAR(200)  NOT NULL              COMMENT 'bcrypt 哈希',
     display_name    VARCHAR(100)  DEFAULT ''             COMMENT '显示名称',
     is_admin        TINYINT(1)    NOT NULL DEFAULT 0    COMMENT '是否管理员',
+    quota_bytes     BIGINT        DEFAULT NULL              COMMENT '个人空间配额(字节), NULL=使用默认',
     is_active       TINYINT(1)    DEFAULT 1,
     created_at      DATETIME      DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP

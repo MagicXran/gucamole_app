@@ -35,5 +35,13 @@
     "heartbeat_interval_seconds": 30,
     "session_timeout_seconds": 120,
     "cleanup_interval_seconds": 60
+  },
+  "file_transfer": {
+    "enabled": true,
+    "default_quota_gb": 10,
+    "max_file_size_gb": 50,
+    "chunk_size_mb": 10,
+    "usage_cache_seconds": 60,
+    "cleanup_stale_uploads_hours": 24
   }
 }

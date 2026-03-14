@@ -110,6 +110,7 @@ class UserCreateRequest(BaseModel):
     password: str = Field(..., min_length=4, max_length=128)
     display_name: str = Field(default="", max_length=100)
     is_admin: bool = False
+    quota_gb: Optional[float] = Field(default=None, ge=0, description="个人空间配额(GB), 0=使用默认")
 
 
 class UserUpdateRequest(BaseModel):
@@ -118,6 +119,7 @@ class UserUpdateRequest(BaseModel):
     password: Optional[str] = Field(default=None, min_length=4, max_length=128)
     is_admin: Optional[bool] = None
     is_active: Optional[bool] = None
+    quota_gb: Optional[float] = Field(default=None, ge=0, description="个人空间配额(GB), 0=使用默认")
 
 
 class UserAdminResponse(BaseModel):

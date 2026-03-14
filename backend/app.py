@@ -21,6 +21,7 @@ from backend.router import router
 from backend.admin_router import router as admin_router
 from backend.monitor import router as monitor_router, admin_monitor_router, cleanup_stale_sessions
 from backend.dataset_router import router as dataset_router
+from backend.file_router import router as file_router, cleanup_stale_uploads
 
 # 日志配置
 logging.basicConfig(
@@ -44,17 +45,31 @@ async def _cleanup_loop():
             logger.exception("清理超时会话异常")
 
 
+async def _upload_cleanup_loop():
+    """后台循环: 每小时清理过期上传临时文件"""
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            cleanup_stale_uploads()
+        except Exception:
+            logger.exception("清理过期上传异常")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期: 启动后台清理任务"""
     task = asyncio.create_task(_cleanup_loop())
+    upload_task = asyncio.create_task(_upload_cleanup_loop())
     logger.info("会话清理任务已启动 (间隔 %ds)", CLEANUP_INTERVAL)
+    logger.info("上传清理任务已启动 (间隔 3600s)")
     yield
     task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    upload_task.cancel()
+    for t in (task, upload_task):
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -69,7 +84,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CONFIG["api"]["cors_origins"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -87,6 +102,7 @@ app.include_router(admin_router)
 app.include_router(monitor_router)
 app.include_router(admin_monitor_router)
 app.include_router(dataset_router)
+app.include_router(file_router)
 
 # 静态文件（前端）
 frontend_path = Path(__file__).parent.parent / "frontend"

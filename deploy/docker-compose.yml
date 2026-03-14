@@ -81,6 +81,8 @@ services:
       GUACAMOLE_EXTERNAL_URL: http://${PORTAL_HOST:-localhost}:${PORTAL_PORT:-80}/guacamole
       GUACAMOLE_JSON_SECRET_KEY: ${JSON_SECRET_KEY}
       PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-f7a3d9e2c1b5084a6e3f1d8b2a5c7e09}
+    volumes:
+      - guacd_drive:/drive
     depends_on:
       guac-sql:
         condition: service_healthy
@@ -94,6 +96,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - guacd_drive:/drive:ro
     depends_on:
       - portal-backend
       - guac-web
@@ -101,5 +104,15 @@ services:
 volumes:
   mysql_data:
     name: guacamole_mysql_data
+    driver: local
+    driver_opts:
+      type: none
+      device: ${DATA_DIR:-/opt/nercar-portal/data}/mysql
+      o: bind
   guacd_drive:
     name: guacamole_guacd_drive
+    driver: local
+    driver_opts:
+      type: none
+      device: ${DATA_DIR:-/opt/nercar-portal/data}/drive
+      o: bind

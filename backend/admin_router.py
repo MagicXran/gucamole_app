@@ -148,12 +148,19 @@ def delete_app(
 # 用户管理
 # ============================================
 
-@router.get("/users", response_model=list[UserAdminResponse])
+@router.get("/users")
 def list_users(admin: UserInfo = Depends(require_admin)):
-    """列出所有用户"""
+    """列出所有用户（含配额信息）"""
     rows = db.execute_query(
-        "SELECT id, username, display_name, is_admin, is_active FROM portal_user ORDER BY id"
+        "SELECT id, username, display_name, is_admin, is_active, quota_bytes FROM portal_user ORDER BY id"
     )
+    from backend.file_router import _get_usage_sync, _format_bytes, DEFAULT_QUOTA_BYTES
+    for row in rows:
+        used = _get_usage_sync(row["id"])
+        row["used_bytes"] = used
+        row["used_display"] = _format_bytes(used)
+        qb = row.get("quota_bytes")
+        row["quota_display"] = _format_bytes(qb) if qb else _format_bytes(DEFAULT_QUOTA_BYTES)
     return rows
 
 
@@ -172,15 +179,19 @@ def create_user(
         raise HTTPException(status.HTTP_409_CONFLICT, "用户名已存在")
 
     hashed = bcrypt.hashpw(req.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    quota_bytes = None
+    if req.quota_gb is not None and req.quota_gb > 0:
+        quota_bytes = int(req.quota_gb * 1073741824)
     db.execute_update(
         """
-        INSERT INTO portal_user (username, password_hash, display_name, is_admin)
-        VALUES (%(username)s, %(hash)s, %(display)s, %(admin)s)
+        INSERT INTO portal_user (username, password_hash, display_name, is_admin, quota_bytes)
+        VALUES (%(username)s, %(hash)s, %(display)s, %(admin)s, %(quota)s)
         """,
         {
             "username": req.username, "hash": hashed,
             "display": req.display_name or req.username,
             "admin": 1 if req.is_admin else 0,
+            "quota": quota_bytes,
         },
     )
     user = db.execute_query(
@@ -225,6 +236,12 @@ def update_user(
         hashed = bcrypt.hashpw(req.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
         set_parts.append("password_hash = %(password_hash)s")
         params["password_hash"] = hashed
+    if req.quota_gb is not None:
+        if req.quota_gb <= 0:
+            set_parts.append("quota_bytes = NULL")
+        else:
+            set_parts.append("quota_bytes = %(quota_bytes)s")
+            params["quota_bytes"] = int(req.quota_gb * 1073741824)
 
     if not set_parts:
         return db.execute_query(

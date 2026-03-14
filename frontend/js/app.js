@@ -222,6 +222,524 @@ function showError(msg) {
     setTimeout(function() { el.style.display = 'none'; }, 5000);
 }
 
+// ============================================
+// Portal Tab 切换
+// ============================================
+
+var _currentPortalTab = 'apps';
+var _filesLoaded = false;
+
+function switchPortalTab(tab) {
+    _currentPortalTab = tab;
+    document.querySelectorAll('.portal-tabs__btn').forEach(function(btn) {
+        btn.classList.toggle('portal-tabs__btn--active', btn.getAttribute('data-tab') === tab);
+    });
+    document.getElementById('apps-panel').style.display = tab === 'apps' ? '' : 'none';
+    document.getElementById('files-panel').style.display = tab === 'files' ? '' : 'none';
+
+    if (tab === 'files' && !_filesLoaded) {
+        _filesLoaded = true;
+        loadSpaceInfo();
+        loadFiles('');
+        _initTip();
+    }
+}
+
+
+// ============================================
+// 个人空间 — 配额
+// ============================================
+
+async function loadSpaceInfo() {
+    try {
+        var resp = await fetch('/api/files/space', { headers: authHeaders() });
+        if (resp.status === 401) { logout(); return; }
+        if (!resp.ok) return;
+        var data = await resp.json();
+        var el = document.getElementById('files-quota');
+        var pct = data.usage_percent;
+        var fillClass = 'files-quota__fill';
+        if (pct > 95) fillClass += ' files-quota__fill--danger';
+        else if (pct > 80) fillClass += ' files-quota__fill--warn';
+
+        el.innerHTML =
+            '<div class="files-quota__bar"><div class="' + fillClass + '" style="width:' + pct + '%"></div></div>' +
+            '<div class="files-quota__text">' + escapeHtml(data.used_display) + ' / ' + escapeHtml(data.quota_display) + ' (' + pct + '%)</div>';
+    } catch (e) {
+        // silent
+    }
+}
+
+
+// ============================================
+// 个人空间 — 文件列表
+// ============================================
+
+var _currentPath = '';
+
+async function loadFiles(path) {
+    _currentPath = path;
+    renderBreadcrumb(path);
+
+    try {
+        var resp = await fetch('/api/files/list?path=' + encodeURIComponent(path), { headers: authHeaders() });
+        if (resp.status === 401) { logout(); return; }
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return {}; });
+            showError(err.detail || '加载文件列表失败');
+            return;
+        }
+        var data = await resp.json();
+        renderFileTable(data.items || []);
+    } catch (e) {
+        showError('加载文件列表失败: ' + (e.message || ''));
+    }
+}
+
+function renderBreadcrumb(path) {
+    var el = document.getElementById('files-breadcrumb');
+    var html = '<a onclick="loadFiles(\'\')">根目录</a>';
+    if (path) {
+        var parts = path.split('/').filter(function(p) { return p; });
+        var acc = '';
+        parts.forEach(function(part) {
+            acc += (acc ? '/' : '') + part;
+            var p = acc;
+            html += '<span>/</span><a onclick="loadFiles(\'' + escapeHtml(p) + '\')">' + escapeHtml(part) + '</a>';
+        });
+    }
+    el.innerHTML = html;
+}
+
+function renderFileTable(items) {
+    var tbody = document.querySelector('#files-table tbody');
+    tbody.innerHTML = '';
+
+    if (!items.length) {
+        var tr = document.createElement('tr');
+        var td = document.createElement('td');
+        td.colSpan = 4;
+        td.style.textAlign = 'center';
+        td.style.color = '#999';
+        td.style.padding = '2rem';
+        td.textContent = '空文件夹';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+    }
+
+    items.forEach(function(item) {
+        var tr = document.createElement('tr');
+
+        // 名称
+        var nameTd = document.createElement('td');
+        var nameSpan = document.createElement('span');
+        nameSpan.className = 'files-table__icon';
+        nameSpan.textContent = item.is_dir ? '\uD83D\uDCC1' : '\uD83D\uDCC4';
+        nameTd.appendChild(nameSpan);
+
+        if (item.is_dir) {
+            var link = document.createElement('span');
+            link.className = 'files-table__name';
+            link.textContent = item.name;
+            var dirPath = (_currentPath ? _currentPath + '/' : '') + item.name;
+            link.onclick = (function(p) { return function() { loadFiles(p); }; })(dirPath);
+            nameTd.appendChild(link);
+        } else {
+            var fname = document.createElement('span');
+            fname.textContent = item.name;
+            nameTd.appendChild(fname);
+        }
+        tr.appendChild(nameTd);
+
+        // 大小
+        var sizeTd = document.createElement('td');
+        sizeTd.textContent = item.is_dir ? '-' : formatBytes(item.size);
+        sizeTd.style.fontSize = '0.85rem';
+        sizeTd.style.color = '#666';
+        tr.appendChild(sizeTd);
+
+        // 修改时间
+        var mtimeTd = document.createElement('td');
+        mtimeTd.textContent = formatTime(item.mtime);
+        mtimeTd.style.fontSize = '0.85rem';
+        mtimeTd.style.color = '#666';
+        tr.appendChild(mtimeTd);
+
+        // 操作
+        var actionTd = document.createElement('td');
+        var filePath = (_currentPath ? _currentPath + '/' : '') + item.name;
+
+        if (!item.is_dir) {
+            var dlBtn = document.createElement('button');
+            dlBtn.className = 'btn btn--outline';
+            dlBtn.style.padding = '0.2rem 0.5rem';
+            dlBtn.style.fontSize = '0.8rem';
+            dlBtn.style.border = '1px solid #ddd';
+            dlBtn.style.borderRadius = '4px';
+            dlBtn.style.cursor = 'pointer';
+            dlBtn.style.background = 'transparent';
+            dlBtn.textContent = '下载';
+            dlBtn.onclick = (function(p) { return function() { downloadFile(p); }; })(filePath);
+            actionTd.appendChild(dlBtn);
+        }
+
+        var delBtn = document.createElement('button');
+        delBtn.style.padding = '0.2rem 0.5rem';
+        delBtn.style.fontSize = '0.8rem';
+        delBtn.style.border = 'none';
+        delBtn.style.borderRadius = '4px';
+        delBtn.style.cursor = 'pointer';
+        delBtn.style.background = '#e74c3c';
+        delBtn.style.color = '#fff';
+        delBtn.style.marginLeft = '0.3rem';
+        delBtn.textContent = '删除';
+        delBtn.onclick = (function(p, n) { return function() { deleteItem(p, n); }; })(filePath, item.name);
+        actionTd.appendChild(delBtn);
+        tr.appendChild(actionTd);
+
+        tbody.appendChild(tr);
+    });
+}
+
+
+// ============================================
+// 个人空间 — 下载
+// ============================================
+
+async function downloadFile(path) {
+    try {
+        var resp = await fetch('/api/files/download-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getToken() },
+            body: JSON.stringify({ path: path }),
+        });
+        if (resp.status === 401) { logout(); return; }
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return {}; });
+            showError(err.detail || '获取下载链接失败');
+            return;
+        }
+        var data = await resp.json();
+        window.open('/api/files/download?path=' + encodeURIComponent(path) + '&_token=' + data.token);
+    } catch (e) {
+        showError('下载失败: ' + (e.message || ''));
+    }
+}
+
+
+// ============================================
+// 个人空间 — 删除
+// ============================================
+
+async function deleteItem(path, name) {
+    if (!confirm('确定删除 "' + name + '"？')) return;
+    try {
+        var resp = await fetch('/api/files/file?path=' + encodeURIComponent(path), {
+            method: 'DELETE',
+            headers: authHeaders(),
+        });
+        if (resp.status === 401) { logout(); return; }
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return {}; });
+            showError(err.detail || '删除失败');
+            return;
+        }
+        loadFiles(_currentPath);
+        loadSpaceInfo();
+    } catch (e) {
+        showError('删除失败: ' + (e.message || ''));
+    }
+}
+
+
+// ============================================
+// 个人空间 — 新建文件夹
+// ============================================
+
+async function createFolder() {
+    var name = prompt('文件夹名称');
+    if (!name || !name.trim()) return;
+    name = name.trim();
+
+    var path = (_currentPath ? _currentPath + '/' : '') + name;
+    try {
+        var resp = await fetch('/api/files/mkdir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getToken() },
+            body: JSON.stringify({ path: path }),
+        });
+        if (resp.status === 401) { logout(); return; }
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return {}; });
+            showError(err.detail || '创建失败');
+            return;
+        }
+        loadFiles(_currentPath);
+    } catch (e) {
+        showError('创建失败: ' + (e.message || ''));
+    }
+}
+
+
+// ============================================
+// 个人空间 — 分片上传
+// ============================================
+
+var _uploads = {};
+var CHUNK_SIZE = 10 * 1024 * 1024;  // 10MB
+
+function triggerUpload() {
+    document.getElementById('file-input').click();
+}
+
+function _handleFileSelect(evt) {
+    var files = evt.target.files;
+    for (var i = 0; i < files.length; i++) {
+        uploadFile(files[i], _currentPath);
+    }
+    evt.target.value = '';
+}
+
+async function uploadFile(file, targetDir) {
+    var path = (targetDir ? targetDir + '/' : '') + file.name;
+    var id = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+
+    _uploads[id] = {
+        file: file, path: path, name: file.name,
+        offset: 0, size: file.size, speed: 0,
+        aborted: false, controller: new AbortController(),
+        status: 'uploading', error: '',
+    };
+
+    renderUploads();
+
+    try {
+        // init
+        var initForm = new FormData();
+        initForm.append('path', path);
+        initForm.append('size', file.size);
+
+        var initResp = await fetch('/api/files/upload/init', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + getToken() },
+            body: initForm,
+            signal: _uploads[id].controller.signal,
+        });
+        if (initResp.status === 401) { logout(); return; }
+        if (!initResp.ok) {
+            var err = await initResp.json().catch(function() { return {}; });
+            _uploads[id].status = 'error';
+            _uploads[id].error = err.detail || 'init 失败';
+            renderUploads();
+            return;
+        }
+        var initData = await initResp.json();
+        var uploadId = initData.upload_id;
+        var offset = initData.offset || 0;
+
+        _uploads[id].offset = offset;
+        _uploads[id].uploadId = uploadId;
+        renderUploads();
+
+        // chunk loop
+        var chunkTimes = [];
+        while (offset < file.size) {
+            if (_uploads[id].aborted) return;
+
+            var end = Math.min(offset + CHUNK_SIZE, file.size);
+            var blob = file.slice(offset, end);
+
+            var chunkForm = new FormData();
+            chunkForm.append('upload_id', uploadId);
+            chunkForm.append('offset', offset);
+            chunkForm.append('chunk', blob, file.name);
+
+            var t0 = Date.now();
+            var chunkResp = await fetch('/api/files/upload/chunk', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + getToken() },
+                body: chunkForm,
+                signal: _uploads[id].controller.signal,
+            });
+
+            if (!chunkResp.ok) {
+                var cerr = await chunkResp.json().catch(function() { return {}; });
+                _uploads[id].status = 'error';
+                _uploads[id].error = cerr.detail || 'chunk 失败';
+                renderUploads();
+                return;
+            }
+
+            var chunkData = await chunkResp.json();
+            var elapsed = (Date.now() - t0) / 1000;
+            chunkTimes.push({ bytes: end - offset, time: elapsed });
+            if (chunkTimes.length > 5) chunkTimes.shift();
+
+            offset = chunkData.offset;
+            _uploads[id].offset = offset;
+            _uploads[id].speed = calcSpeed(chunkTimes);
+            renderUploads();
+
+            if (chunkData.complete) {
+                _uploads[id].status = 'done';
+                renderUploads();
+                loadFiles(_currentPath);
+                loadSpaceInfo();
+                // 3秒后移除完成条目
+                setTimeout(function(uid) { delete _uploads[uid]; renderUploads(); }, 3000, id);
+                return;
+            }
+        }
+    } catch (e) {
+        if (e.name === 'AbortError') {
+            _uploads[id].status = 'cancelled';
+        } else {
+            _uploads[id].status = 'error';
+            _uploads[id].error = e.message || '上传失败';
+        }
+        renderUploads();
+    }
+}
+
+function cancelUpload(id) {
+    var u = _uploads[id];
+    if (!u) return;
+    u.aborted = true;
+    u.controller.abort();
+    // 取消服务端
+    if (u.uploadId) {
+        fetch('/api/files/upload/' + u.uploadId, {
+            method: 'DELETE',
+            headers: authHeaders(),
+        }).catch(function() {});
+    }
+    delete _uploads[id];
+    renderUploads();
+}
+
+function calcSpeed(chunkTimes) {
+    if (!chunkTimes.length) return 0;
+    var totalBytes = 0, totalTime = 0;
+    chunkTimes.forEach(function(c) { totalBytes += c.bytes; totalTime += c.time; });
+    return totalTime > 0 ? totalBytes / totalTime : 0;
+}
+
+function renderUploads() {
+    var container = document.getElementById('files-uploads');
+    if (!container) return;
+    var keys = Object.keys(_uploads);
+    if (!keys.length) { container.innerHTML = ''; return; }
+
+    var html = '';
+    keys.forEach(function(id) {
+        var u = _uploads[id];
+        var pct = u.size > 0 ? Math.round(u.offset / u.size * 100) : 0;
+        var fillClass = 'files-upload-item__fill';
+        if (u.status === 'done') fillClass += ' files-upload-item__fill--done';
+        else if (u.status === 'error') fillClass += ' files-upload-item__fill--error';
+
+        var statusText = '';
+        if (u.status === 'done') statusText = '完成';
+        else if (u.status === 'error') statusText = u.error;
+        else if (u.status === 'cancelled') statusText = '已取消';
+        else statusText = formatBytes(u.offset) + ' / ' + formatBytes(u.size);
+
+        var speedText = u.status === 'uploading' && u.speed > 0 ? formatBytes(u.speed) + '/s' : '';
+
+        html += '<div class="files-upload-item">' +
+            '<div class="files-upload-item__name"><span>' + escapeHtml(u.name) + '</span>' +
+            (u.status === 'uploading' ? '<button class="files-upload-item__cancel" onclick="cancelUpload(\'' + id + '\')">取消</button>' : '') +
+            '</div>' +
+            '<div class="files-upload-item__progress"><div class="' + fillClass + '" style="width:' + pct + '%"></div></div>' +
+            '<div class="files-upload-item__info"><span>' + statusText + '</span><span>' + speedText + '</span></div>' +
+            '</div>';
+    });
+    container.innerHTML = html;
+}
+
+
+// ============================================
+// 个人空间 — 拖拽上传
+// ============================================
+
+var _dragCounter = 0;
+
+function _initDragDrop() {
+    var body = document.body;
+    body.addEventListener('dragenter', function(e) {
+        if (_currentPortalTab !== 'files') return;
+        e.preventDefault();
+        _dragCounter++;
+        document.getElementById('files-dropzone').classList.add('files-dropzone--active');
+    });
+    body.addEventListener('dragleave', function(e) {
+        _dragCounter--;
+        if (_dragCounter <= 0) {
+            _dragCounter = 0;
+            document.getElementById('files-dropzone').classList.remove('files-dropzone--active');
+        }
+    });
+    body.addEventListener('dragover', function(e) {
+        if (_currentPortalTab !== 'files') return;
+        e.preventDefault();
+    });
+    body.addEventListener('drop', function(e) {
+        e.preventDefault();
+        _dragCounter = 0;
+        document.getElementById('files-dropzone').classList.remove('files-dropzone--active');
+        if (_currentPortalTab !== 'files') return;
+
+        var files = e.dataTransfer.files;
+        for (var i = 0; i < files.length; i++) {
+            uploadFile(files[i], _currentPath);
+        }
+    });
+}
+
+
+// ============================================
+// 个人空间 — 使用说明折叠
+// ============================================
+
+function _initTip() {
+    var hidden = localStorage.getItem('portal_files_tip_hidden') === '1';
+    if (hidden) {
+        var el = document.getElementById('files-tip');
+        if (el) el.style.display = 'none';
+    }
+}
+
+function closeTip() {
+    var el = document.getElementById('files-tip');
+    if (el) el.style.display = 'none';
+    localStorage.setItem('portal_files_tip_hidden', '1');
+}
+
+
+// ============================================
+// 格式化工具
+// ============================================
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+    return (bytes / 1073741824).toFixed(2) + ' GB';
+}
+
+function formatTime(ts) {
+    if (!ts) return '-';
+    var d = new Date(ts * 1000);
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    var dd = String(d.getDate()).padStart(2, '0');
+    var hh = String(d.getHours()).padStart(2, '0');
+    var mi = String(d.getMinutes()).padStart(2, '0');
+    return mm + '-' + dd + ' ' + hh + ':' + mi;
+}
+
+
 /**
  * 初始化
  */
@@ -260,6 +778,24 @@ async function init() {
         loading.style.display = 'none';
         showError('加载应用列表失败: ' + (e.message || '未知错误'));
     }
+
+    // Tab 切换
+    document.getElementById('portal-tabs').addEventListener('click', function(e) {
+        var tab = e.target.getAttribute('data-tab');
+        if (tab) switchPortalTab(tab);
+    });
+
+    // 文件选择
+    document.getElementById('file-input').addEventListener('change', _handleFileSelect);
+
+    // 拖拽上传
+    _initDragDrop();
+
+    // 上传列表容器
+    var uploadsDiv = document.createElement('div');
+    uploadsDiv.className = 'files-uploads';
+    uploadsDiv.id = 'files-uploads';
+    document.body.appendChild(uploadsDiv);
 }
 
 document.addEventListener('DOMContentLoaded', init);

@@ -271,3 +271,276 @@ body {
     background: #93c5fd;
     cursor: not-allowed;
 }
+
+/* ============================================
+   Portal Tab Bar
+   ============================================ */
+.portal-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 0;
+    border-bottom: 2px solid #e0e0e0;
+    background: #fff;
+    padding: 0 1.5rem;
+}
+
+.portal-tabs__btn {
+    padding: 0.7rem 1.5rem;
+    cursor: pointer;
+    font-size: 0.95rem;
+    color: #666;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    background: none;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.portal-tabs__btn:hover { color: #1a73e8; }
+
+.portal-tabs__btn--active {
+    color: #1a73e8;
+    border-bottom-color: #1a73e8;
+    font-weight: 500;
+}
+
+/* ============================================
+   个人空间
+   ============================================ */
+
+/* 使用说明 */
+.files-tip {
+    background: #e3f2fd;
+    border: 1px solid #90caf9;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+    font-size: 0.88rem;
+    color: #1565c0;
+    line-height: 1.6;
+    position: relative;
+}
+
+.files-tip ul {
+    margin: 0.4rem 0 0 1.2rem;
+    padding: 0;
+}
+
+.files-tip code {
+    background: rgba(255,255,255,0.6);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.82rem;
+}
+
+.files-tip__close {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.8rem;
+    background: none;
+    border: none;
+    color: #1565c0;
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.files-tip__close:hover { text-decoration: underline; }
+
+/* 配额进度条 */
+.files-quota {
+    margin-bottom: 1rem;
+}
+
+.files-quota__bar {
+    height: 10px;
+    background: #e0e0e0;
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.files-quota__fill {
+    height: 100%;
+    background: #1a73e8;
+    border-radius: 5px;
+    transition: width 0.3s;
+}
+
+.files-quota__fill--warn { background: #f57c00; }
+.files-quota__fill--danger { background: #e53935; }
+
+.files-quota__text {
+    font-size: 0.82rem;
+    color: #666;
+    margin-top: 0.3rem;
+}
+
+/* 工具栏 */
+.files-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    gap: 1rem;
+}
+
+.files-toolbar .btn {
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: background 0.2s;
+    border: none;
+}
+
+.files-toolbar .btn--outline {
+    background: transparent;
+    border: 1px solid #ddd;
+    color: #555;
+}
+
+.files-toolbar .btn--outline:hover { background: #f5f5f5; }
+
+.files-toolbar .btn--primary {
+    background: #1a73e8;
+    color: #fff;
+}
+
+.files-toolbar .btn--primary:hover { background: #1557b0; }
+
+/* 面包屑 */
+.files-breadcrumb {
+    font-size: 0.9rem;
+    color: #555;
+}
+
+.files-breadcrumb a {
+    color: #1a73e8;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.files-breadcrumb a:hover { text-decoration: underline; }
+
+.files-breadcrumb span { color: #999; margin: 0 0.3rem; }
+
+/* 文件表格 */
+.files-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.files-table th,
+.files-table td {
+    padding: 0.6rem 0.8rem;
+    text-align: left;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 0.9rem;
+}
+
+.files-table th {
+    background: #f8f9fa;
+    font-weight: 500;
+    color: #555;
+}
+
+.files-table tr:hover { background: #f5f8ff; }
+
+.files-table__name {
+    cursor: pointer;
+    color: #1a73e8;
+}
+
+.files-table__name:hover { text-decoration: underline; }
+
+.files-table__icon { margin-right: 0.4rem; }
+
+/* 拖拽区域 */
+.files-dropzone {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(26, 115, 232, 0.08);
+    border: 3px dashed #1a73e8;
+    z-index: 900;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    color: #1a73e8;
+    pointer-events: none;
+}
+
+.files-dropzone--active {
+    display: flex;
+}
+
+/* 上传任务列表 */
+.files-uploads {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    width: 340px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1100;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.files-upload-item {
+    background: #fff;
+    border-radius: 8px;
+    padding: 0.65rem 0.8rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+    font-size: 0.85rem;
+}
+
+.files-upload-item__name {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.3rem;
+    color: #333;
+}
+
+.files-upload-item__progress {
+    height: 6px;
+    background: #e0e0e0;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.files-upload-item__fill {
+    height: 100%;
+    background: #1a73e8;
+    border-radius: 3px;
+    transition: width 0.2s;
+}
+
+.files-upload-item__fill--done { background: #2e7d32; }
+.files-upload-item__fill--error { background: #e53935; }
+
+.files-upload-item__info {
+    font-size: 0.78rem;
+    color: #888;
+    margin-top: 0.25rem;
+    display: flex;
+    justify-content: space-between;
+}
+
+.files-upload-item__cancel {
+    background: none;
+    border: none;
+    color: #e53935;
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.files-upload-item__cancel:hover { text-decoration: underline; }

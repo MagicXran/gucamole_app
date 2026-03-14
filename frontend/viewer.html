@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 仿真查看器 - VTK.js</title>
+    <link rel="stylesheet" href="css/viewer.css">
+</head>
+<body>
+    <div class="viewer-layout">
+        <!-- 左侧控制面板 -->
+        <aside class="sidebar">
+            <div class="sidebar__header">
+                <div class="sidebar__title">3D 仿真查看器</div>
+                <div class="sidebar__subtitle">WebGL 数据驱动渲染 (PoC)</div>
+                <a href="/index.html" class="back-link">&larr; 返回门户</a>
+            </div>
+
+            <!-- 数据集列表 -->
+            <div class="sidebar__section">
+                <div class="sidebar__section-title">数据集</div>
+                <div id="dataset-loading" style="color:var(--text-muted);font-size:0.85rem;">加载中...</div>
+                <ul id="dataset-list" class="dataset-list" style="display:none;"></ul>
+                <div id="dataset-empty" class="dataset-empty" style="display:none;">
+                    暂无数据文件<br>
+                    <span style="font-size:0.75rem;">请将 .vtp / .vtu / .stl 文件放入 data/samples/</span>
+                </div>
+            </div>
+
+            <!-- 显示控件 -->
+            <div class="sidebar__section">
+                <div class="sidebar__section-title">显示设置</div>
+
+                <div class="control-group">
+                    <label for="color-preset">色表 (Color Map)</label>
+                    <select id="color-preset">
+                        <option value="erdc_rainbow_bright">Rainbow</option>
+                        <option value="Cool to Warm" selected>Cool to Warm</option>
+                        <option value="Viridis (matplotlib)">Viridis</option>
+                        <option value="jet">Jet</option>
+                        <option value="Grayscale">Grayscale</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="scalar-select">标量场</label>
+                    <select id="scalar-select">
+                        <option value="">无 (纯几何)</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="representation">表现模式</label>
+                    <select id="representation">
+                        <option value="2" selected>Surface</option>
+                        <option value="1">Wireframe</option>
+                        <option value="0">Points</option>
+                        <option value="3">Surface + Edges</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="opacity-range">不透明度</label>
+                    <input type="range" id="opacity-range" min="0.1" max="1.0" step="0.05" value="1.0">
+                </div>
+
+                <label class="checkbox-row">
+                    <input type="checkbox" id="toggle-axes" checked>
+                    显示坐标轴
+                </label>
+            </div>
+
+            <!-- 操作 -->
+            <div class="sidebar__section">
+                <div class="sidebar__section-title">操作</div>
+                <button class="btn btn--accent btn--block" id="btn-reset-camera">
+                    重置视角
+                </button>
+            </div>
+
+            <!-- 模型信息 -->
+            <div class="sidebar__section">
+                <div class="sidebar__section-title">模型信息</div>
+                <div id="model-info" style="font-size:0.8rem;color:var(--text-muted);">
+                    未加载模型
+                </div>
+            </div>
+        </aside>
+
+        <!-- 渲染区域 -->
+        <div class="render-area" id="render-area">
+            <!-- 欢迎提示 -->
+            <div class="render-overlay" id="welcome-overlay">
+                <div class="welcome-hint">
+                    <span class="welcome-hint__icon">&#x1F52C;</span>
+                    <div class="welcome-hint__title">选择数据集开始查看</div>
+                    <div class="welcome-hint__desc">支持 VTP / VTU / STL / OBJ 格式</div>
+                </div>
+            </div>
+
+            <!-- 加载中提示 -->
+            <div class="render-overlay render-overlay--hidden" id="loading-overlay">
+                <div class="render-overlay__spinner"></div>
+                <div class="render-overlay__text" id="loading-text">加载中...</div>
+            </div>
+
+            <!-- 错误提示 -->
+            <div class="error-toast error-toast--hidden" id="error-toast"></div>
+
+            <!-- 状态栏 -->
+            <div class="status-bar" id="status-bar" style="display:none;">
+                <div class="status-bar__item">
+                    FPS: <span class="status-bar__value" id="fps-value">--</span>
+                </div>
+                <div class="status-bar__item">
+                    顶点: <span class="status-bar__value" id="vertex-count">--</span>
+                </div>
+                <div class="status-bar__item">
+                    面片: <span class="status-bar__value" id="cell-count">--</span>
+                </div>
+                <div class="status-bar__item">
+                    大小: <span class="status-bar__value" id="file-size">--</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- VTK.js via ESM importmap -->
+    <script type="importmap">
+    {
+        "imports": {
+            "@kitware/vtk.js/": "https://esm.sh/@kitware/vtk.js/"
+        }
+    }
+    </script>
+    <script type="module" src="js/viewer.js"></script>
+</body>
+</html>

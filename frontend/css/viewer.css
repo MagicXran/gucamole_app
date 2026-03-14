@@ -1,0 +1,337 @@
+/* ============================================
+   VTK.js 3D 查看器 - 样式
+   ============================================ */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --bg-dark: #1a1a2e;
+    --bg-panel: #16213e;
+    --bg-card: #1e2a45;
+    --border: #2a3a5c;
+    --text: #e0e0e0;
+    --text-muted: #8899aa;
+    --accent: #4fc3f7;
+    --accent-hover: #29b6f6;
+    --danger: #ef5350;
+    --success: #66bb6a;
+}
+
+html, body {
+    height: 100%;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg-dark);
+    color: var(--text);
+}
+
+/* ---- 主布局 ---- */
+.viewer-layout {
+    display: flex;
+    height: 100vh;
+}
+
+/* ---- 左侧面板 ---- */
+.sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.sidebar__header {
+    padding: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.sidebar__title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.sidebar__subtitle {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+.sidebar__section {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.sidebar__section-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.5rem;
+}
+
+/* ---- 数据集列表 ---- */
+.dataset-list {
+    list-style: none;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.dataset-item {
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+}
+
+.dataset-item:hover {
+    background: var(--bg-card);
+}
+
+.dataset-item--active {
+    background: var(--bg-card);
+    border: 1px solid var(--accent);
+}
+
+.dataset-item__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.dataset-item__size {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-left: 0.5rem;
+    flex-shrink: 0;
+}
+
+.dataset-empty {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    padding: 0.5rem 0;
+    text-align: center;
+}
+
+/* ---- 控件 ---- */
+.control-group {
+    margin-bottom: 0.75rem;
+}
+
+.control-group label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.25rem;
+}
+
+.control-group select,
+.control-group input {
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 0.85rem;
+}
+
+.control-group select:focus,
+.control-group input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+/* 复选框行 */
+.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+    padding: 0.3rem 0;
+}
+
+.checkbox-row input[type="checkbox"] {
+    width: auto;
+    accent-color: var(--accent);
+}
+
+/* 按钮 */
+.btn {
+    display: inline-block;
+    padding: 0.4rem 0.8rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.btn--accent {
+    background: var(--accent);
+    color: #000;
+}
+
+.btn--accent:hover {
+    background: var(--accent-hover);
+}
+
+.btn--block {
+    display: block;
+    width: 100%;
+    text-align: center;
+}
+
+/* ---- 渲染区域 ---- */
+.render-area {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: #0d1117;
+}
+
+.render-area canvas {
+    display: block;
+}
+
+/* ---- 加载/状态提示 ---- */
+.render-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(13, 17, 23, 0.85);
+    z-index: 10;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.render-overlay--hidden {
+    display: none;
+}
+
+.render-overlay__spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.render-overlay__text {
+    font-size: 1rem;
+    color: var(--text-muted);
+}
+
+/* 欢迎提示 */
+.welcome-hint {
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.welcome-hint__icon {
+    font-size: 3rem;
+    margin-bottom: 0.5rem;
+    display: block;
+}
+
+.welcome-hint__title {
+    font-size: 1.2rem;
+    color: var(--text);
+    margin-bottom: 0.25rem;
+}
+
+.welcome-hint__desc {
+    font-size: 0.9rem;
+}
+
+/* ---- 状态栏 (右下角) ---- */
+.status-bar {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    background: rgba(22, 33, 62, 0.9);
+    border-top: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+    border-radius: 8px 0 0 0;
+    padding: 0.4rem 0.8rem;
+    display: flex;
+    gap: 1rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    z-index: 5;
+}
+
+.status-bar__item {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.status-bar__value {
+    color: var(--accent);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---- 返回按钮 ---- */
+.back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+    transition: color 0.15s;
+}
+
+.back-link:hover {
+    color: var(--accent);
+}
+
+/* ---- 错误提示 ---- */
+.error-toast {
+    position: absolute;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--danger);
+    color: #fff;
+    padding: 0.5rem 1.2rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    z-index: 20;
+    animation: fadeIn 0.3s;
+}
+
+.error-toast--hidden {
+    display: none;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

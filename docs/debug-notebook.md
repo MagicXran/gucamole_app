@@ -29,6 +29,7 @@
   - [BUG-017: Admin 修改应用后 Launch 仍用旧参数（Session 缓存未失效）](#bug-017-admin-修改应用后-launch-仍用旧参数session-缓存未失效)
   - [BUG-018: 多用户并发打开应用时第二个用户跳 Guacamole 登录页](#bug-018-多用户并发打开应用时第二个用户跳-guacamole-登录页)
   - [BUG-019: Guacamole BAN Extension 锁定 Portal 容器 IP 导致全员瘫痪](#bug-019-guacamole-ban-extension-锁定-portal-容器-ip-导致全员瘫痪)
+  - [BUG-020: 多用户打开同一 Electron RemoteApp（VSCode）黑屏/画面合并](#bug-020-多用户打开同一-electron-remoteappvscode黑屏画面合并)
 - [三、参考资料汇总](#三参考资料汇总)
 
 ---
@@ -1502,6 +1503,235 @@ BAN_ENABLED: "false"
 
 ---
 
+### BUG-020: 多用户打开同一 Electron RemoteApp（VSCode）黑屏/画面合并
+
+| 字段 | 值 |
+|------|-----|
+| 严重程度 | **严重** |
+| 发现日期 | 2026-03-10 |
+| 影响范围 | 所有基于 Electron 的 RemoteApp（VSCode、Postman、Slack 等），原生 Win32 应用不受影响 |
+| 状态 | 🔧 待修复 |
+
+**现象：**
+
+配置 VSCode 作为 RemoteApp 卡片。用户A打开 VSCode 正常工作。用户B随后打开同一个 VSCode：
+
+1. **B 的页面一片黑** — RemoteApp 窗口短暂出现后消失，只剩空白/黑色画布
+2. **A 的页面出现两个 VSCode 窗口** — 一个是A自己的，另一个是B触发的
+
+对比测试：**记事本** 多用户同时打开完全正常，各自独立。
+
+**前提条件：**
+
+- Windows Server 已禁用"限制远程桌面服务用户使用单一远程桌面服务会话"组策略（`fSingleSessionPerUser = 0`）
+- 多个 RDP session 并发正常（记事本验证通过）
+- 所有 Portal 用户共用同一个 Windows RDP 账户（`remote_app` 表的 `rdp_username/rdp_password` 是应用级别，非用户级别）
+
+**根因分析：**
+
+#### 第一层：RDP Session 隔离 ✅ 已解决
+
+Windows 默认启用"限制用户单一会话"策略，同一 Windows 账户的多个 RDP 连接会被合并到同一 session。
+
+```
+组策略路径：
+计算机配置 → 管理模板 → Windows 组件 → 远程桌面服务
+  → 远程桌面会话主机 → 连接
+    → "限制远程桌面服务用户使用单一远程桌面服务会话" → 已禁用
+
+注册表等效：
+HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server
+  fSingleSessionPerUser = 0 (DWORD)
+```
+
+禁用后，同一 `admin` 用户可以创建多个独立的 RDP session。记事本等原生应用在此配置下已正常。
+
+#### 第二层：Electron 单实例机制 ❌ 当前问题
+
+VSCode 基于 **Electron**（Chromium + Node.js）。Electron 应用启动时有一个**单实例检测机制（Single Instance Lock）**：
+
+```
+VSCode 启动流程：
+1. 启动 code.exe
+2. Electron 检查是否已有同一 user-data-dir 的实例在运行
+   └── 检测方式：Windows Named Pipe（命名管道）
+       管道名基于 user-data-dir 路径生成
+3. 如果检测到已有实例 → 通过 IPC 将"打开窗口"请求发给已有实例 → 自身退出
+4. 如果没有 → 正常启动，创建 IPC 管道
+```
+
+**关键问题：Windows 命名管道（Named Pipe）在同一用户安全上下文下跨 RDP Session 全局可见。**
+
+```
+                    ┌─────────────────────────────────┐
+                    │     Windows Server (admin)       │
+                    │                                  │
+                    │  Named Pipe: \\.\pipe\vscode-ipc │  ← 全局命名空间
+                    │       ↑              ↑           │
+                    │       │              │           │
+                    │  ┌────┴────┐   ┌─────┴───┐      │
+                    │  │Session 1│   │Session 2 │      │
+                    │  │(User A) │   │(User B)  │      │
+                    │  │         │   │          │      │
+                    │  │ VSCode  │   │ VSCode   │      │
+                    │  │ (运行中)│   │ (启动)   │      │
+                    │  │         │   │    ↓     │      │
+                    │  │ ← IPC ──┤   │检测到管道│      │
+                    │  │ 收到请求│   │转发请求  │      │
+                    │  │ 打开新窗│   │自身退出! │      │
+                    │  └─────────┘   └──────────┘      │
+                    └─────────────────────────────────┘
+
+结果：
+  A 看到两个 VSCode 窗口（自己的 + B 触发的）
+  B 的 VSCode 进程退出 → RemoteApp 窗口消失 → 黑屏
+```
+
+**为什么记事本不受影响：**
+
+记事本（`notepad.exe`）是原生 Win32 应用，**没有单实例检测机制**。每次启动都是独立进程，不使用命名管道做 IPC。所有原生 Windows 应用（画图、计算器、资源管理器等）都不受影响。
+
+**影响范围**：所有基于 Electron 的应用都有类似行为：
+
+| 应用 | 框架 | 是否受影响 |
+|------|------|-----------|
+| VSCode | Electron | ✅ 受影响 |
+| Postman | Electron | ✅ 受影响 |
+| Slack Desktop | Electron | ✅ 受影响 |
+| Discord | Electron | ✅ 受影响 |
+| 记事本 | Win32 Native | ❌ 不受影响 |
+| Office 套件 | Win32/COM | ❌ 不受影响 |
+| 画图/计算器 | UWP/Win32 | ❌ 不受影响 |
+
+#### 深层原理：Electron 的 Single Instance Lock
+
+Electron 的 `app.requestSingleInstanceLock()` API 底层实现：
+
+```
+Windows 平台：
+1. 根据 user-data-dir 路径计算哈希值
+2. 创建命名管道：\\.\pipe\electron.{hash}
+3. 尝试连接该管道
+   - 连接成功 → 已有实例 → 发送 argv + cwd → 退出
+   - 连接失败 → 无已有实例 → 创建管道 → 成为主实例
+```
+
+**核心洞察**：管道名的哈希基于 `user-data-dir` 路径。如果两个实例使用**不同的 user-data-dir**，它们会生成**不同的管道名**，从而互不干扰。
+
+**解决方案：**
+
+#### 方案设计
+
+通过 RemoteApp 启动参数 `--user-data-dir` 为每个 Portal 用户指定独立的数据目录。这同时解决两个问题：
+
+1. **IPC 管道隔离**：不同的 `user-data-dir` → 不同的管道名 → 单实例检测互不干扰
+2. **用户数据隔离**：settings、extensions、workspace state 各自独立
+
+```
+修复后的行为：
+
+用户A (portal_u1):
+  code.exe --user-data-dir C:\PortalProfiles\1
+    → Named Pipe: \\.\pipe\electron.{hash_of_C:\PortalProfiles\1}
+    → VSCode 正常启动 ✅
+
+用户B (portal_u2):
+  code.exe --user-data-dir C:\PortalProfiles\2
+    → Named Pipe: \\.\pipe\electron.{hash_of_C:\PortalProfiles\2}
+    → 管道名不同，检测不到 A 的实例 → 独立启动 ✅
+```
+
+#### 代码改动
+
+**改动量：1 行代码 + 1 条 SQL**
+
+**文件 1：`backend/router.py` 第 75 行**
+
+```python
+# ── 改前 ──
+remote_app_args=app.get("remote_app_args") or "",
+
+# ── 改后 ──
+remote_app_args=(app.get("remote_app_args") or "").replace("{user_id}", str(user_id)),
+```
+
+在构建 Guacamole 连接参数时，将 `remote_app_args` 中的 `{user_id}` 占位符替换为实际的 Portal 用户 ID。
+
+该改动与同一函数中第 62 行的 Drive 路径隔离完全同源：
+```python
+# 第 62 行（已有代码）：
+user_drive_path = f"{drive_base}/portal_u{user_id}" if drive_enabled else ""
+```
+
+**文件 2：数据库 `remote_app` 表**
+
+```sql
+-- 更新 VSCode 应用的启动参数
+UPDATE remote_app
+SET remote_app_args = '--user-data-dir C:\\PortalProfiles\\{user_id}'
+WHERE name = 'VSCode';
+```
+
+> **注意：** Windows 服务器上需要确保 `C:\PortalProfiles\` 目录存在。VSCode 会自动创建以 user_id 命名的子目录。
+
+**数据流追踪：**
+
+```
+DB: remote_app.remote_app_args = '--user-data-dir C:\PortalProfiles\{user_id}'
+    │
+    ↓  router.py 第 75 行（NEW: .replace("{user_id}", str(user_id))）
+    │
+'--user-data-dir C:\PortalProfiles\3'     ← 假设 portal user_id = 3
+    │
+    ↓  guacamole_crypto.py 第 163-164 行
+    │
+params["remote-app-args"] = '--user-data-dir C:\PortalProfiles\3'
+    │
+    ↓  guacamole_service.py → 加密打包进 Guacamole JSON token
+    │
+    ↓  Guacamole → guacd → FreeRDP
+    │
+    ↓  Windows RDP 服务器
+    │
+code.exe --user-data-dir C:\PortalProfiles\3     ← 独立数据目录 + 独立 IPC 管道
+```
+
+**验证步骤：**
+
+1. 修改代码并重启 Portal 后端
+2. 在管理后台（或 SQL）更新 VSCode 的 `remote_app_args` 为 `--user-data-dir C:\PortalProfiles\{user_id}`
+3. 用户A打开 VSCode → 正常启动
+4. 用户B打开 VSCode → 独立窗口，A 不受影响
+5. 在 Windows 服务器上确认 `C:\PortalProfiles\1\`、`C:\PortalProfiles\2\` 等目录被自动创建
+6. 各用户的 VSCode 设置、扩展互相独立
+
+**教训：**
+
+| 原则 | 内容 |
+|------|------|
+| **框架特性会穿透 OS 隔离** | RDP session 隔离了桌面和窗口，但没有隔离命名管道等内核对象的用户命名空间。Electron 的 IPC 管道在同一 Windows 用户下全局可见 |
+| **同一用户 ≠ 同一身份** | 当多个真实用户共享一个 Windows 账户时，必须在应用层面做额外隔离。OS 级别的 session 隔离不够 |
+| **RemoteApp 参数是隔离的最后防线** | 当无法为每个用户创建独立 Windows 账户时，通过应用的命令行参数（`--user-data-dir`）实现进程级隔离 |
+| **模板变量是通用模式** | `{user_id}` 占位符机制可以推广到所有需要 per-user 隔离的 Electron 应用 |
+
+**补充知识：其他 Electron 应用的隔离参数**
+
+| 应用 | 隔离参数 |
+|------|----------|
+| VSCode | `--user-data-dir <path>` + `--extensions-dir <path>`（可选） |
+| Electron 通用 | `--user-data-dir <path>` |
+| Chrome/Chromium | `--user-data-dir=<path>` |
+
+#### 关联
+
+- 与 [BUG-018](#bug-018-多用户并发打开应用时第二个用户跳-guacamole-登录页) 相关：同为多用户并发场景下的隔离问题
+- 与 Drive Redirection 的 per-user 路径隔离（`/drive/portal_u{user_id}`）设计思路一致
+- 参考: [Electron Single Instance Lock](https://www.electronjs.org/docs/latest/api/app#apprequestsingleinstancelock)
+- 参考: [VSCode CLI Reference --user-data-dir](https://code.visualstudio.com/docs/editor/command-line#_advanced-cli-options)
+- 参考: [Windows Named Pipes](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipes)
+
+---
+
 ## 三、参考资料汇总
 
 ### 官方文档
@@ -1558,6 +1788,10 @@ BAN_ENABLED: "false"
 | Microsoft: RDP Session Timeout | https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/rdp-files |
 | Microsoft: RemoteApp sessions disconnected | https://learn.microsoft.com/en-us/troubleshoot/windows-server/remote/remoteapp-sessions-disconnected |
 | Microsoft: Session Time Limits GPO (admx.help) | https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SESSIONS_Idle_Limit_1 |
+| Electron: Single Instance Lock API | https://www.electronjs.org/docs/latest/api/app#apprequestsingleinstancelock |
+| VSCode CLI: --user-data-dir | https://code.visualstudio.com/docs/editor/command-line#_advanced-cli-options |
+| Microsoft: Windows Named Pipes | https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipes |
+| Microsoft: RDS 单一会话策略 | https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SINGLE_SESSION |
 
 ---
 
@@ -1572,3 +1806,4 @@ BAN_ENABLED: "false"
 > | 2026-03-02 | 追加 BUG-016：RemoteApp 空闲 ~20 分钟卡死，多层超时优化 + Windows GPO 配置指南 |
 > | 2026-03-08 | 追加 BUG-017：Admin 修改应用后缓存未失效，Session 缓存失效策略修复 |
 > | 2026-03-08 | 追加 BUG-018：同一浏览器多账号 localStorage 互踢（设计限制）；BUG-019：BAN Extension 锁定容器 IP 致全员瘫痪（已修复） |
+> | 2026-03-10 | 追加 BUG-020：多用户打开同一 Electron RemoteApp（VSCode）黑屏/画面合并 — Electron 单实例 IPC 管道跨 session 可见 |

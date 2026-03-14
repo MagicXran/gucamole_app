@@ -20,6 +20,7 @@ from backend.auth import router as auth_router
 from backend.router import router
 from backend.admin_router import router as admin_router
 from backend.monitor import router as monitor_router, admin_monitor_router, cleanup_stale_sessions
+from backend.dataset_router import router as dataset_router
 
 # 日志配置
 logging.basicConfig(
@@ -85,6 +86,7 @@ app.include_router(router)
 app.include_router(admin_router)
 app.include_router(monitor_router)
 app.include_router(admin_monitor_router)
+app.include_router(dataset_router)
 
 # 静态文件（前端）
 frontend_path = Path(__file__).parent.parent / "frontend"

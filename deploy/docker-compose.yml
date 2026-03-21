@@ -102,17 +102,31 @@ services:
       - guac-web
 
 volumes:
+  # ============================================================
+  # 数据持久化策略
+  #
+  # 【默认】Docker Named Volume — 适用于 Windows 开发环境
+  #   数据存在 Docker Desktop WSL2 VM 内，容器重启不丢失。
+  #   备份方式: deploy/backup.sh export
+  #   ⚠️ docker compose down -v 会删除数据！
+  #
+  # 【生产环境】取消下方 driver_opts 注释，改用 bind mount
+  #   需先创建目录: mkdir -p ${DATA_DIR}/mysql ${DATA_DIR}/drive
+  #   ⚠️ 不支持 Windows NTFS 路径 — MySQL 8 拒绝 case-insensitive 文件系统
+  # ============================================================
   mysql_data:
     name: guacamole_mysql_data
-    driver: local
-    driver_opts:
-      type: none
-      device: ${DATA_DIR:-/opt/nercar-portal/data}/mysql
-      o: bind
+    # --- 生产环境: 取消以下注释，DATA_DIR 指向 Linux 宿主机路径 ---
+    # driver: local
+    # driver_opts:
+    #   type: none
+    #   device: ${DATA_DIR}/mysql
+    #   o: bind
   guacd_drive:
     name: guacamole_guacd_drive
-    driver: local
-    driver_opts:
-      type: none
-      device: ${DATA_DIR:-/opt/nercar-portal/data}/drive
-      o: bind
+    # --- 生产环境: 取消以下注释 ---
+    # driver: local
+    # driver_opts:
+    #   type: none
+    #   device: ${DATA_DIR}/drive
+    #   o: bind

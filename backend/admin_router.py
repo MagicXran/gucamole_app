@@ -46,11 +46,21 @@ def create_app(
         INSERT INTO remote_app
             (name, icon, protocol, hostname, port,
              rdp_username, rdp_password, domain, security, ignore_cert,
-             remote_app, remote_app_dir, remote_app_args)
+             remote_app, remote_app_dir, remote_app_args,
+             color_depth, disable_gfx, resize_method,
+             enable_wallpaper, enable_font_smoothing,
+             disable_copy, disable_paste,
+             enable_audio, enable_audio_input, enable_printing,
+             timezone, keyboard_layout)
         VALUES
             (%(name)s, %(icon)s, %(protocol)s, %(hostname)s, %(port)s,
              %(rdp_username)s, %(rdp_password)s, %(domain)s, %(security)s, %(ignore_cert)s,
-             %(remote_app)s, %(remote_app_dir)s, %(remote_app_args)s)
+             %(remote_app)s, %(remote_app_dir)s, %(remote_app_args)s,
+             %(color_depth)s, %(disable_gfx)s, %(resize_method)s,
+             %(enable_wallpaper)s, %(enable_font_smoothing)s,
+             %(disable_copy)s, %(disable_paste)s,
+             %(enable_audio)s, %(enable_audio_input)s, %(enable_printing)s,
+             %(timezone)s, %(keyboard_layout)s)
         """,
         {
             "name": req.name, "icon": req.icon, "protocol": req.protocol,
@@ -62,6 +72,18 @@ def create_app(
             "remote_app": req.remote_app or None,
             "remote_app_dir": req.remote_app_dir or None,
             "remote_app_args": req.remote_app_args or None,
+            "color_depth": req.color_depth,
+            "disable_gfx": 1 if req.disable_gfx else 0,
+            "resize_method": req.resize_method,
+            "enable_wallpaper": 1 if req.enable_wallpaper else 0,
+            "enable_font_smoothing": 1 if req.enable_font_smoothing else 0,
+            "disable_copy": 1 if req.disable_copy else 0,
+            "disable_paste": 1 if req.disable_paste else 0,
+            "enable_audio": 1 if req.enable_audio else 0,
+            "enable_audio_input": 1 if req.enable_audio_input else 0,
+            "enable_printing": 1 if req.enable_printing else 0,
+            "timezone": req.timezone or None,
+            "keyboard_layout": req.keyboard_layout or None,
         },
     )
     app = db.execute_query(
@@ -96,14 +118,18 @@ def update_app(
         return existing
 
     # 构建动态 SET 子句
+    _BOOL_COLUMNS = {
+        "ignore_cert", "disable_gfx", "enable_wallpaper", "enable_font_smoothing",
+        "disable_copy", "disable_paste", "enable_audio", "enable_audio_input",
+        "enable_printing", "is_active",
+    }
     set_parts = []
     params = {"id": app_id}
     for key, value in updates.items():
-        if key == "ignore_cert":
+        if key in _BOOL_COLUMNS:
             value = 1 if value else 0
-        col = key
-        set_parts.append(f"{col} = %({col})s")
-        params[col] = value
+        set_parts.append(f"{key} = %({key})s")
+        params[key] = value
 
     db.execute_update(
         f"UPDATE remote_app SET {', '.join(set_parts)} WHERE id = %(id)s", params,

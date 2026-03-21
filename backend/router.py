@@ -42,7 +42,12 @@ def _build_all_connections(user_id: int) -> dict:
     query = """
         SELECT a.id, a.hostname, a.port, a.rdp_username, a.rdp_password,
                a.domain, a.security, a.ignore_cert,
-               a.remote_app, a.remote_app_dir, a.remote_app_args
+               a.remote_app, a.remote_app_dir, a.remote_app_args,
+               a.color_depth, a.disable_gfx, a.resize_method,
+               a.enable_wallpaper, a.enable_font_smoothing,
+               a.disable_copy, a.disable_paste,
+               a.enable_audio, a.enable_audio_input,
+               a.enable_printing, a.timezone, a.keyboard_layout
         FROM remote_app a
         JOIN remote_app_acl acl ON a.id = acl.app_id
         WHERE acl.user_id = %(user_id)s AND a.is_active = 1
@@ -77,6 +82,19 @@ def _build_all_connections(user_id: int) -> dict:
             drive_name=drive_name,
             drive_path=user_drive_path,
             create_drive_path=drive_create,
+            # RDP 高级参数
+            color_depth=app.get("color_depth"),
+            disable_gfx=bool(app.get("disable_gfx", 1)),
+            resize_method=app.get("resize_method") or "display-update",
+            enable_wallpaper=bool(app.get("enable_wallpaper", 0)),
+            enable_font_smoothing=bool(app.get("enable_font_smoothing", 1)),
+            disable_copy=bool(app.get("disable_copy", 0)),
+            disable_paste=bool(app.get("disable_paste", 0)),
+            enable_audio=bool(app.get("enable_audio", 1)),
+            enable_audio_input=bool(app.get("enable_audio_input", 0)),
+            enable_printing=bool(app.get("enable_printing", 0)),
+            timezone=app.get("timezone") or None,
+            keyboard_layout=app.get("keyboard_layout") or None,
         )
         connections.update(conn)
     return connections

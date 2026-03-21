@@ -4,7 +4,7 @@ Pydantic 数据模型
 
 from typing import Optional, List, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class RemoteAppResponse(BaseModel):
@@ -66,6 +66,33 @@ class AppCreateRequest(BaseModel):
     remote_app: str = Field(default="", max_length=200)
     remote_app_dir: str = Field(default="", max_length=500)
     remote_app_args: str = Field(default="", max_length=500)
+    # RDP 高级参数
+    color_depth: Optional[int] = None
+    disable_gfx: bool = True
+    resize_method: str = "display-update"
+    enable_wallpaper: bool = False
+    enable_font_smoothing: bool = True
+    disable_copy: bool = False
+    disable_paste: bool = False
+    enable_audio: bool = True
+    enable_audio_input: bool = False
+    enable_printing: bool = False
+    timezone: Optional[str] = Field(default=None, max_length=50)
+    keyboard_layout: Optional[str] = Field(default=None, max_length=50)
+
+    @field_validator("color_depth")
+    @classmethod
+    def check_color_depth(cls, v):
+        if v is not None and v not in (8, 16, 24):
+            raise ValueError("color_depth 必须是 8, 16, 24 或 null")
+        return v
+
+    @field_validator("resize_method")
+    @classmethod
+    def check_resize_method(cls, v):
+        if v not in ("display-update", "reconnect"):
+            raise ValueError("resize_method 必须是 display-update 或 reconnect")
+        return v
 
 
 class AppUpdateRequest(BaseModel):
@@ -82,7 +109,33 @@ class AppUpdateRequest(BaseModel):
     remote_app: Optional[str] = Field(default=None, max_length=200)
     remote_app_dir: Optional[str] = Field(default=None, max_length=500)
     remote_app_args: Optional[str] = Field(default=None, max_length=500)
+    color_depth: Optional[int] = None
+    disable_gfx: Optional[bool] = None
+    resize_method: Optional[str] = Field(default=None, max_length=20)
+    enable_wallpaper: Optional[bool] = None
+    enable_font_smoothing: Optional[bool] = None
+    disable_copy: Optional[bool] = None
+    disable_paste: Optional[bool] = None
+    enable_audio: Optional[bool] = None
+    enable_audio_input: Optional[bool] = None
+    enable_printing: Optional[bool] = None
+    timezone: Optional[str] = Field(default=None, max_length=50)
+    keyboard_layout: Optional[str] = Field(default=None, max_length=50)
     is_active: Optional[bool] = None
+
+    @field_validator("color_depth")
+    @classmethod
+    def check_color_depth(cls, v):
+        if v is not None and v not in (8, 16, 24):
+            raise ValueError("color_depth 必须是 8, 16, 24 或 null")
+        return v
+
+    @field_validator("resize_method")
+    @classmethod
+    def check_resize_method(cls, v):
+        if v is not None and v not in ("display-update", "reconnect"):
+            raise ValueError("resize_method 必须是 display-update 或 reconnect")
+        return v
 
 
 class AppAdminResponse(BaseModel):
@@ -101,6 +154,18 @@ class AppAdminResponse(BaseModel):
     remote_app: Optional[str] = None
     remote_app_dir: Optional[str] = None
     remote_app_args: Optional[str] = None
+    color_depth: Optional[int] = None
+    disable_gfx: bool = True
+    resize_method: str = "display-update"
+    enable_wallpaper: bool = False
+    enable_font_smoothing: bool = True
+    disable_copy: bool = False
+    disable_paste: bool = False
+    enable_audio: bool = True
+    enable_audio_input: bool = False
+    enable_printing: bool = False
+    timezone: Optional[str] = None
+    keyboard_layout: Optional[str] = None
     is_active: bool = True
 
 

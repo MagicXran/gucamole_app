@@ -147,9 +147,105 @@ function renderAppsTable() {
     });
 }
 
+function _chk(label, id, checked) {
+    return '<div class="form-group form-group--checkbox">' +
+        '<input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + '>' +
+        '<label for="' + id + '">' + escapeHtml(label) + '</label></div>';
+}
+
 function showAppModal(app) {
     var isEdit = !!app;
     var title = isEdit ? '编辑应用' : '新建应用';
+
+    // 高级参数默认值
+    var adv = {
+        color_depth: app ? app.color_depth : null,
+        disable_gfx: app ? app.disable_gfx : true,
+        resize_method: app ? (app.resize_method || 'display-update') : 'display-update',
+        enable_wallpaper: app ? app.enable_wallpaper : false,
+        enable_font_smoothing: app ? (app.enable_font_smoothing !== false && app.enable_font_smoothing !== 0) : true,
+        disable_copy: app ? app.disable_copy : false,
+        disable_paste: app ? app.disable_paste : false,
+        enable_audio: app ? (app.enable_audio !== false && app.enable_audio !== 0) : true,
+        enable_audio_input: app ? app.enable_audio_input : false,
+        enable_printing: app ? app.enable_printing : false,
+        timezone: app ? (app.timezone || '') : '',
+        keyboard_layout: app ? (app.keyboard_layout || '') : '',
+    };
+
+    // 色深选项
+    var depthOpts = [
+        {v: '', l: '自动'},
+        {v: '8', l: '8 位 (256色)'},
+        {v: '16', l: '16 位 (高彩)'},
+        {v: '24', l: '24 位 (真彩)'},
+    ];
+    var depthVal = adv.color_depth ? String(adv.color_depth) : '';
+    var depthSelect = '<div class="form-group"><label>色深</label><select id="app-color-depth">';
+    depthOpts.forEach(function(o) {
+        depthSelect += '<option value="' + o.v + '"' + (o.v === depthVal ? ' selected' : '') + '>' + o.l + '</option>';
+    });
+    depthSelect += '</select></div>';
+
+    // 时区选项
+    var tzOpts = ['', 'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Tokyo', 'Asia/Seoul', 'UTC', 'America/New_York', 'Europe/London'];
+    var tzSelect = '<div class="form-group"><label>时区</label><select id="app-timezone">';
+    tzOpts.forEach(function(tz) {
+        tzSelect += '<option value="' + tz + '"' + (tz === adv.timezone ? ' selected' : '') + '>' + (tz || '自动') + '</option>';
+    });
+    tzSelect += '</select></div>';
+
+    // 键盘布局选项
+    var kbOpts = [
+        {v: '', l: '自动'},
+        {v: 'en-us-qwerty', l: 'English (US)'},
+        {v: 'ja-jp-qwerty', l: '日本語'},
+        {v: 'de-de-qwertz', l: 'Deutsch'},
+        {v: 'fr-fr-azerty', l: 'Français'},
+        {v: 'zh-cn-qwerty', l: '中文'},
+        {v: 'ko-kr', l: '한국어'},
+    ];
+    var kbSelect = '<div class="form-group"><label>键盘布局</label><select id="app-keyboard-layout">';
+    kbOpts.forEach(function(o) {
+        kbSelect += '<option value="' + o.v + '"' + (o.v === adv.keyboard_layout ? ' selected' : '') + '>' + o.l + '</option>';
+    });
+    kbSelect += '</select></div>';
+
+    var advancedHtml =
+        '<details class="advanced-params">' +
+        '<summary>高级 RDP 参数</summary>' +
+        '<div class="advanced-params__body">' +
+        // 显示与性能
+        '<div class="advanced-params__section">' +
+        '<div class="advanced-params__section-title">显示与性能</div>' +
+        '<div class="form-row">' +
+        depthSelect +
+        formGroupSelect('缩放模式', 'app-resize-method', ['display-update', 'reconnect'], adv.resize_method) +
+        '</div>' +
+        _chk('禁用 GFX Pipeline (推荐)', 'app-disable-gfx', adv.disable_gfx) +
+        _chk('显示桌面壁纸', 'app-enable-wallpaper', adv.enable_wallpaper) +
+        _chk('字体平滑 (ClearType)', 'app-enable-font-smoothing', adv.enable_font_smoothing) +
+        '</div>' +
+        // 安全与剪贴板
+        '<div class="advanced-params__section">' +
+        '<div class="advanced-params__section-title">安全与剪贴板</div>' +
+        _chk('禁止远程→本地复制', 'app-disable-copy', adv.disable_copy) +
+        _chk('禁止本地→远程粘贴', 'app-disable-paste', adv.disable_paste) +
+        '</div>' +
+        // 音频与设备
+        '<div class="advanced-params__section">' +
+        '<div class="advanced-params__section-title">音频与设备</div>' +
+        _chk('音频输出', 'app-enable-audio', adv.enable_audio) +
+        _chk('麦克风输入', 'app-enable-audio-input', adv.enable_audio_input) +
+        _chk('虚拟打印机 (PDF)', 'app-enable-printing', adv.enable_printing) +
+        '</div>' +
+        // 本地化
+        '<div class="advanced-params__section">' +
+        '<div class="advanced-params__section-title">本地化</div>' +
+        '<div class="form-row">' +
+        tzSelect + kbSelect +
+        '</div></div>' +
+        '</div></details>';
 
     var html = '<div class="modal-overlay" onclick="closeModal(event)">' +
         '<div class="modal" onclick="event.stopPropagation()">' +
@@ -180,6 +276,7 @@ function showAppModal(app) {
         '<input type="checkbox" id="app-ignore-cert"' + ((!app || app.ignore_cert) ? ' checked' : '') + '>' +
         '<label for="app-ignore-cert">忽略证书错误</label>' +
         '</div>' +
+        advancedHtml +
         (isEdit ? '<div class="form-group form-group--checkbox">' +
         '<input type="checkbox" id="app-is-active"' + (app.is_active ? ' checked' : '') + '>' +
         '<label for="app-is-active">启用</label></div>' : '') +
@@ -197,6 +294,7 @@ function showAppModal(app) {
 }
 
 async function saveApp(appId) {
+    var depthVal = document.getElementById('app-color-depth').value;
     var data = {
         name: document.getElementById('app-name').value.trim(),
         icon: document.getElementById('app-icon').value.trim() || 'desktop',
@@ -210,6 +308,19 @@ async function saveApp(appId) {
         remote_app: document.getElementById('app-remote-app').value.trim(),
         remote_app_dir: document.getElementById('app-remote-dir').value.trim(),
         remote_app_args: document.getElementById('app-remote-args').value.trim(),
+        // RDP 高级参数
+        color_depth: depthVal ? parseInt(depthVal) : null,
+        disable_gfx: document.getElementById('app-disable-gfx').checked,
+        resize_method: document.getElementById('app-resize-method').value,
+        enable_wallpaper: document.getElementById('app-enable-wallpaper').checked,
+        enable_font_smoothing: document.getElementById('app-enable-font-smoothing').checked,
+        disable_copy: document.getElementById('app-disable-copy').checked,
+        disable_paste: document.getElementById('app-disable-paste').checked,
+        enable_audio: document.getElementById('app-enable-audio').checked,
+        enable_audio_input: document.getElementById('app-enable-audio-input').checked,
+        enable_printing: document.getElementById('app-enable-printing').checked,
+        timezone: document.getElementById('app-timezone').value || null,
+        keyboard_layout: document.getElementById('app-keyboard-layout').value || null,
     };
 
     if (!data.name || !data.hostname) {

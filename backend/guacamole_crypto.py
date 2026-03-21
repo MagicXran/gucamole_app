@@ -117,6 +117,19 @@ class GuacamoleCrypto:
         drive_name: str = "GuacDrive",
         drive_path: str = "",
         create_drive_path: bool = True,
+        # RDP 高级参数
+        color_depth: int = None,
+        disable_gfx: bool = True,
+        resize_method: str = "display-update",
+        enable_wallpaper: bool = False,
+        enable_font_smoothing: bool = True,
+        disable_copy: bool = False,
+        disable_paste: bool = False,
+        enable_audio: bool = True,
+        enable_audio_input: bool = False,
+        enable_printing: bool = False,
+        timezone: str = None,
+        keyboard_layout: str = None,
     ) -> dict:
         """构建 RDP 连接参数
 
@@ -124,18 +137,21 @@ class GuacamoleCrypto:
             name: 连接显示名称（同时作为 JSON 中的 key）
             hostname: RDP 目标主机
             port: RDP 端口
-            username: RDP 用户名
-            password: RDP 密码
-            domain: Windows 域
+            username/password/domain: RDP 认证
             security: 安全模式 (nla/tls/rdp/any)
             ignore_cert: 是否忽略证书
-            remote_app: RemoteApp 名称，如 "||notepad"
-            remote_app_dir: RemoteApp 工作目录
-            remote_app_args: RemoteApp 命令行参数
-            enable_drive: 启用虚拟磁盘（文件传输）
-            drive_name: 虚拟磁盘在 RDP 中显示的名称
-            drive_path: guacd 服务器上的存储路径（per-user）
-            create_drive_path: 自动创建不存在的路径
+            remote_app/remote_app_dir/remote_app_args: RemoteApp 配置
+            enable_drive/drive_name/drive_path/create_drive_path: 虚拟磁盘
+            color_depth: 色深 8/16/24, None=自动
+            disable_gfx: 禁用 GFX Pipeline (GUACAMOLE-2123)
+            resize_method: display-update / reconnect
+            enable_wallpaper: 显示桌面壁纸
+            enable_font_smoothing: ClearType
+            disable_copy/disable_paste: 剪贴板控制 (CLIPRDR)
+            enable_audio/enable_audio_input: 音频
+            enable_printing: 虚拟打印机
+            timezone: 如 Asia/Shanghai
+            keyboard_layout: 如 en-us-qwerty
 
         Returns:
             {name: {protocol, parameters}} 格式的 dict，可直接合并到 connections
@@ -145,9 +161,7 @@ class GuacamoleCrypto:
             "port": str(port),
             "security": security,
             "ignore-cert": "true" if ignore_cert else "false",
-            # GUACAMOLE-2123: GFX Pipeline 可能导致 RemoteApp 窗口不更新
-            "disable-gfx": "true",
-            "resize-method": "display-update",
+            "resize-method": resize_method,
         }
 
         if username:
@@ -162,6 +176,38 @@ class GuacamoleCrypto:
             params["remote-app-dir"] = remote_app_dir
         if remote_app_args:
             params["remote-app-args"] = remote_app_args
+
+        # 显示与性能
+        if color_depth in (8, 16, 24):
+            params["color-depth"] = str(color_depth)
+        if disable_gfx:
+            params["disable-gfx"] = "true"
+        if enable_wallpaper:
+            params["enable-wallpaper"] = "true"
+        if enable_font_smoothing:
+            params["enable-font-smoothing"] = "true"
+
+        # 安全与剪贴板
+        if disable_copy:
+            params["disable-copy"] = "true"
+        if disable_paste:
+            params["disable-paste"] = "true"
+
+        # 音频
+        if enable_audio:
+            params["enable-audio"] = "true"
+            if enable_audio_input:
+                params["enable-audio-input"] = "true"
+
+        # 设备
+        if enable_printing:
+            params["enable-printing"] = "true"
+
+        # 本地化
+        if timezone:
+            params["timezone"] = timezone
+        if keyboard_layout:
+            params["server-layout"] = keyboard_layout
 
         # Drive redirection: guacd 模拟虚拟磁盘，通过 RDP RDPDR 映射到远程会话
         # 远程端通过 \\tsclient\{drive_name} 访问；Download 子文件夹自动触发浏览器下载

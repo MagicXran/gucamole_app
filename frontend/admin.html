@@ -238,6 +238,37 @@
         }
         .monitor-card__dot--green { background: #4caf50; box-shadow: 0 0 4px #4caf50; }
         .monitor-card__dot--gray { background: #bbb; }
+
+        /* 高级参数折叠面板 */
+        .advanced-params {
+            margin: 0.8rem 0;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .advanced-params summary {
+            padding: 0.6rem 0.8rem;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #555;
+            background: #f8f9fa;
+            user-select: none;
+        }
+        .advanced-params summary:hover { color: #1a73e8; }
+        .advanced-params[open] summary { border-bottom: 1px solid #e0e0e0; }
+        .advanced-params__body {
+            padding: 0.8rem;
+        }
+        .advanced-params__section {
+            margin-bottom: 0.6rem;
+        }
+        .advanced-params__section-title {
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 0.3rem;
+            font-weight: 500;
+        }
     </style>
 </head>
 <body>

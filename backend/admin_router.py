@@ -12,6 +12,7 @@ from backend.database import db
 from backend.auth import require_admin
 from backend.audit import log_action
 from backend.router import guac_service
+from backend.app_launch_presets import prepare_launch_payload
 from backend.models import (
     UserInfo,
     AppCreateRequest, AppUpdateRequest, AppAdminResponse,
@@ -41,12 +42,17 @@ def create_app(
     admin: UserInfo = Depends(require_admin),
 ):
     """创建应用"""
+    try:
+        launch_payload = prepare_launch_payload(req.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
     db.execute_update(
         """
         INSERT INTO remote_app
             (name, icon, protocol, hostname, port,
              rdp_username, rdp_password, domain, security, ignore_cert,
              remote_app, remote_app_dir, remote_app_args,
+             launch_preset, server_file_path, launch_arg_template,
              color_depth, disable_gfx, resize_method,
              enable_wallpaper, enable_font_smoothing,
              disable_copy, disable_paste,
@@ -56,6 +62,7 @@ def create_app(
             (%(name)s, %(icon)s, %(protocol)s, %(hostname)s, %(port)s,
              %(rdp_username)s, %(rdp_password)s, %(domain)s, %(security)s, %(ignore_cert)s,
              %(remote_app)s, %(remote_app_dir)s, %(remote_app_args)s,
+             %(launch_preset)s, %(server_file_path)s, %(launch_arg_template)s,
              %(color_depth)s, %(disable_gfx)s, %(resize_method)s,
              %(enable_wallpaper)s, %(enable_font_smoothing)s,
              %(disable_copy)s, %(disable_paste)s,
@@ -69,9 +76,12 @@ def create_app(
             "rdp_password": req.rdp_password or None,
             "domain": req.domain, "security": req.security,
             "ignore_cert": 1 if req.ignore_cert else 0,
-            "remote_app": req.remote_app or None,
-            "remote_app_dir": req.remote_app_dir or None,
-            "remote_app_args": req.remote_app_args or None,
+            "remote_app": launch_payload.get("remote_app"),
+            "remote_app_dir": launch_payload.get("remote_app_dir"),
+            "remote_app_args": launch_payload.get("remote_app_args"),
+            "launch_preset": launch_payload.get("launch_preset"),
+            "server_file_path": launch_payload.get("server_file_path"),
+            "launch_arg_template": launch_payload.get("launch_arg_template"),
             "color_depth": req.color_depth,
             "disable_gfx": 1 if req.disable_gfx else 0,
             "resize_method": req.resize_method,
@@ -116,6 +126,32 @@ def update_app(
     updates = req.model_dump(exclude_none=True)
     if not updates:
         return existing
+
+    launch_keys = {
+        "launch_preset",
+        "server_file_path",
+        "launch_arg_template",
+        "remote_app",
+        "remote_app_dir",
+        "remote_app_args",
+    }
+    launch_updates = {key: updates.pop(key) for key in list(updates) if key in launch_keys}
+    existing_for_launch = existing
+    effective_preset = launch_updates.get("launch_preset", existing.get("launch_preset"))
+    if not effective_preset:
+        effective_preset = "custom"
+    if (
+        "server_file_path" in launch_updates
+        and "remote_app_dir" not in launch_updates
+        and effective_preset in ("comsol_open_file", "generic_file_template")
+    ):
+        existing_for_launch = dict(existing)
+        existing_for_launch["remote_app_dir"] = None
+    try:
+        prepared_launch = prepare_launch_payload(launch_updates, existing=existing_for_launch)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+    updates.update({key: prepared_launch.get(key) for key in launch_keys if key in prepared_launch})
 
     # 构建动态 SET 子句
     _BOOL_COLUMNS = {

@@ -28,6 +28,50 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
+function escapeAttr(str) {
+    return String(str === undefined || str === null ? '' : str)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function normalizeWindowsPreviewPath(path) {
+    return String(path === undefined || path === null ? '' : path).trim().replace(/\//g, '\\');
+}
+
+function deriveWindowsParentDir(path) {
+    var normalized = normalizeWindowsPreviewPath(path);
+    var driveMatch;
+    var uncParts;
+    var uncTail;
+
+    if (!normalized) return '';
+
+    if (/^[A-Za-z]:\\[^\\]+$/.test(normalized)) {
+        return normalized.slice(0, 3);
+    }
+
+    driveMatch = normalized.match(/^([A-Za-z]:\\)(.+)$/);
+    if (driveMatch) {
+        return driveMatch[2].lastIndexOf('\\') === -1
+            ? driveMatch[1]
+            : driveMatch[1] + driveMatch[2].slice(0, driveMatch[2].lastIndexOf('\\'));
+    }
+
+    if (normalized.indexOf('\\\\') === 0) {
+        uncParts = normalized.slice(2).split('\\');
+        if (uncParts.length < 2) return normalized;
+        if (uncParts.length <= 3) {
+            return '\\\\' + uncParts[0] + '\\' + uncParts[1] + '\\';
+        }
+        uncTail = uncParts.slice(2, -1).join('\\');
+        return '\\\\' + uncParts[0] + '\\' + uncParts[1] + '\\' + uncTail;
+    }
+
+    return normalized.lastIndexOf('\\') > 0 ? normalized.slice(0, normalized.lastIndexOf('\\')) : '';
+}
+
 // ---- Toast 通知 ----
 function showToast(msg, type) {
     var existing = document.querySelector('.toast');
@@ -156,6 +200,9 @@ function _chk(label, id, checked) {
 function showAppModal(app) {
     var isEdit = !!app;
     var title = isEdit ? '编辑应用' : '新建应用';
+    var launchPreset = app ? (app.launch_preset || 'custom') : 'custom';
+    var serverFilePath = app ? (app.server_file_path || '') : '';
+    var launchArgTemplate = app ? (app.launch_arg_template || '') : '';
 
     // 高级参数默认值
     var adv = {
@@ -210,6 +257,29 @@ function showAppModal(app) {
         kbSelect += '<option value="' + o.v + '"' + (o.v === adv.keyboard_layout ? ' selected' : '') + '>' + o.l + '</option>';
     });
     kbSelect += '</select></div>';
+
+    var presetOpts = [
+        {v: 'custom', l: 'custom'},
+        {v: 'comsol_open_file', l: 'comsol_open_file'},
+        {v: 'generic_file_template', l: 'generic_file_template'},
+    ];
+    var presetSelect = '<div class="form-group">' +
+        '<label for="app-launch-preset">启动预设</label>' +
+        '<select id="app-launch-preset">';
+    presetOpts.forEach(function(o) {
+        presetSelect += '<option value="' + o.v + '"' + (o.v === launchPreset ? ' selected' : '') + '>' + o.l + '</option>';
+    });
+    presetSelect += '</select></div>';
+
+    var serverFileGroup = '<div class="form-group" id="app-server-file-wrap">' +
+        '<label for="app-server-file">固定文件路径</label>' +
+        '<input type="text" id="app-server-file" value="' + escapeAttr(serverFilePath) + '">' +
+        '</div>';
+
+    var launchTemplateGroup = '<div class="form-group" id="app-launch-template-wrap">' +
+        '<label for="app-launch-template">通用参数模板</label>' +
+        '<input type="text" id="app-launch-template" value="' + escapeAttr(launchArgTemplate) + '">' +
+        '</div>';
 
     var advancedHtml =
         '<details class="advanced-params">' +
@@ -267,6 +337,11 @@ function showAppModal(app) {
         formGroup('域名', 'app-domain', app ? (app.domain || '') : '') +
         formGroupSelect('安全模式', 'app-security', ['nla', 'tls', 'rdp', 'any'], app ? (app.security || 'nla') : 'nla') +
         '</div>' +
+        presetSelect +
+        '<div class="form-row" id="app-launch-extra-row">' +
+        serverFileGroup +
+        launchTemplateGroup +
+        '</div>' +
         formGroup('RemoteApp', 'app-remote-app', app ? (app.remote_app || '') : '', 'text', false, '如 ||notepad') +
         '<div class="form-row">' +
         formGroup('工作目录', 'app-remote-dir', app ? (app.remote_app_dir || '') : '') +
@@ -287,6 +362,68 @@ function showAppModal(app) {
         '</form></div></div>';
 
     document.getElementById('modal-container').innerHTML = html;
+
+    var presetEl = document.getElementById('app-launch-preset');
+    var serverFileEl = document.getElementById('app-server-file');
+    var launchTemplateEl = document.getElementById('app-launch-template');
+    var serverFileWrap = document.getElementById('app-server-file-wrap');
+    var launchTemplateWrap = document.getElementById('app-launch-template-wrap');
+    var extraRow = document.getElementById('app-launch-extra-row');
+    var remoteArgsEl = document.getElementById('app-remote-args');
+    var remoteDirEl = document.getElementById('app-remote-dir');
+    var lastCustomArgs = remoteArgsEl.value;
+    var initialDerivedDir = deriveWindowsParentDir(serverFileEl.value);
+    var lastAutoDerivedDir = initialDerivedDir && normalizeWindowsPreviewPath(remoteDirEl.value) === initialDerivedDir
+        ? initialDerivedDir
+        : '';
+
+    function syncLaunchPresetUi() {
+        var presetVal = presetEl.value || 'custom';
+        var fileVal = serverFileEl.value.trim();
+        var normalizedFileVal = normalizeWindowsPreviewPath(fileVal);
+        var templateVal = launchTemplateEl.value;
+        var isCustom = presetVal === 'custom';
+        var isComsol = presetVal === 'comsol_open_file';
+        var isGeneric = presetVal === 'generic_file_template';
+        var currentDir = normalizeWindowsPreviewPath(remoteDirEl.value);
+        var derivedDir = deriveWindowsParentDir(fileVal);
+
+        if (isCustom) {
+            remoteArgsEl.readOnly = false;
+            if (lastCustomArgs !== null && remoteArgsEl.value !== lastCustomArgs) {
+                remoteArgsEl.value = lastCustomArgs;
+            }
+        } else {
+            if (!remoteArgsEl.readOnly) {
+                lastCustomArgs = remoteArgsEl.value;
+            }
+            remoteArgsEl.readOnly = true;
+            if (isComsol) {
+                remoteArgsEl.value = normalizedFileVal ? ('-open "' + normalizedFileVal + '"') : '';
+            } else if (isGeneric) {
+                var preview = templateVal || '';
+                preview = preview.replace(/\{file\}/g, normalizedFileVal);
+                remoteArgsEl.value = preview;
+            } else {
+                remoteArgsEl.value = '';
+            }
+        }
+
+        if (extraRow) extraRow.style.display = isCustom ? 'none' : '';
+        serverFileWrap.style.display = isCustom ? 'none' : '';
+        launchTemplateWrap.style.display = isGeneric ? '' : 'none';
+
+        if (!currentDir || (lastAutoDerivedDir && currentDir === lastAutoDerivedDir)) {
+            remoteDirEl.value = derivedDir;
+            lastAutoDerivedDir = derivedDir;
+        }
+    }
+
+    presetEl.addEventListener('change', syncLaunchPresetUi);
+    serverFileEl.addEventListener('input', syncLaunchPresetUi);
+    launchTemplateEl.addEventListener('input', syncLaunchPresetUi);
+    syncLaunchPresetUi();
+
     document.getElementById('app-form').onsubmit = function(e) {
         e.preventDefault();
         saveApp(isEdit ? app.id : null);
@@ -308,6 +445,9 @@ async function saveApp(appId) {
         remote_app: document.getElementById('app-remote-app').value.trim(),
         remote_app_dir: document.getElementById('app-remote-dir').value.trim(),
         remote_app_args: document.getElementById('app-remote-args').value.trim(),
+        launch_preset: document.getElementById('app-launch-preset').value,
+        server_file_path: document.getElementById('app-server-file').value.trim() || null,
+        launch_arg_template: document.getElementById('app-launch-template').value.trim() || null,
         // RDP 高级参数
         color_depth: depthVal ? parseInt(depthVal) : null,
         disable_gfx: document.getElementById('app-disable-gfx').checked,
@@ -903,10 +1043,10 @@ function formGroup(label, id, value, type, required, placeholder) {
     type = type || 'text';
     value = value === undefined || value === null ? '' : value;
     var req = required ? ' required' : '';
-    var ph = placeholder ? ' placeholder="' + escapeHtml(placeholder) + '"' : '';
+    var ph = placeholder ? ' placeholder="' + escapeAttr(placeholder) + '"' : '';
     return '<div class="form-group">' +
         '<label for="' + id + '">' + escapeHtml(label) + '</label>' +
-        '<input type="' + type + '" id="' + id + '" value="' + escapeHtml(String(value)) + '"' + req + ph + '>' +
+        '<input type="' + type + '" id="' + id + '" value="' + escapeAttr(value) + '"' + req + ph + '>' +
         '</div>';
 }
 

@@ -66,6 +66,9 @@ class AppCreateRequest(BaseModel):
     remote_app: str = Field(default="", max_length=200)
     remote_app_dir: str = Field(default="", max_length=500)
     remote_app_args: str = Field(default="", max_length=500)
+    launch_preset: str = Field(default="custom", max_length=50)
+    server_file_path: Optional[str] = Field(default=None, max_length=500)
+    launch_arg_template: Optional[str] = Field(default=None, max_length=500)
     # RDP 高级参数
     color_depth: Optional[int] = None
     disable_gfx: bool = True
@@ -109,6 +112,9 @@ class AppUpdateRequest(BaseModel):
     remote_app: Optional[str] = Field(default=None, max_length=200)
     remote_app_dir: Optional[str] = Field(default=None, max_length=500)
     remote_app_args: Optional[str] = Field(default=None, max_length=500)
+    launch_preset: Optional[str] = Field(default=None, max_length=50)
+    server_file_path: Optional[str] = Field(default=None, max_length=500)
+    launch_arg_template: Optional[str] = Field(default=None, max_length=500)
     color_depth: Optional[int] = None
     disable_gfx: Optional[bool] = None
     resize_method: Optional[str] = Field(default=None, max_length=20)
@@ -154,6 +160,9 @@ class AppAdminResponse(BaseModel):
     remote_app: Optional[str] = None
     remote_app_dir: Optional[str] = None
     remote_app_args: Optional[str] = None
+    launch_preset: str = "custom"
+    server_file_path: Optional[str] = None
+    launch_arg_template: Optional[str] = None
     color_depth: Optional[int] = None
     disable_gfx: bool = True
     resize_method: str = "display-update"

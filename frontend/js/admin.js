@@ -28,6 +28,14 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
+function escapeAttr(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 // ---- Toast 通知 ----
 function showToast(msg, type) {
     var existing = document.querySelector('.toast');
@@ -441,7 +449,7 @@ function showUserModal(u) {
         '<div class="modal" onclick="event.stopPropagation()">' +
         '<div class="modal__title">' + escapeHtml(title) + '</div>' +
         '<form id="user-form">' +
-        (isEdit ? '<div class="form-group"><label>用户名</label><input type="text" value="' + escapeHtml(u.username) + '" disabled></div>' :
+        (isEdit ? '<div class="form-group"><label>用户名</label><input type="text" value="' + escapeAttr(u.username) + '" disabled></div>' :
             formGroup('用户名', 'user-username', '', 'text', true)) +
         formGroup(isEdit ? '新密码（留空不改）' : '密码', 'user-password', '', 'password', !isEdit) +
         formGroup('显示名称', 'user-display', isEdit ? u.display_name : '') +
@@ -903,17 +911,17 @@ function formGroup(label, id, value, type, required, placeholder) {
     type = type || 'text';
     value = value === undefined || value === null ? '' : value;
     var req = required ? ' required' : '';
-    var ph = placeholder ? ' placeholder="' + escapeHtml(placeholder) + '"' : '';
+    var ph = placeholder ? ' placeholder="' + escapeAttr(placeholder) + '"' : '';
     return '<div class="form-group">' +
         '<label for="' + id + '">' + escapeHtml(label) + '</label>' +
-        '<input type="' + type + '" id="' + id + '" value="' + escapeHtml(String(value)) + '"' + req + ph + '>' +
+        '<input type="' + type + '" id="' + id + '" value="' + escapeAttr(value) + '"' + req + ph + '>' +
         '</div>';
 }
 
 function formGroupSelect(label, id, options, selected) {
     var opts = options.map(function(opt) {
         var sel = opt === selected ? ' selected' : '';
-        return '<option value="' + escapeHtml(opt) + '"' + sel + '>' + escapeHtml(opt) + '</option>';
+        return '<option value="' + escapeAttr(opt) + '"' + sel + '>' + escapeHtml(opt) + '</option>';
     }).join('');
     return '<div class="form-group">' +
         '<label for="' + id + '">' + escapeHtml(label) + '</label>' +

@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS remote_app (
     enable_printing TINYINT(1)    DEFAULT 0             COMMENT '虚拟打印机(PDF)',
     timezone        VARCHAR(50)   DEFAULT NULL          COMMENT '时区, 如 Asia/Shanghai',
     keyboard_layout VARCHAR(50)   DEFAULT NULL          COMMENT '键盘布局',
+    max_concurrent_sessions INT   DEFAULT NULL          COMMENT '应用级最大并发会话数, NULL/<=0=不限制',
+    max_concurrent_per_user INT   DEFAULT NULL          COMMENT '单用户最大并发会话数, NULL/<=0=不限制',
+    queue_enabled   TINYINT(1)    NOT NULL DEFAULT 0    COMMENT '达到上限后是否进入排队',
+    queue_timeout_seconds INT     NOT NULL DEFAULT 300  COMMENT '排队条目过期秒数',
     is_active       TINYINT(1)    DEFAULT 1,
     created_at      DATETIME      DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -89,6 +93,19 @@ CREATE TABLE IF NOT EXISTS portal_user (
     is_active       TINYINT(1)    DEFAULT 1,
     created_at      DATETIME      DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 启动排队表（资源治理基础）
+CREATE TABLE IF NOT EXISTS launch_queue (
+    id             BIGINT PRIMARY KEY AUTO_INCREMENT,
+    app_id         BIGINT      NOT NULL,
+    user_id        BIGINT      NOT NULL,
+    status         VARCHAR(20) NOT NULL DEFAULT 'waiting' COMMENT 'waiting/expired/cancelled',
+    created_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_app_status_created (app_id, status, created_at, id),
+    INDEX idx_user_status (user_id, status),
+    FOREIGN KEY (app_id) REFERENCES remote_app(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 审计日志表

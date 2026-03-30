@@ -1,4 +1,4 @@
-﻿"""
+"""
 FastAPI 路由 - RemoteApp 门户 API
 """
 
@@ -14,8 +14,11 @@ from backend.guacamole_crypto import GuacamoleCrypto
 from backend.guacamole_service import GuacamoleService
 from backend.auth import get_current_user
 from backend.audit import log_action
+import backend.resource_governance as rg
 
 logger = logging.getLogger(__name__)
+_monitor_cfg = CONFIG.get("monitor", {})
+SESSION_TIMEOUT_SECONDS = _monitor_cfg.get("session_timeout_seconds", 120)
 
 router = APIRouter(
     prefix=CONFIG["api"]["prefix"],
@@ -100,6 +103,15 @@ def _build_all_connections(user_id: int) -> dict:
     return connections
 
 
+def _queued_launch_response(position: int) -> LaunchResponse:
+    return LaunchResponse(
+        status="queued",
+        queue_position=position,
+        retry_after_seconds=5,
+        message="已进入等待队列，请稍后重试",
+    )
+
+
 @router.get("/", response_model=List[RemoteAppResponse])
 def list_apps(user: UserInfo = Depends(get_current_user)):
     """获取当前用户可访问的 RemoteApp 列表"""
@@ -137,7 +149,10 @@ async def launch_app(
 
     # 2. 验证目标应用存在
     app_check = """
-        SELECT id, name FROM remote_app WHERE id = %(app_id)s AND is_active = 1
+        SELECT id, name, queue_enabled, max_concurrent_sessions,
+               max_concurrent_per_user, queue_timeout_seconds
+        FROM remote_app
+        WHERE id = %(app_id)s AND is_active = 1
     """
     app = db.execute_query(app_check, {"app_id": app_id}, fetch_one=True)
     if not app:
@@ -146,7 +161,39 @@ async def launch_app(
             detail="应用不存在或已禁用",
         )
 
-    # 3. 构建该用户所有可用应用的连接参数
+    # 3. 资源治理：默认关闭，开启后才检查并发/排队
+    if rg.governance_enabled(app):
+        rg.expire_stale_queue_entries(db)
+        counts = rg.get_active_counts(
+            db,
+            app_id=app_id,
+            user_id=user.user_id,
+            timeout_seconds=SESSION_TIMEOUT_SECONDS,
+        )
+        waiting_entry = rg.get_waiting_entry(db, app_id=app_id, user_id=user.user_id)
+        queue_has_waiting = rg.has_waiting_entries(db, app_id=app_id)
+        limit_hit = rg.limits_reached(
+            active_count=counts["active_count"],
+            user_active_count=counts["user_active_count"],
+            app_row=app,
+        )
+
+        if waiting_entry:
+            if not limit_hit and rg.is_queue_head(db, app_id=app_id, user_id=user.user_id):
+                rg.remove_waiting_entry(db, app_id=app_id, user_id=user.user_id)
+            else:
+                queue_info = rg.enqueue_or_refresh(db, app_id=app_id, user_id=user.user_id)
+                return _queued_launch_response(queue_info["position"])
+        elif limit_hit or queue_has_waiting:
+            if not bool(app.get("queue_enabled", 0)):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="当前应用占用已满，请稍后再试",
+                )
+            queue_info = rg.enqueue_or_refresh(db, app_id=app_id, user_id=user.user_id)
+            return _queued_launch_response(queue_info["position"])
+
+    # 4. 构建该用户所有可用应用的连接参数
     #    全部打包到一个 token，确保多标签共享同一 session
     connection_name = f"app_{app_id}"
     connections = _build_all_connections(user.user_id)
@@ -156,7 +203,7 @@ async def launch_app(
             detail="连接构建异常",
         )
 
-    # 4. 复用或创建 session → 拿 URL
+    # 5. 复用或创建 session → 拿 URL
     #    动态跟随请求的 Host，确保 redirect 指向客户端实际访问的地址
     host = request.headers.get("host") or request.headers.get("x-forwarded-host", "")
     scheme = request.headers.get("x-forwarded-proto", "http")
@@ -177,7 +224,7 @@ async def launch_app(
             detail="远程连接服务暂时不可用",
         )
 
-    # 5. 审计: 启动应用
+    # 6. 审计: 启动应用
     client_ip = request.client.host if request.client else "unknown"
     log_action(
         user_id=user.user_id, username=user.username, action="launch_app",
@@ -185,7 +232,7 @@ async def launch_app(
         ip_address=client_ip,
     )
 
-    # 6. 创建活跃会话记录 (实时监控)
+    # 7. 创建活跃会话记录 (实时监控)
     session_id = str(uuid.uuid4())
     try:
         db.execute_update(
@@ -203,4 +250,5 @@ async def launch_app(
         redirect_url=redirect_url,
         connection_name=connection_name,
         session_id=session_id,
+        status="ready",
     )

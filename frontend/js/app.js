@@ -1,4 +1,4 @@
-﻿/**
+/**
  * RemoteApp 门户 - 前端逻辑
  */
 
@@ -53,6 +53,152 @@ async function fetchApps() {
 // ---- 防重复点击锁 ----
 var _launchLock = {};
 
+function _writeLaunchPage(win, title, bodyHtml, bodyStyle) {
+    if (!win || win.closed) return;
+    win.document.open();
+    win.document.write(
+        '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">' +
+        '<title>' + title + '</title>' +
+        '<style>' +
+        '*{margin:0;padding:0;box-sizing:border-box}' +
+        'body{' + bodyStyle + '}' +
+        '.spinner{width:40px;height:40px;margin:0 auto 1rem;' +
+        'border:4px solid rgba(255,255,255,0.2);border-top-color:#fff;' +
+        'border-radius:50%;animation:spin .8s linear infinite}' +
+        '.queue-badge{display:inline-block;padding:0.35rem 0.7rem;border-radius:999px;' +
+        'background:rgba(255,255,255,0.12);margin-bottom:1rem;font-size:0.9rem}' +
+        '.queue-position{font-size:3rem;font-weight:700;line-height:1;margin:0.75rem 0}' +
+        '.queue-note{margin-top:0.75rem;color:rgba(255,255,255,0.72);font-size:0.9rem}' +
+        '@keyframes spin{to{transform:rotate(360deg)}}' +
+        '</style></head><body>' +
+        bodyHtml +
+        '</body></html>'
+    );
+    win.document.close();
+}
+
+function _showLaunchLoading(win, appName) {
+    var safeName = escapeHtml(appName);
+    _writeLaunchPage(
+        win,
+        safeName + ' - 加载中...',
+        '<div style="text-align:center"><div class="spinner"></div>' +
+        '<p>正在启动 ' + safeName + '...</p></div>',
+        'display:flex;align-items:center;justify-content:center;height:100vh;' +
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;' +
+        'background:#1a1a2e;color:#fff'
+    );
+}
+
+function _showLaunchQueue(win, appName, data) {
+    var safeName = escapeHtml(appName);
+    var position = parseInt(data.queue_position, 10) || 0;
+    var retry = parseInt(data.retry_after_seconds, 10) || 5;
+    var message = escapeHtml(data.message || '当前资源繁忙，正在等待空闲槽位');
+    _writeLaunchPage(
+        win,
+        safeName + ' - 等待队列',
+        '<div style="max-width:480px;padding:2rem;text-align:center">' +
+        '<div class="queue-badge">排队中</div>' +
+        '<h1 style="font-size:1.8rem;font-weight:600">' + safeName + '</h1>' +
+        '<div class="queue-position">#' + position + '</div>' +
+        '<p>' + message + '</p>' +
+        '<p class="queue-note">系统将每 ' + retry + ' 秒自动重试一次，无需手动刷新。</p>' +
+        '</div>',
+        'display:flex;align-items:center;justify-content:center;height:100vh;' +
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;' +
+        'background:linear-gradient(135deg,#0f172a,#1d4ed8);color:#fff'
+    );
+}
+
+function _showLaunchError(win, msg) {
+    var safeMsg = escapeHtml(msg || '未知错误');
+    _writeLaunchPage(
+        win,
+        '启动失败',
+        '<div style="text-align:center">' +
+        '<p style="font-size:1.2rem">启动失败</p>' +
+        '<p style="margin-top:.5rem;color:#aaa">' + safeMsg + '</p>' +
+        '</div>',
+        'display:flex;align-items:center;justify-content:center;height:100vh;' +
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;' +
+        'background:#1a1a2e;color:#e74c3c'
+    );
+}
+
+function _showLaunchFrame(win, appName, data) {
+    var safeName = escapeHtml(appName);
+    win.document.open();
+    win.document.write(
+        '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">' +
+        '<title>' + safeName + '</title>' +
+        '<style>html,body{margin:0;padding:0;overflow:hidden}</style></head>' +
+        '<body><iframe id="guac" src="' + escapeHtml(data.redirect_url) + '" ' +
+        'style="width:100vw;height:100vh;border:none" ' +
+        'allow="clipboard-read;clipboard-write" ' +
+        'onload="this.focus()"></iframe>' +
+        '<script>' +
+        'var f=document.getElementById("guac");' +
+        'document.body.addEventListener("click",function(){f.focus()});' +
+        'document.addEventListener("keydown",function(e){' +
+        '  if(document.activeElement!==f){e.preventDefault();f.focus();}' +
+        '},true);' +
+        'var wb=new Blob(["setInterval(function(){postMessage(1)},30000)"],' +
+        '{type:"text/javascript"});' +
+        'var wk=new Worker(URL.createObjectURL(wb));' +
+        'wk.onmessage=function(){' +
+        '  try{f.contentWindow.postMessage("keepalive","*")}catch(e){}' +
+        '};' +
+        'var _sid="' + (data.session_id || '') + '";' +
+        'var _token="' + getToken() + '";' +
+        'if(_sid){' +
+        '  var _hbUrl="/api/monitor/heartbeat";' +
+        '  var _endUrl="/api/monitor/session-end";' +
+        '  setInterval(function(){' +
+        '    fetch(_hbUrl,{method:"POST",' +
+        '      headers:{"Authorization":"Bearer "+_token,"Content-Type":"application/json"},' +
+        '      body:JSON.stringify({session_id:_sid})' +
+        '    }).catch(function(){});' +
+        '  },30000);' +
+        '  window.addEventListener("beforeunload",function(){' +
+        '    navigator.sendBeacon(_endUrl,' +
+        '      new Blob([JSON.stringify({session_id:_sid})],{type:"application/json"})' +
+        '    );' +
+        '  });' +
+        '}' +
+        '</script>' +
+        '</body></html>'
+    );
+    win.document.close();
+}
+
+async function _pollQueuedLaunch(win, appId, appName, retryAfterSeconds) {
+    var waitMs = Math.max(parseInt(retryAfterSeconds, 10) || 5, 1) * 1000;
+    window.setTimeout(async function() {
+        if (!win || win.closed) return;
+        try {
+            var resp = await fetch(API_BASE + '/launch/' + appId, {
+                method: 'POST',
+                headers: authHeaders(),
+            });
+            if (resp.status === 401) { win.close(); logout(); return; }
+            if (!resp.ok) {
+                var err = await resp.json().catch(function() { return {}; });
+                throw new Error(err.detail || 'HTTP ' + resp.status);
+            }
+            var data = await resp.json();
+            if (data.status === 'queued') {
+                _showLaunchQueue(win, appName, data);
+                _pollQueuedLaunch(win, appId, appName, data.retry_after_seconds);
+                return;
+            }
+            _showLaunchFrame(win, appName, data);
+        } catch (e) {
+            _showLaunchError(win, e.message || '未知错误');
+        }
+    }, waitMs);
+}
+
 /**
  * 启动应用
  * 使用 about:blank + iframe 隐藏 Guacamole 内部 URL，
@@ -70,27 +216,7 @@ async function launchApp(appId, appName) {
         return;
     }
 
-    var safeName = escapeHtml(appName);
-
-    // 立即写入加载状态页面
-    win.document.write(
-        '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">' +
-        '<title>' + safeName + ' - \u52A0\u8F7D\u4E2D...</title>' +
-        '<style>' +
-        '*{margin:0;padding:0}' +
-        'body{display:flex;align-items:center;justify-content:center;height:100vh;' +
-        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;' +
-        'background:#1a1a2e;color:#fff}' +
-        '.spinner{width:40px;height:40px;margin:0 auto 1rem;' +
-        'border:4px solid rgba(255,255,255,0.2);border-top-color:#fff;' +
-        'border-radius:50%;animation:spin .8s linear infinite}' +
-        '@keyframes spin{to{transform:rotate(360deg)}}' +
-        '</style></head><body>' +
-        '<div style="text-align:center"><div class="spinner"></div>' +
-        '<p>\u6B63\u5728\u542F\u52A8 ' + safeName + '...</p></div>' +
-        '</body></html>'
-    );
-    win.document.close();
+    _showLaunchLoading(win, appName);
 
     try {
         var resp = await fetch(API_BASE + '/launch/' + appId, {
@@ -106,71 +232,14 @@ async function launchApp(appId, appName) {
         }
 
         var data = await resp.json();
-
-        // 用 iframe 加载 Guacamole —— 地址栏保持 about:blank
-        // 关键: iframe 必须获得焦点，否则键盘事件落在 parent document 上，Guacamole 收不到
-        win.document.open();
-        win.document.write(
-            '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">' +
-            '<title>' + safeName + '</title>' +
-            '<style>html,body{margin:0;padding:0;overflow:hidden}</style></head>' +
-            '<body><iframe id="guac" src="' + escapeHtml(data.redirect_url) + '" ' +
-            'style="width:100vw;height:100vh;border:none" ' +
-            'allow="clipboard-read;clipboard-write" ' +
-            'onload="this.focus()"></iframe>' +
-            '<script>' +
-            'var f=document.getElementById("guac");' +
-            'document.body.addEventListener("click",function(){f.focus()});' +
-            'document.addEventListener("keydown",function(e){' +
-            '  if(document.activeElement!==f){e.preventDefault();f.focus();}' +
-            '},true);' +
-            // Web Worker keepalive: 防止浏览器后台节流冻结 Guacamole 的 NOP ping
-            'var wb=new Blob(["setInterval(function(){postMessage(1)},30000)"],' +
-            '{type:"text/javascript"});' +
-            'var wk=new Worker(URL.createObjectURL(wb));' +
-            'wk.onmessage=function(){' +
-            '  try{f.contentWindow.postMessage("keepalive","*")}catch(e){}' +
-            '};' +
-            // 实时监控: 心跳 + 关闭检测
-            'var _sid="' + (data.session_id || '') + '";' +
-            'var _token="' + getToken() + '";' +
-            'if(_sid){' +
-            '  var _hbUrl="/api/monitor/heartbeat";' +
-            '  var _endUrl="/api/monitor/session-end";' +
-            '  setInterval(function(){' +
-            '    fetch(_hbUrl,{method:"POST",' +
-            '      headers:{"Authorization":"Bearer "+_token,"Content-Type":"application/json"},' +
-            '      body:JSON.stringify({session_id:_sid})' +
-            '    }).catch(function(){});' +
-            '  },30000);' +
-            '  window.addEventListener("beforeunload",function(){' +
-            '    navigator.sendBeacon(_endUrl,' +
-            '      new Blob([JSON.stringify({session_id:_sid})],{type:"application/json"})' +
-            '    );' +
-            '  });' +
-            '}' +
-            '</script>' +
-            '</body></html>'
-        );
-        win.document.close();
+        if (data.status === 'queued') {
+            _showLaunchQueue(win, appName, data);
+            _pollQueuedLaunch(win, appId, appName, data.retry_after_seconds);
+        } else {
+            _showLaunchFrame(win, appName, data);
+        }
     } catch (e) {
-        var safeMsg = escapeHtml(e.message || '未知错误');
-        win.document.open();
-        win.document.write(
-            '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">' +
-            '<title>\u542F\u52A8\u5931\u8D25</title>' +
-            '<style>' +
-            '*{margin:0;padding:0}' +
-            'body{display:flex;align-items:center;justify-content:center;height:100vh;' +
-            'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;' +
-            'background:#1a1a2e;color:#e74c3c}' +
-            '</style></head><body>' +
-            '<div style="text-align:center">' +
-            '<p style="font-size:1.2rem">\u542F\u52A8\u5931\u8D25</p>' +
-            '<p style="margin-top:.5rem;color:#aaa">' + safeMsg + '</p>' +
-            '</div></body></html>'
-        );
-        win.document.close();
+        _showLaunchError(win, e.message || '未知错误');
     } finally {
         delete _launchLock[appId];
     }

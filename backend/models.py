@@ -1,4 +1,4 @@
-﻿"""
+"""
 Pydantic 数据模型
 """
 
@@ -21,9 +21,13 @@ class RemoteAppResponse(BaseModel):
 
 class LaunchResponse(BaseModel):
     """启动连接响应"""
-    redirect_url: str = Field(..., description="Guacamole 客户端重定向 URL")
-    connection_name: str = Field(..., description="连接名称")
+    redirect_url: str = Field("", description="Guacamole 客户端重定向 URL")
+    connection_name: str = Field("", description="连接名称")
     session_id: str = Field("", description="实时监控会话 ID")
+    status: str = Field("ready", description="ready/queued")
+    queue_position: int = Field(0, ge=0, description="队列中的位置")
+    retry_after_seconds: int = Field(0, ge=0, description="建议重试间隔")
+    message: str = Field("", description="提示信息")
 
 
 class LoginRequest(BaseModel):
@@ -79,6 +83,10 @@ class AppCreateRequest(BaseModel):
     enable_printing: bool = False
     timezone: Optional[str] = Field(default=None, max_length=50)
     keyboard_layout: Optional[str] = Field(default=None, max_length=50)
+    max_concurrent_sessions: Optional[int] = Field(default=None, ge=0)
+    max_concurrent_per_user: Optional[int] = Field(default=None, ge=0)
+    queue_enabled: bool = False
+    queue_timeout_seconds: int = Field(default=300, ge=1)
 
     @field_validator("color_depth")
     @classmethod
@@ -121,6 +129,10 @@ class AppUpdateRequest(BaseModel):
     enable_printing: Optional[bool] = None
     timezone: Optional[str] = Field(default=None, max_length=50)
     keyboard_layout: Optional[str] = Field(default=None, max_length=50)
+    max_concurrent_sessions: Optional[int] = Field(default=None, ge=0)
+    max_concurrent_per_user: Optional[int] = Field(default=None, ge=0)
+    queue_enabled: Optional[bool] = None
+    queue_timeout_seconds: Optional[int] = Field(default=None, ge=1)
     is_active: Optional[bool] = None
 
     @field_validator("color_depth")
@@ -166,6 +178,10 @@ class AppAdminResponse(BaseModel):
     enable_printing: bool = False
     timezone: Optional[str] = None
     keyboard_layout: Optional[str] = None
+    max_concurrent_sessions: Optional[int] = None
+    max_concurrent_per_user: Optional[int] = None
+    queue_enabled: bool = False
+    queue_timeout_seconds: int = 300
     is_active: bool = True
 
 

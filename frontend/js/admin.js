@@ -1,4 +1,4 @@
-﻿/**
+/**
  * RemoteApp 管理后台 - 前端逻辑
  */
 
@@ -106,6 +106,13 @@ async function loadApps() {
     } catch (e) { showToast('加载应用失败: ' + e.message, 'error'); }
 }
 
+function governanceSummary(app) {
+    var total = app.max_concurrent_sessions > 0 ? ('总' + app.max_concurrent_sessions) : '总不限';
+    var perUser = app.max_concurrent_per_user > 0 ? ('单人' + app.max_concurrent_per_user) : '单人不限';
+    var queue = app.queue_enabled ? ('排队 ' + (app.queue_timeout_seconds || 300) + 's') : '不排队';
+    return total + ' / ' + perUser + ' / ' + queue;
+}
+
 function renderAppsTable() {
     var tbody = document.querySelector('#apps-table tbody');
     tbody.innerHTML = '';
@@ -118,6 +125,7 @@ function renderAppsTable() {
             escapeHtml(app.hostname),
             app.port,
             escapeHtml(app.remote_app || '-'),
+            governanceSummary(app),
         ];
         cells.forEach(function(val) {
             var td = document.createElement('td');
@@ -179,6 +187,10 @@ function showAppModal(app) {
         enable_printing: app ? app.enable_printing : false,
         timezone: app ? (app.timezone || '') : '',
         keyboard_layout: app ? (app.keyboard_layout || '') : '',
+        max_concurrent_sessions: app ? (app.max_concurrent_sessions || '') : '',
+        max_concurrent_per_user: app ? (app.max_concurrent_per_user || '') : '',
+        queue_enabled: app ? !!app.queue_enabled : false,
+        queue_timeout_seconds: app ? (app.queue_timeout_seconds || 300) : 300,
     };
 
     // 色深选项
@@ -246,6 +258,16 @@ function showAppModal(app) {
         _chk('音频输出', 'app-enable-audio', adv.enable_audio) +
         _chk('麦克风输入', 'app-enable-audio-input', adv.enable_audio_input) +
         _chk('虚拟打印机 (PDF)', 'app-enable-printing', adv.enable_printing) +
+        '</div>' +
+        // 资源治理
+        '<div class="advanced-params__section">' +
+        '<div class="advanced-params__section-title">资源治理</div>' +
+        '<div class="form-row">' +
+        formGroup('总并发上限', 'app-max-concurrent-sessions', adv.max_concurrent_sessions, 'number', false, '0 或留空 = 不限制') +
+        formGroup('单用户上限', 'app-max-concurrent-per-user', adv.max_concurrent_per_user, 'number', false, '0 或留空 = 不限制') +
+        '</div>' +
+        _chk('达到上限后允许排队', 'app-queue-enabled', adv.queue_enabled) +
+        formGroup('排队超时(秒)', 'app-queue-timeout-seconds', adv.queue_timeout_seconds, 'number', false, '默认 300') +
         '</div>' +
         // 本地化
         '<div class="advanced-params__section">' +
@@ -329,6 +351,10 @@ async function saveApp(appId) {
         enable_printing: document.getElementById('app-enable-printing').checked,
         timezone: document.getElementById('app-timezone').value || null,
         keyboard_layout: document.getElementById('app-keyboard-layout').value || null,
+        max_concurrent_sessions: parseNonNegativeInt('app-max-concurrent-sessions'),
+        max_concurrent_per_user: parseNonNegativeInt('app-max-concurrent-per-user'),
+        queue_enabled: document.getElementById('app-queue-enabled').checked,
+        queue_timeout_seconds: parseNonNegativeInt('app-queue-timeout-seconds') || 300,
     };
 
     if (!data.name || !data.hostname) {
@@ -792,8 +818,10 @@ async function loadMonitor() {
     try {
         var overview = await api('GET', '/monitor/overview');
         var detail = await api('GET', '/monitor/sessions');
+        var queue = await api('GET', '/monitor/queue');
         if (overview) renderMonitorCards(overview);
         if (detail) renderMonitorSessions(detail.sessions || []);
+        if (queue) renderMonitorQueue(queue.items || []);
     } catch (e) {
         showToast('加载监控数据失败: ' + e.message, 'error');
     }
@@ -806,7 +834,7 @@ function renderMonitorCards(data) {
     // 总览摘要
     var summary = document.getElementById('monitor-summary');
     if (summary) {
-        summary.textContent = '在线 ' + data.total_online + ' 人 / ' + data.total_sessions + ' 个会话';
+        summary.textContent = '在线 ' + data.total_online + ' 人 / ' + data.total_sessions + ' 个会话 / 排队 ' + (data.total_queued || 0) + ' 人';
     }
 
     (data.apps || []).forEach(function(app) {
@@ -826,7 +854,7 @@ function renderMonitorCards(data) {
 
         var countEl = document.createElement('div');
         countEl.className = 'monitor-card__count' + (app.active_count > 0 ? ' monitor-card__count--active' : '');
-        countEl.textContent = app.active_count + ' ';
+        countEl.textContent = app.active_count + ' / ' + (app.queued_count || 0) + '排队 ';
 
         var dot = document.createElement('span');
         dot.className = 'monitor-card__dot ' + (app.active_count > 0 ? 'monitor-card__dot--green' : 'monitor-card__dot--gray');
@@ -902,6 +930,52 @@ function renderMonitorSessions(sessions) {
     });
 }
 
+function renderMonitorQueue(items) {
+    var tbody = document.querySelector('#queue-table tbody');
+    tbody.innerHTML = '';
+
+    if (!items.length) {
+        var tr = document.createElement('tr');
+        var td = document.createElement('td');
+        td.colSpan = 6;
+        td.style.textAlign = 'center';
+        td.style.color = '#999';
+        td.textContent = '当前无等待队列';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+    }
+
+    items.forEach(function(item) {
+        var tr = document.createElement('tr');
+
+        [item.position, item.display_name || item.username, item.app_name, item.created_at || '', item.updated_at || ''].forEach(function(val) {
+            var td = document.createElement('td');
+            td.textContent = val;
+            tr.appendChild(td);
+        });
+
+        var actionTd = document.createElement('td');
+        var cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn btn--danger btn--small';
+        cancelBtn.textContent = '移出';
+        cancelBtn.onclick = function() { cancelQueueEntry(item.queue_id); };
+        actionTd.appendChild(cancelBtn);
+        tr.appendChild(actionTd);
+
+        tbody.appendChild(tr);
+    });
+}
+
+async function cancelQueueEntry(queueId) {
+    if (!confirm('确定将该用户移出等待队列？')) return;
+    try {
+        await api('DELETE', '/monitor/queue/' + queueId);
+        showToast('已移出等待队列');
+        loadMonitor();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
 
 // ============================================
 // 工具函数
@@ -926,6 +1000,13 @@ function formGroupSelect(label, id, options, selected) {
     return '<div class="form-group">' +
         '<label for="' + id + '">' + escapeHtml(label) + '</label>' +
         '<select id="' + id + '">' + opts + '</select></div>';
+}
+
+function parseNonNegativeInt(id) {
+    var raw = document.getElementById(id).value;
+    if (raw === '') return 0;
+    var val = parseInt(raw, 10);
+    return isNaN(val) || val < 0 ? 0 : val;
 }
 
 function closeModal(event) {

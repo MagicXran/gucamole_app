@@ -1,4 +1,4 @@
-﻿"""
+"""
 管理后台 API 路由 - 应用/用户/ACL/审计日志管理
 """
 
@@ -51,7 +51,9 @@ def create_app(
              enable_wallpaper, enable_font_smoothing,
              disable_copy, disable_paste,
              enable_audio, enable_audio_input, enable_printing,
-             timezone, keyboard_layout)
+             timezone, keyboard_layout,
+             max_concurrent_sessions, max_concurrent_per_user,
+             queue_enabled, queue_timeout_seconds)
         VALUES
             (%(name)s, %(icon)s, %(protocol)s, %(hostname)s, %(port)s,
              %(rdp_username)s, %(rdp_password)s, %(domain)s, %(security)s, %(ignore_cert)s,
@@ -60,7 +62,9 @@ def create_app(
              %(enable_wallpaper)s, %(enable_font_smoothing)s,
              %(disable_copy)s, %(disable_paste)s,
              %(enable_audio)s, %(enable_audio_input)s, %(enable_printing)s,
-             %(timezone)s, %(keyboard_layout)s)
+             %(timezone)s, %(keyboard_layout)s,
+             %(max_concurrent_sessions)s, %(max_concurrent_per_user)s,
+             %(queue_enabled)s, %(queue_timeout_seconds)s)
         """,
         {
             "name": req.name, "icon": req.icon, "protocol": req.protocol,
@@ -84,6 +88,10 @@ def create_app(
             "enable_printing": 1 if req.enable_printing else 0,
             "timezone": req.timezone or None,
             "keyboard_layout": req.keyboard_layout or None,
+            "max_concurrent_sessions": req.max_concurrent_sessions or None,
+            "max_concurrent_per_user": req.max_concurrent_per_user or None,
+            "queue_enabled": 1 if req.queue_enabled else 0,
+            "queue_timeout_seconds": req.queue_timeout_seconds,
         },
     )
     app = db.execute_query(
@@ -121,7 +129,7 @@ def update_app(
     _BOOL_COLUMNS = {
         "ignore_cert", "disable_gfx", "enable_wallpaper", "enable_font_smoothing",
         "disable_copy", "disable_paste", "enable_audio", "enable_audio_input",
-        "enable_printing", "is_active",
+        "enable_printing", "queue_enabled", "is_active",
     }
     set_parts = []
     params = {"id": app_id}

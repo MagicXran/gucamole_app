@@ -8,9 +8,9 @@ from backend.models import UserInfo
 
 
 class FakeDB:
-    def __init__(self, *, active_session_ids=None, reclaimed_session_ids=None):
+    def __init__(self, *, active_session_ids=None, reclaimed_sessions=None):
         self.active_session_ids = set(active_session_ids or [])
-        self.reclaimed_session_ids = set(reclaimed_session_ids or [])
+        self.reclaimed_sessions = dict(reclaimed_sessions or {})
 
     def execute_update(self, query: str, params=None) -> int:
         sid = (params or {}).get("sid")
@@ -20,10 +20,11 @@ class FakeDB:
 
     def execute_query(self, query: str, params=None, fetch_one: bool = False):
         sid = (params or {}).get("sid")
-        if "status = 'reclaim_pending'" in query and sid in self.reclaimed_session_ids:
+        if "status = 'reclaim_pending'" in query and sid in self.reclaimed_sessions:
+            row = {"reclaim_reason": self.reclaimed_sessions[sid]}
             if fetch_one:
-                return {"exists": 1}
-            return [{"exists": 1}]
+                return row
+            return [row]
         if fetch_one:
             return None
         return []
@@ -77,11 +78,11 @@ def test_heartbeat_and_activity_return_200_when_session_is_active(monkeypatch):
     assert activity_resp.json() == {"ok": True}
 
 
-def test_heartbeat_and_activity_return_409_when_session_is_reclaimed(monkeypatch):
+def test_heartbeat_and_activity_return_409_when_session_is_admin_reclaimed(monkeypatch):
     monkeypatch.setattr(
         monitor,
         "db",
-        FakeDB(reclaimed_session_ids={"session-reclaimed"}),
+        FakeDB(reclaimed_sessions={"session-reclaimed": "admin"}),
     )
     app = _build_app()
 
@@ -102,11 +103,48 @@ def test_heartbeat_and_activity_return_409_when_session_is_reclaimed(monkeypatch
     assert heartbeat_resp.json() == {
         "detail": "会话已被管理员回收",
         "code": "session_reclaimed",
+        "reason": "admin",
     }
     assert activity_resp.status_code == 409
     assert activity_resp.json() == {
         "detail": "会话已被管理员回收",
         "code": "session_reclaimed",
+        "reason": "admin",
+    }
+
+
+def test_heartbeat_and_activity_return_409_when_session_is_idle_reclaimed(monkeypatch):
+    monkeypatch.setattr(
+        monitor,
+        "db",
+        FakeDB(reclaimed_sessions={"session-idle-reclaimed": "idle"}),
+    )
+    app = _build_app()
+
+    heartbeat_resp = _request(
+        app,
+        "POST",
+        "/api/monitor/heartbeat",
+        {"session_id": "session-idle-reclaimed"},
+    )
+    activity_resp = _request(
+        app,
+        "POST",
+        "/api/monitor/activity",
+        {"session_id": "session-idle-reclaimed"},
+    )
+
+    assert heartbeat_resp.status_code == 409
+    assert heartbeat_resp.json() == {
+        "detail": "会话因长时间空闲被系统回收",
+        "code": "session_reclaimed",
+        "reason": "idle",
+    }
+    assert activity_resp.status_code == 409
+    assert activity_resp.json() == {
+        "detail": "会话因长时间空闲被系统回收",
+        "code": "session_reclaimed",
+        "reason": "idle",
     }
 
 

@@ -6,6 +6,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
+from backend.database import CONFIG
+
 
 def build_default_pool_seed_rows(app_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
@@ -20,9 +22,14 @@ def build_default_pool_seed_rows(app_rows: list[dict[str, Any]]) -> list[dict[st
     ]
 
 
+_monitor_cfg = CONFIG.get("monitor", {})
+
+
 class ResourcePoolService:
     LIVE_QUEUE_STATES = ("queued", "ready", "launching")
     OCCUPIED_SESSION_STATUSES = ("active", "reclaim_pending")
+    DEFAULT_STALE_TIMEOUT_SECONDS = int(_monitor_cfg.get("session_timeout_seconds", 120))
+    DEFAULT_ORPHAN_IDLE_TIMEOUT_SECONDS = int(_monitor_cfg.get("session_timeout_seconds", 120))
 
     def __init__(self, db, now_provider: Callable[[], datetime] | None = None):
         self._db = db
@@ -771,12 +778,15 @@ class ResourcePoolService:
             /* rps:list_stale_sessions */
             SELECT s.session_id, s.user_id
             FROM active_session s
-            JOIN resource_pool p ON p.id = s.pool_id
+            LEFT JOIN resource_pool p ON p.id = s.pool_id
             WHERE s.status IN ('active', 'reclaim_pending')
-              AND TIMESTAMPDIFF(SECOND, s.last_heartbeat, %(now_ts)s) > p.stale_timeout_seconds
+              AND TIMESTAMPDIFF(SECOND, s.last_heartbeat, %(now_ts)s) > COALESCE(p.stale_timeout_seconds, %(fallback_stale_timeout_seconds)s)
             ORDER BY s.session_id ASC
             """,
-            {"now_ts": self._now()},
+            {
+                "now_ts": self._now(),
+                "fallback_stale_timeout_seconds": self.DEFAULT_STALE_TIMEOUT_SECONDS,
+            },
         )
         reclaimed: list[dict[str, Any]] = []
         for row in rows:
@@ -790,14 +800,26 @@ class ResourcePoolService:
             /* rps:list_idle_sessions */
             SELECT s.session_id, s.user_id
             FROM active_session s
-            JOIN resource_pool p ON p.id = s.pool_id
+            LEFT JOIN resource_pool p ON p.id = s.pool_id
             WHERE s.status = 'active'
-              AND p.idle_timeout_seconds IS NOT NULL
               AND s.last_activity_at IS NOT NULL
-              AND TIMESTAMPDIFF(SECOND, s.last_activity_at, %(now_ts)s) > p.idle_timeout_seconds
+              AND (
+                    (
+                        s.pool_id IS NULL
+                        AND TIMESTAMPDIFF(SECOND, s.last_activity_at, %(now_ts)s) > %(fallback_idle_timeout_seconds)s
+                    )
+                    OR (
+                        s.pool_id IS NOT NULL
+                        AND p.idle_timeout_seconds IS NOT NULL
+                        AND TIMESTAMPDIFF(SECOND, s.last_activity_at, %(now_ts)s) > COALESCE(p.idle_timeout_seconds, %(fallback_idle_timeout_seconds)s)
+                    )
+              )
             ORDER BY s.session_id ASC
             """,
-            {"now_ts": self._now()},
+            {
+                "now_ts": self._now(),
+                "fallback_idle_timeout_seconds": self.DEFAULT_ORPHAN_IDLE_TIMEOUT_SECONDS,
+            },
         )
         reclaimed: list[dict[str, Any]] = []
         for row in rows:

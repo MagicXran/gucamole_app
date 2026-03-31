@@ -66,7 +66,7 @@ function _renderGuacWindow(win, appName, data) {
         '  var _hbUrl=\"/api/monitor/heartbeat\";' +
         '  var _activityUrl=\"/api/monitor/activity\";' +
         '  var _endUrl=\"/api/monitor/session-end\";' +
-        '  var _defaultReclaimMessage=\"该会话已被管理员回收，窗口将关闭\";' +
+        '  var _defaultReclaimMessage=\"该会话已被系统回收，窗口将关闭\";' +
         '  var _control=null;' +
         '  var _hbTimer=0;' +
         '  var _activityTimer=0;' +
@@ -95,7 +95,7 @@ function _renderGuacWindow(win, appName, data) {
         '      processNetworkError:function(){return {reclaimed:false,message:\"\"};},' +
         '      processResponse:function(status,payload){' +
         '        if(_stopped){return {reclaimed:true,message:_defaultReclaimMessage};}' +
-        '        if(status===409&&payload&&payload.code===\"session_reclaimed\"){' +
+        '        if(status===409&&payload&&(payload.code===\"session_reclaimed\"||payload.code===\"session_idle_reclaimed\")){' +
         '          _stopped=true;' +
         '          var _msg=(typeof payload.detail===\"string\"&&payload.detail)?payload.detail:_defaultReclaimMessage;' +
         '          if(!_handled){_handled=true;_closePopupWithNotice(_msg);}' +

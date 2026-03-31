@@ -1,6 +1,6 @@
 const SESSION_RECLAIMED_STATUS = 409;
-const SESSION_RECLAIMED_CODE = 'session_reclaimed';
-export const DEFAULT_SESSION_RECLAIMED_MESSAGE = '该会话已被管理员回收，窗口将关闭';
+const SESSION_RECLAIMED_CODES = new Set(['session_reclaimed', 'session_idle_reclaimed']);
+export const DEFAULT_SESSION_RECLAIMED_MESSAGE = '该会话已被系统回收，窗口将关闭';
 
 function buildNoopDecision() {
   return { reclaimed: false, message: '' };
@@ -18,7 +18,7 @@ export function detectSessionReclaimed(status, payload) {
     return buildNoopDecision();
   }
 
-  if (payload.code !== SESSION_RECLAIMED_CODE) {
+  if (!SESSION_RECLAIMED_CODES.has(payload.code)) {
     return buildNoopDecision();
   }
 

@@ -21,8 +21,19 @@ SESSION_TIMEOUT_SECONDS = _monitor_cfg.get("session_timeout_seconds", 120)
 router = APIRouter(prefix="/api/monitor", tags=["monitor"])
 admin_monitor_router = APIRouter(prefix="/api/admin/monitor", tags=["admin-monitor"])
 pool_service = ResourcePoolService(db=db)
-SESSION_RECLAIMED_DETAIL = "会话已被管理员回收"
-SESSION_RECLAIMED_CODE = "session_reclaimed"
+SESSION_RECLAIMED_RESPONSES = {
+    "admin": {
+        "detail": "会话已被管理员回收",
+        "code": "session_reclaimed",
+        "reason": "admin",
+    },
+    "idle": {
+        "detail": "会话因长时间空闲被系统回收",
+        "code": "session_reclaimed",
+        "reason": "idle",
+    },
+}
+DEFAULT_SESSION_RECLAIM_REASON = "admin"
 
 
 # ---- 请求模型 ----
@@ -39,10 +50,10 @@ class ActivityRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=36)
 
 
-def _is_reclaim_pending_session(session_id: str, user_id: int) -> bool:
+def _get_reclaim_pending_reason(session_id: str, user_id: int) -> str | None:
     row = db.execute_query(
         """
-        SELECT 1
+        SELECT reclaim_reason
         FROM active_session
         WHERE session_id = %(sid)s AND user_id = %(uid)s AND status = 'reclaim_pending'
         LIMIT 1
@@ -50,16 +61,20 @@ def _is_reclaim_pending_session(session_id: str, user_id: int) -> bool:
         {"sid": session_id, "uid": user_id},
         fetch_one=True,
     )
-    return bool(row)
+    if not row:
+        return None
+    reason = str(row.get("reclaim_reason") or "").strip()
+    return reason or DEFAULT_SESSION_RECLAIM_REASON
 
 
-def _reclaimed_response() -> JSONResponse:
+def _reclaimed_response(reclaim_reason: str) -> JSONResponse:
+    payload = SESSION_RECLAIMED_RESPONSES.get(
+        reclaim_reason,
+        SESSION_RECLAIMED_RESPONSES[DEFAULT_SESSION_RECLAIM_REASON],
+    )
     return JSONResponse(
         status_code=status.HTTP_409_CONFLICT,
-        content={
-            "detail": SESSION_RECLAIMED_DETAIL,
-            "code": SESSION_RECLAIMED_CODE,
-        },
+        content=payload,
     )
 
 
@@ -118,8 +133,9 @@ def heartbeat(req: HeartbeatRequest, user: UserInfo = Depends(get_current_user))
         {"sid": req.session_id, "uid": user.user_id},
     )
     if rows == 0:
-        if _is_reclaim_pending_session(req.session_id, user.user_id):
-            return _reclaimed_response()
+        reclaim_reason = _get_reclaim_pending_reason(req.session_id, user.user_id)
+        if reclaim_reason is not None:
+            return _reclaimed_response(reclaim_reason)
         raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在或已结束")
     return {"ok": True}
 
@@ -154,8 +170,9 @@ def activity(req: ActivityRequest, user: UserInfo = Depends(get_current_user)):
         {"sid": req.session_id, "uid": user.user_id},
     )
     if rows == 0:
-        if _is_reclaim_pending_session(req.session_id, user.user_id):
-            return _reclaimed_response()
+        reclaim_reason = _get_reclaim_pending_reason(req.session_id, user.user_id)
+        if reclaim_reason is not None:
+            return _reclaimed_response(reclaim_reason)
         raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在或已结束")
     return {"ok": True}
 

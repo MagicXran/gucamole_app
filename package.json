@@ -4,10 +4,13 @@
   "type": "module",
   "scripts": {
     "build:viewer": "node scripts/build-viewer-bundle.mjs",
-    "test:viewer-build": "node --test tests/test_viewer_bundle_build.mjs"
+    "test:viewer-build": "node --test tests/test_viewer_bundle_build.mjs",
+    "test:dockerfile-build": "node --test tests/test_portal_dockerfile_build.mjs",
+    "test:e2e": "node tests/test_portal_e2e.mjs"
   },
   "devDependencies": {
     "@kitware/vtk.js": "35.5.2",
-    "esbuild": "0.25.10"
+    "esbuild": "0.25.10",
+    "playwright": "^1.52.0"
   }
 }

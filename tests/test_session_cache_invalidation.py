@@ -8,6 +8,7 @@ from fastapi import FastAPI
 import backend.admin_pool_router as admin_pool_router
 import backend.monitor as monitor
 from backend.models import UserInfo
+from backend.resource_pool_service import ResourcePoolService
 
 
 class FakeSessionDB:
@@ -63,6 +64,43 @@ class FakeAdminPoolService:
 
     def reclaim_session(self, session_id: str):
         return dict(self.result)
+
+
+class FakeResourcePoolReclaimDB:
+    def __init__(self, *, stale_rows=None, idle_rows=None):
+        self.stale_rows = list(stale_rows or [])
+        self.idle_rows = list(idle_rows or [])
+        self.marked = []
+        self.fallback_stale_timeout_seconds = None
+        self.fallback_idle_timeout_seconds = None
+
+    def execute_query(self, query: str, params=None, fetch_one: bool = False):
+        if "/* rps:list_stale_sessions */" in query:
+            if "LEFT JOIN resource_pool" in query and "COALESCE(p.stale_timeout_seconds" in query:
+                self.fallback_stale_timeout_seconds = params.get("fallback_stale_timeout_seconds")
+                return list(self.stale_rows)
+            return []
+        if "/* rps:list_idle_sessions */" in query:
+            if "LEFT JOIN resource_pool" in query and "COALESCE(p.idle_timeout_seconds" in query:
+                self.fallback_idle_timeout_seconds = params.get("fallback_idle_timeout_seconds")
+                return list(self.idle_rows)
+            return []
+        if fetch_one:
+            return None
+        return []
+
+    def execute_update(self, query: str, params=None) -> int:
+        params = params or {}
+        if "/* rps:session_mark_reclaimed */" not in query:
+            return 0
+        session_id = str(params.get("session_id") or "")
+        known_ids = {str(row["session_id"]) for row in (self.stale_rows + self.idle_rows)}
+        if session_id not in known_ids:
+            return 0
+        self.marked.append(
+            (session_id, str(params.get("reason")), str(params.get("target_status")))
+        )
+        return 1
 
 
 def _install_router_stub(monkeypatch, guac_service: FakeGuacService):
@@ -136,6 +174,28 @@ def test_cleanup_idle_sessions_invalidates_cache_when_reclaimed_session_is_last_
     assert guac.invalidated == ["portal_u2"]
 
 
+def test_cleanup_stale_sessions_skips_cache_invalidation_when_user_has_other_active_session(monkeypatch):
+    guac = FakeGuacService()
+    _install_router_stub(monkeypatch, guac)
+    monkeypatch.setattr(
+        monitor,
+        "pool_service",
+        FakeMonitorPoolService([
+            {"session_id": "reclaimed-session", "user_id": 2},
+        ]),
+    )
+    monkeypatch.setattr(
+        monitor,
+        "db",
+        FakeSessionDB({2: {"reclaimed-session", "still-active"}}),
+    )
+
+    reclaimed_count = monitor.cleanup_stale_sessions()
+
+    assert reclaimed_count == 1
+    assert guac.invalidated == []
+
+
 def test_admin_reclaim_skips_cache_invalidation_when_user_has_other_active_session(monkeypatch):
     guac = FakeGuacService()
     _install_router_stub(monkeypatch, guac)
@@ -160,3 +220,38 @@ def test_admin_reclaim_skips_cache_invalidation_when_user_has_other_active_sessi
 
     assert response.status_code == 200
     assert guac.invalidated == []
+
+
+def test_reclaim_stale_sessions_handles_orphan_rows_with_null_pool_id():
+    db = FakeResourcePoolReclaimDB(
+        stale_rows=[
+            {"session_id": "stale-null-pool", "user_id": 9, "pool_id": None},
+        ]
+    )
+    service = ResourcePoolService(db=db)
+
+    reclaimed = service.reclaim_stale_sessions()
+
+    assert reclaimed == [{"session_id": "stale-null-pool", "user_id": 9}]
+    assert db.marked == [("stale-null-pool", "stale", "reclaimed")]
+    assert db.fallback_stale_timeout_seconds == ResourcePoolService.DEFAULT_STALE_TIMEOUT_SECONDS
+
+
+def test_reclaim_idle_sessions_handles_orphan_rows_with_null_pool_id():
+    db = FakeResourcePoolReclaimDB(
+        idle_rows=[
+            {"session_id": "idle-null-pool", "user_id": 11, "pool_id": None},
+        ]
+    )
+    service = ResourcePoolService(db=db)
+
+    reclaimed = service.reclaim_idle_sessions()
+
+    assert reclaimed == [{"session_id": "idle-null-pool", "user_id": 11}]
+    assert db.marked == [("idle-null-pool", "idle", "reclaim_pending")]
+    assert db.fallback_idle_timeout_seconds == ResourcePoolService.DEFAULT_ORPHAN_IDLE_TIMEOUT_SECONDS
+
+
+def test_default_orphan_timeouts_follow_monitor_session_timeout_config():
+    assert ResourcePoolService.DEFAULT_STALE_TIMEOUT_SECONDS == monitor.SESSION_TIMEOUT_SECONDS
+    assert ResourcePoolService.DEFAULT_ORPHAN_IDLE_TIMEOUT_SECONDS == monitor.SESSION_TIMEOUT_SECONDS

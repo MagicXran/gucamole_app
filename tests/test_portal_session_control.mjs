@@ -17,6 +17,16 @@ test('detectSessionReclaimed identifies admin reclaim response', () => {
   assert.equal(decision.message, '会话已被管理员回收');
 });
 
+test('detectSessionReclaimed identifies idle reclaim response', () => {
+  const decision = detectSessionReclaimed(409, {
+    code: 'session_idle_reclaimed',
+    detail: '会话因长时间空闲被系统回收',
+  });
+
+  assert.equal(decision.reclaimed, true);
+  assert.equal(decision.message, '会话因长时间空闲被系统回收');
+});
+
 test('detectSessionReclaimed ignores network jitter-like responses', () => {
   assert.deepEqual(
     detectSessionReclaimed(503, { code: 'service_unavailable' }),

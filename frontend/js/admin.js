@@ -1,39 +1,14 @@
-﻿/**
+/**
  * RemoteApp 管理后台 - 前端逻辑
  */
 
 var API_ADMIN = '/api/admin';
 
-// ---- 认证工具 (与 app.js 保持一致) ----
-function getToken() { return localStorage.getItem('portal_token'); }
-function getUser() {
-    try { return JSON.parse(localStorage.getItem('portal_user')); }
-    catch (e) { return null; }
-}
-function authHeaders() {
+function adminAuthHeaders() {
     return {
         'Authorization': 'Bearer ' + getToken(),
         'Content-Type': 'application/json',
     };
-}
-function logout() {
-    localStorage.removeItem('portal_token');
-    localStorage.removeItem('portal_user');
-    window.location.href = '/login.html';
-}
-
-function escapeHtml(str) {
-    var div = document.createElement('div');
-    div.appendChild(document.createTextNode(str || ''));
-    return div.innerHTML;
-}
-
-function escapeAttr(str) {
-    return String(str || '')
-        .replace(/&/g, '&amp;')
-        .replace(/"/g, '&quot;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
 }
 
 // ---- Toast 通知 ----
@@ -50,7 +25,7 @@ function showToast(msg, type) {
 
 // ---- API 请求封装 ----
 async function api(method, path, body) {
-    var opts = { method: method, headers: authHeaders() };
+    var opts = { method: method, headers: adminAuthHeaders() };
     if (body !== undefined) opts.body = JSON.stringify(body);
     var resp = await fetch(API_ADMIN + path, opts);
     if (resp.status === 401) { logout(); return null; }
@@ -86,11 +61,148 @@ function switchTab(tab) {
     if (!_tabLoaded[tab]) {
         _tabLoaded[tab] = true;
         if (tab === 'monitor') loadMonitor();
+        else if (tab === 'pools') loadPools();
         else if (tab === 'apps') loadApps();
         else if (tab === 'users') loadUsers();
         else if (tab === 'acl') loadAcl();
         else if (tab === 'audit') loadAuditLogs(1);
     }
+}
+
+
+// ============================================
+// 资源池管理
+// ============================================
+var _pools = [];
+
+async function ensurePoolsLoaded() {
+    if (_pools.length) return;
+    _pools = await api('GET', '/pools');
+}
+
+async function loadPools() {
+    try {
+        _pools = await api('GET', '/pools');
+        renderPoolsTable();
+        var queueData = await api('GET', '/pools/queues');
+        renderPoolQueueTable(queueData.items || []);
+    } catch (e) { showToast('加载资源池失败: ' + e.message, 'error'); }
+}
+
+function renderPoolsTable() {
+    var tbody = document.querySelector('#pools-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    _pools.forEach(function(pool) {
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+            '<td>' + pool.id + '</td>' +
+            '<td>' + escapeHtml(pool.name) + '</td>' +
+            '<td>' + pool.max_concurrent + '</td>' +
+            '<td>' + (pool.active_count || 0) + '</td>' +
+            '<td>' + (pool.queued_count || 0) + '</td>' +
+            '<td>' + (pool.is_active ? '<span class="badge badge--active">启用</span>' : '<span class="badge badge--inactive">禁用</span>') + '</td>' +
+            '<td><button class="btn btn--outline btn--small" onclick="showPoolModal(' + pool.id + ')">编辑</button></td>';
+        tbody.appendChild(tr);
+    });
+}
+
+function renderPoolQueueTable(items) {
+    var tbody = document.querySelector('#pool-queue-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    if (!items.length) {
+        var tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="6" style="text-align:center;color:#999;">当前无排队记录</td>';
+        tbody.appendChild(tr);
+        return;
+    }
+
+    items.forEach(function(item) {
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+            '<td>' + escapeHtml(item.pool_name) + '</td>' +
+            '<td>' + escapeHtml(item.display_name || item.username) + '</td>' +
+            '<td>' + escapeHtml(item.status) + '</td>' +
+            '<td>' + escapeHtml(item.created_at || '-') + '</td>' +
+            '<td>' + escapeHtml(item.ready_expires_at || '-') + '</td>' +
+            '<td><button class="btn btn--danger btn--small" onclick="cancelPoolQueue(' + item.queue_id + ')">取消</button></td>';
+        tbody.appendChild(tr);
+    });
+}
+
+function showPoolModal(poolId) {
+    var pool = null;
+    if (poolId) {
+        pool = _pools.find(function(item) { return item.id === poolId; }) || null;
+    }
+
+    var html = '<div class="modal-overlay" onclick="closeModal(event)">' +
+        '<div class="modal" onclick="event.stopPropagation()">' +
+        '<div class="modal__title">' + (pool ? '编辑资源池' : '新建资源池') + '</div>' +
+        '<form id="pool-form">' +
+        formGroup('名称', 'pool-name', pool ? pool.name : '', 'text', true) +
+        '<div class="form-row">' +
+        formGroup('图标', 'pool-icon', pool ? pool.icon : 'desktop') +
+        formGroup('总并发上限', 'pool-max', pool ? pool.max_concurrent : 1, 'number', true) +
+        '</div>' +
+        '<div class="form-row">' +
+        formGroup('ready 宽限(秒)', 'pool-grace', pool ? pool.dispatch_grace_seconds : 120, 'number', true) +
+        formGroup('失联回收(秒)', 'pool-stale', pool ? pool.stale_timeout_seconds : 120, 'number', true) +
+        '</div>' +
+        formGroup('空闲回收(秒, 留空禁用)', 'pool-idle', pool && pool.idle_timeout_seconds ? pool.idle_timeout_seconds : '', 'number') +
+        '<div class="form-group form-group--checkbox">' +
+        '<input type="checkbox" id="pool-auto"' + ((!pool || pool.auto_dispatch_enabled) ? ' checked' : '') + '>' +
+        '<label for="pool-auto">启用自动放行</label></div>' +
+        '<div class="form-group form-group--checkbox">' +
+        '<input type="checkbox" id="pool-active"' + ((!pool || pool.is_active) ? ' checked' : '') + '>' +
+        '<label for="pool-active">启用</label></div>' +
+        '<div class="modal__actions">' +
+        '<button type="button" class="btn btn--outline" onclick="closeModal()">取消</button>' +
+        '<button type="submit" class="btn btn--primary">' + (pool ? '保存' : '创建') + '</button>' +
+        '</div></form></div></div>';
+
+    document.getElementById('modal-container').innerHTML = html;
+    document.getElementById('pool-form').onsubmit = function(e) {
+        e.preventDefault();
+        savePool(pool ? pool.id : null);
+    };
+}
+
+async function savePool(poolId) {
+    var data = {
+        name: document.getElementById('pool-name').value.trim(),
+        icon: document.getElementById('pool-icon').value.trim() || 'desktop',
+        max_concurrent: parseInt(document.getElementById('pool-max').value, 10) || 1,
+        auto_dispatch_enabled: document.getElementById('pool-auto').checked,
+        dispatch_grace_seconds: parseInt(document.getElementById('pool-grace').value, 10) || 120,
+        stale_timeout_seconds: parseInt(document.getElementById('pool-stale').value, 10) || 120,
+        idle_timeout_seconds: document.getElementById('pool-idle').value ? parseInt(document.getElementById('pool-idle').value, 10) : null,
+        is_active: document.getElementById('pool-active').checked,
+    };
+
+    try {
+        if (poolId) {
+            await api('PUT', '/pools/' + poolId, data);
+            showToast('资源池已更新');
+        } else {
+            await api('POST', '/pools', data);
+            showToast('资源池已创建');
+        }
+        closeModal();
+        loadPools();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function cancelPoolQueue(queueId) {
+    if (!confirm('确定取消这条排队？')) return;
+    try {
+        await api('POST', '/pools/queues/' + queueId + '/cancel');
+        showToast('排队已取消');
+        loadPools();
+    } catch (e) { showToast(e.message, 'error'); }
 }
 
 
@@ -161,7 +273,12 @@ function _chk(label, id, checked) {
         '<label for="' + id + '">' + escapeHtml(label) + '</label></div>';
 }
 
-function showAppModal(app) {
+async function showAppModal(app) {
+    await ensurePoolsLoaded();
+    if (!_pools.length) {
+        showToast('请先创建资源池，再创建应用', 'error');
+        return;
+    }
     var isEdit = !!app;
     var title = isEdit ? '编辑应用' : '新建应用';
 
@@ -218,6 +335,17 @@ function showAppModal(app) {
         kbSelect += '<option value="' + o.v + '"' + (o.v === adv.keyboard_layout ? ' selected' : '') + '>' + o.l + '</option>';
     });
     kbSelect += '</select></div>';
+
+    var poolOptions = _pools.map(function(pool) {
+        var selected = app && pool.id === app.pool_id ? ' selected' : '';
+        return '<option value="' + pool.id + '"' + selected + '>' + escapeHtml(pool.name) + '</option>';
+    }).join('');
+    var defaultPoolId = app && app.pool_id ? app.pool_id : _pools[0].id;
+    var poolSelect = '<div class="form-group"><label>资源池</label><select id="app-pool-id">' +
+        _pools.map(function(pool) {
+            var selected = pool.id === defaultPoolId ? ' selected' : '';
+            return '<option value="' + pool.id + '"' + selected + '>' + escapeHtml(pool.name) + '</option>';
+        }).join('') + '</select></div>';
 
     var advancedHtml =
         '<details class="advanced-params">' +
@@ -280,6 +408,10 @@ function showAppModal(app) {
         formGroup('工作目录', 'app-remote-dir', app ? (app.remote_app_dir || '') : '') +
         formGroup('命令参数', 'app-remote-args', app ? (app.remote_app_args || '') : '') +
         '</div>' +
+        '<div class="form-row">' +
+        poolSelect +
+        formGroup('成员并发上限', 'app-member-max', app ? (app.member_max_concurrent || 1) : 1, 'number', true) +
+        '</div>' +
         '<div class="form-group form-group--checkbox">' +
         '<input type="checkbox" id="app-ignore-cert"' + ((!app || app.ignore_cert) ? ' checked' : '') + '>' +
         '<label for="app-ignore-cert">忽略证书错误</label>' +
@@ -329,10 +461,16 @@ async function saveApp(appId) {
         enable_printing: document.getElementById('app-enable-printing').checked,
         timezone: document.getElementById('app-timezone').value || null,
         keyboard_layout: document.getElementById('app-keyboard-layout').value || null,
+        pool_id: document.getElementById('app-pool-id').value ? parseInt(document.getElementById('app-pool-id').value, 10) : null,
+        member_max_concurrent: parseInt(document.getElementById('app-member-max').value, 10) || 1,
     };
 
     if (!data.name || !data.hostname) {
         showToast('名称和主机为必填项', 'error');
+        return;
+    }
+    if (!data.pool_id) {
+        showToast('请选择资源池', 'error');
         return;
     }
 
@@ -756,17 +894,6 @@ function renderAuditPagination(total, page, pageSize) {
 // 实时监控
 // ============================================
 
-var ICON_MAP = {
-    'desktop':   '\u{1F5A5}\uFE0F',
-    'edit':      '\u{1F4DD}',
-    'calculate': '\u{1F522}',
-    'folder':    '\u{1F4C1}',
-    'terminal':  '\u{1F4BB}',
-    'browser':   '\u{1F310}',
-    'database':  '\u{1F5C4}\uFE0F',
-    'chart':     '\u{1F4CA}',
-};
-
 var _monitorTimer = null;
 
 function _manageMonitorRefresh(active) {
@@ -857,7 +984,7 @@ function renderMonitorSessions(sessions) {
     if (!sessions.length) {
         var tr = document.createElement('tr');
         var td = document.createElement('td');
-        td.colSpan = 6;
+        td.colSpan = 7;
         td.style.textAlign = 'center';
         td.style.color = '#999';
         td.textContent = '当前无活跃会话';
@@ -898,8 +1025,26 @@ function renderMonitorSessions(sessions) {
         statusTd.appendChild(badge);
         tr.appendChild(statusTd);
 
+        var actionTd = document.createElement('td');
+        var reclaimBtn = document.createElement('button');
+        reclaimBtn.className = 'btn btn--danger btn--small';
+        reclaimBtn.textContent = '回收';
+        reclaimBtn.onclick = (function(id) { return function() { reclaimSession(id); }; })(s.session_id);
+        actionTd.appendChild(reclaimBtn);
+        tr.appendChild(actionTd);
+
         tbody.appendChild(tr);
     });
+}
+
+async function reclaimSession(sessionId) {
+    if (!confirm('确定回收这个活跃会话？')) return;
+    try {
+        await api('POST', '/pools/sessions/' + encodeURIComponent(sessionId) + '/reclaim');
+        showToast('会话已回收');
+        loadMonitor();
+        if (_tabLoaded.pools) loadPools();
+    } catch (e) { showToast('回收失败: ' + e.message, 'error'); }
 }
 
 

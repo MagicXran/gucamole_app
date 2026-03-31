@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -32,3 +32,10 @@ Desktop.ini
 
 # Local backups
 deploy/backups/
+
+# Local git worktrees
+.worktrees/
+
+# Local frontend toolchain
+node_modules/
+output/

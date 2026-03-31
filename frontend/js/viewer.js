@@ -5,14 +5,12 @@
  * 对比 Guacamole 像素推流的带宽/CPU/延迟差异。
  */
 
-// ---- VTK.js 模块导入 (通过 importmap → esm.sh CDN) ----
+// ---- VTK.js 模块导入 (本地 bundle 入口) ----
 import '@kitware/vtk.js/Rendering/Profiles/Geometry';
-
 import vtkGenericRenderWindow  from '@kitware/vtk.js/Rendering/Misc/GenericRenderWindow';
 import vtkActor                from '@kitware/vtk.js/Rendering/Core/Actor';
 import vtkMapper               from '@kitware/vtk.js/Rendering/Core/Mapper';
 import vtkXMLPolyDataReader    from '@kitware/vtk.js/IO/XML/XMLPolyDataReader';
-import vtkXMLUnstructuredGridReader from '@kitware/vtk.js/IO/XML/XMLUnstructuredGridReader';
 import vtkSTLReader            from '@kitware/vtk.js/IO/Geometry/STLReader';
 import vtkOBJReader            from '@kitware/vtk.js/IO/Misc/OBJReader';
 import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction';
@@ -20,6 +18,14 @@ import vtkColorMaps            from '@kitware/vtk.js/Rendering/Core/ColorTransfe
 import vtkScalarBarActor       from '@kitware/vtk.js/Rendering/Core/ScalarBarActor';
 import vtkAxesActor            from '@kitware/vtk.js/Rendering/Core/AxesActor';
 import vtkInteractorStyleTrackballCamera from '@kitware/vtk.js/Interaction/Style/InteractorStyleTrackballCamera';
+import {
+    baseName,
+    buildDatasetFileCandidates,
+    buildDatasetListUrl,
+    extractDatasetItems,
+    normalizeViewerPath,
+    parentPath,
+} from './viewer_dataset_api.js';
 
 // ---- 认证工具 ----
 function getToken() { return localStorage.getItem('portal_token'); }
@@ -51,12 +57,15 @@ const $modelInfo      = document.getElementById('model-info');
 const $datasetList    = document.getElementById('dataset-list');
 const $datasetLoading = document.getElementById('dataset-loading');
 const $datasetEmpty   = document.getElementById('dataset-empty');
+const $datasetPath    = document.getElementById('dataset-path');
 const $colorPreset    = document.getElementById('color-preset');
 const $scalarSelect   = document.getElementById('scalar-select');
 const $representation = document.getElementById('representation');
 const $opacityRange   = document.getElementById('opacity-range');
 const $toggleAxes     = document.getElementById('toggle-axes');
 const $btnResetCamera = document.getElementById('btn-reset-camera');
+let currentBrowsePath = '';
+let pendingOpenPath = '';
 
 
 // ============================================================
@@ -96,43 +105,83 @@ function initVTK() {
 // ============================================================
 // 加载数据集列表
 // ============================================================
-async function loadDatasetList() {
+async function loadDatasetList(path) {
+    var requestedPath = normalizeViewerPath(path);
+    currentBrowsePath = requestedPath;
+    if ($datasetPath) {
+        $datasetPath.textContent = 'Output/' + currentBrowsePath;
+    }
+    $datasetLoading.style.display = 'block';
+    $datasetLoading.textContent = '加载中...';
+
     try {
-        var resp = await fetch('/api/datasets/', { headers: authHeaders() });
+        var resp = await fetch(buildDatasetListUrl(currentBrowsePath), {
+            headers: authHeaders(),
+        });
         if (resp.status === 401) {
             window.location.href = '/login.html';
             return;
         }
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
-        var datasets = await resp.json();
+        var payload = extractDatasetItems(await resp.json());
+        var datasets = payload.items;
+        currentBrowsePath = payload.path || requestedPath;
+        if ($datasetPath) {
+            $datasetPath.textContent = 'Output/' + currentBrowsePath;
+        }
         $datasetLoading.style.display = 'none';
+        $datasetEmpty.style.display = 'none';
 
         if (datasets.length === 0) {
             $datasetEmpty.style.display = 'block';
+            $datasetList.style.display = 'none';
             return;
         }
 
         $datasetList.style.display = 'block';
         $datasetList.innerHTML = '';
 
+        if (currentBrowsePath) {
+            var upItem = document.createElement('li');
+            upItem.className = 'dataset-item';
+            upItem.onclick = function() { loadDatasetList(parentPath(currentBrowsePath)); };
+
+            var upName = document.createElement('span');
+            upName.className = 'dataset-item__name dataset-item__name--dir';
+            upName.textContent = '..';
+            upItem.appendChild(upName);
+            $datasetList.appendChild(upItem);
+        }
+
         datasets.forEach(function(ds) {
             var li = document.createElement('li');
             li.className = 'dataset-item';
-            li.onclick = function() { loadDataset(ds.filename, ds.size_human, li); };
+            li.dataset.path = ds.path;
+            if (ds.is_dir) {
+                li.onclick = function() { loadDatasetList(ds.path); };
+            } else {
+                li.onclick = function() { loadDataset(ds.path, ds.size_human, li); };
+            }
 
             var nameSpan = document.createElement('span');
-            nameSpan.className = 'dataset-item__name';
-            nameSpan.textContent = ds.filename;
+            nameSpan.className = 'dataset-item__name' + (ds.is_dir ? ' dataset-item__name--dir' : '');
+            nameSpan.textContent = ds.name;
 
             var sizeSpan = document.createElement('span');
             sizeSpan.className = 'dataset-item__size';
-            sizeSpan.textContent = ds.size_human;
+            sizeSpan.textContent = ds.is_dir ? '' : ds.size_human;
 
             li.appendChild(nameSpan);
             li.appendChild(sizeSpan);
             $datasetList.appendChild(li);
         });
+
+        if (pendingOpenPath) {
+            var targetPath = pendingOpenPath;
+            pendingOpenPath = '';
+            await loadDataset(targetPath, '', null);
+        }
     } catch (e) {
         $datasetLoading.textContent = '加载失败: ' + e.message;
     }
@@ -142,35 +191,61 @@ async function loadDatasetList() {
 // ============================================================
 // 加载并渲染数据集
 // ============================================================
-async function loadDataset(filename, sizeHuman, listItem) {
+async function fetchDatasetArrayBuffer(datasetPath) {
+    var candidates = buildDatasetFileCandidates(datasetPath);
+    var lastError = null;
+
+    for (var i = 0; i < candidates.length; i++) {
+        var resp = await fetch(candidates[i], { headers: authHeaders() });
+        if (resp.status === 401) {
+            window.location.href = '/login.html';
+            return null;
+        }
+        if (resp.status === 404 && i < candidates.length - 1) {
+            lastError = new Error('下载失败: HTTP 404');
+            continue;
+        }
+        if (!resp.ok) {
+            throw new Error('下载失败: HTTP ' + resp.status);
+        }
+        return await resp.arrayBuffer();
+    }
+
+    throw lastError || new Error('下载失败');
+}
+
+
+async function loadDataset(datasetPath, sizeHuman, listItem) {
+    var normalizedPath = normalizeViewerPath(datasetPath);
+    var displayName = baseName(normalizedPath);
+
     // 高亮选中项
     document.querySelectorAll('.dataset-item--active').forEach(function(el) {
         el.classList.remove('dataset-item--active');
     });
+    if (!listItem && normalizedPath) {
+        listItem = $datasetList.querySelector('[data-path="' + normalizedPath.replace(/"/g, '\\"') + '"]');
+    }
     if (listItem) listItem.classList.add('dataset-item--active');
 
     // 显示加载状态
     $welcomeOverlay.classList.add('render-overlay--hidden');
     $loadingOverlay.classList.remove('render-overlay--hidden');
-    $loadingText.textContent = '正在下载 ' + filename + '...';
+    $loadingText.textContent = '正在下载 ' + displayName + '...';
     hideError();
 
     try {
         // 1. 下载文件
         var startTime = performance.now();
-        var resp = await fetch('/api/datasets/' + encodeURIComponent(filename), {
-            headers: authHeaders(),
-        });
-        if (!resp.ok) throw new Error('下载失败: HTTP ' + resp.status);
-
-        var arrayBuffer = await resp.arrayBuffer();
+        var arrayBuffer = await fetchDatasetArrayBuffer(normalizedPath);
+        if (arrayBuffer === null) return;
         var downloadTime = ((performance.now() - startTime) / 1000).toFixed(2);
 
-        $loadingText.textContent = '解析 ' + filename + '...';
+        $loadingText.textContent = '解析 ' + displayName + '...';
 
         // 2. 根据扩展名选择 Reader
-        var ext = filename.split('.').pop().toLowerCase();
-        var reader = createReader(ext);
+        var ext = displayName.split('.').pop().toLowerCase();
+        var reader = await createReader(ext);
         if (!reader) {
             throw new Error('不支持的格式: .' + ext);
         }
@@ -218,15 +293,15 @@ async function loadDataset(filename, sizeHuman, listItem) {
         var nCells  = output.getNumberOfCells  ? output.getNumberOfCells()  : 0;
         $vertexCount.textContent = nPoints.toLocaleString();
         $cellCount.textContent   = nCells.toLocaleString();
-        $fileSize.textContent    = sizeHuman;
+        $fileSize.textContent    = sizeHuman || '-';
         $statusBar.style.display = 'flex';
 
         $modelInfo.innerHTML =
-            '<strong>' + escapeHtml(filename) + '</strong><br>' +
+            '<strong>' + escapeHtml(displayName) + '</strong><br>' +
             '顶点: ' + nPoints.toLocaleString() + '<br>' +
             '单元: ' + nCells.toLocaleString() + '<br>' +
             '下载: ' + downloadTime + 's<br>' +
-            '大小: ' + sizeHuman;
+            '大小: ' + (sizeHuman || '-');
 
         // 隐藏加载提示
         $loadingOverlay.classList.add('render-overlay--hidden');
@@ -246,7 +321,8 @@ async function loadDataset(filename, sizeHuman, listItem) {
 function createReader(ext) {
     switch (ext) {
         case 'vtp': return vtkXMLPolyDataReader.newInstance();
-        case 'vtu': return vtkXMLUnstructuredGridReader.newInstance();
+        case 'vtu':
+            throw new Error('VTU 暂不支持在线预览，请先导出为 VTP / OBJ / STL');
         case 'stl': return vtkSTLReader.newInstance();
         case 'obj': return vtkOBJReader.newInstance();
         default:    return null;
@@ -466,7 +542,14 @@ $btnResetCamera.addEventListener('click', function() {
         window.location.href = '/login.html';
         return;
     }
+    var initialPath = normalizeViewerPath(new URLSearchParams(window.location.search).get('path') || '');
+    if (initialPath && initialPath.indexOf('.') !== -1) {
+        pendingOpenPath = initialPath;
+        currentBrowsePath = parentPath(initialPath);
+    } else {
+        currentBrowsePath = initialPath;
+    }
     initVTK();
     toggleAxes(); // 默认显示坐标轴
-    loadDatasetList();
+    loadDatasetList(currentBrowsePath);
 })();

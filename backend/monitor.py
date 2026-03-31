@@ -1,15 +1,17 @@
-﻿"""
+"""
 实时监控 - 心跳追踪与会话管理
 """
 
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.database import db, CONFIG
 from backend.auth import get_current_user, require_admin
 from backend.models import UserInfo
+from backend.resource_pool_service import ResourcePoolService
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,9 @@ SESSION_TIMEOUT_SECONDS = _monitor_cfg.get("session_timeout_seconds", 120)
 
 router = APIRouter(prefix="/api/monitor", tags=["monitor"])
 admin_monitor_router = APIRouter(prefix="/api/admin/monitor", tags=["admin-monitor"])
+pool_service = ResourcePoolService(db=db)
+SESSION_RECLAIMED_DETAIL = "会话已被管理员回收"
+SESSION_RECLAIMED_CODE = "session_reclaimed"
 
 
 # ---- 请求模型 ----
@@ -28,6 +33,75 @@ class HeartbeatRequest(BaseModel):
 
 class SessionEndRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=36)
+
+
+class ActivityRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=36)
+
+
+def _is_reclaim_pending_session(session_id: str, user_id: int) -> bool:
+    row = db.execute_query(
+        """
+        SELECT 1
+        FROM active_session
+        WHERE session_id = %(sid)s AND user_id = %(uid)s AND status = 'reclaim_pending'
+        LIMIT 1
+        """,
+        {"sid": session_id, "uid": user_id},
+        fetch_one=True,
+    )
+    return bool(row)
+
+
+def _reclaimed_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={
+            "detail": SESSION_RECLAIMED_DETAIL,
+            "code": SESSION_RECLAIMED_CODE,
+        },
+    )
+
+
+def user_has_other_active_sessions(
+    user_id: int,
+    exclude_session_id: str | None = None,
+    session_db=None,
+) -> bool:
+    session_db = session_db or db
+    params = {"uid": user_id}
+    extra_where = ""
+    if exclude_session_id:
+        extra_where = " AND session_id <> %(exclude_sid)s"
+        params["exclude_sid"] = exclude_session_id
+
+    row = session_db.execute_query(
+        f"""
+        SELECT 1 AS exists_flag
+        FROM active_session
+        WHERE user_id = %(uid)s AND status = 'active'{extra_where}
+        LIMIT 1
+        """,
+        params,
+        fetch_one=True,
+    )
+    return bool(row)
+
+
+def invalidate_user_session_if_safe(
+    guac_service,
+    user_id: int,
+    exclude_session_id: str | None = None,
+    session_db=None,
+) -> bool:
+    if user_has_other_active_sessions(
+        user_id,
+        exclude_session_id=exclude_session_id,
+        session_db=session_db,
+    ):
+        return False
+    guac_service.invalidate_user_session(f"portal_u{user_id}")
+    return True
 
 
 # ---- 普通用户端点 ----
@@ -44,6 +118,8 @@ def heartbeat(req: HeartbeatRequest, user: UserInfo = Depends(get_current_user))
         {"sid": req.session_id, "uid": user.user_id},
     )
     if rows == 0:
+        if _is_reclaim_pending_session(req.session_id, user.user_id):
+            return _reclaimed_response()
         raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在或已结束")
     return {"ok": True}
 
@@ -53,14 +129,34 @@ def session_end(req: SessionEndRequest):
     """关闭会话: sendBeacon 调用, 无 JWT (浏览器限制).
     安全性依赖 session_id UUID 的不可猜测性。
     """
-    db.execute_update(
+    rows = db.execute_update(
         """
         UPDATE active_session
         SET status = 'disconnected', ended_at = NOW()
-        WHERE session_id = %(sid)s AND status = 'active'
+        WHERE session_id = %(sid)s AND status IN ('active', 'reclaim_pending')
         """,
         {"sid": req.session_id},
     )
+    if rows > 0:
+        dispatch_ready_queue_entries()
+    return {"ok": True}
+
+
+@router.post("/activity")
+def activity(req: ActivityRequest, user: UserInfo = Depends(get_current_user)):
+    """显式用户活动上报: 更新 last_activity_at。"""
+    rows = db.execute_update(
+        """
+        UPDATE active_session
+        SET last_activity_at = NOW()
+        WHERE session_id = %(sid)s AND user_id = %(uid)s AND status = 'active'
+        """,
+        {"sid": req.session_id, "uid": user.user_id},
+    )
+    if rows == 0:
+        if _is_reclaim_pending_session(req.session_id, user.user_id):
+            return _reclaimed_response()
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在或已结束")
     return {"ok": True}
 
 
@@ -70,7 +166,6 @@ def session_end(req: SessionEndRequest):
 def monitor_overview(admin: UserInfo = Depends(require_admin)):
     """总览: 每个应用的活跃用户数"""
     timeout = SESSION_TIMEOUT_SECONDS
-
     # 所有应用 (含无活跃连接的)
     apps = db.execute_query(
         "SELECT id, name, icon FROM remote_app WHERE is_active = 1 ORDER BY id"
@@ -80,9 +175,10 @@ def monitor_overview(admin: UserInfo = Depends(require_admin)):
     counts = db.execute_query(
         """
         SELECT app_id, COUNT(*) AS cnt
-        FROM active_session
-        WHERE status = 'active'
-          AND last_heartbeat > DATE_SUB(NOW(), INTERVAL %(timeout)s SECOND)
+        FROM active_session s
+        LEFT JOIN resource_pool p ON p.id = s.pool_id
+        WHERE status IN ('active', 'reclaim_pending')
+          AND TIMESTAMPDIFF(SECOND, s.last_heartbeat, NOW()) <= COALESCE(p.stale_timeout_seconds, %(timeout)s)
         GROUP BY app_id
         """,
         {"timeout": timeout},
@@ -105,9 +201,10 @@ def monitor_overview(admin: UserInfo = Depends(require_admin)):
     online_row = db.execute_query(
         """
         SELECT COUNT(DISTINCT user_id) AS cnt
-        FROM active_session
-        WHERE status = 'active'
-          AND last_heartbeat > DATE_SUB(NOW(), INTERVAL %(timeout)s SECOND)
+        FROM active_session s
+        LEFT JOIN resource_pool p ON p.id = s.pool_id
+        WHERE status IN ('active', 'reclaim_pending')
+          AND TIMESTAMPDIFF(SECOND, s.last_heartbeat, NOW()) <= COALESCE(p.stale_timeout_seconds, %(timeout)s)
         """,
         {"timeout": timeout},
         fetch_one=True,
@@ -134,8 +231,9 @@ def monitor_sessions(admin: UserInfo = Depends(require_admin)):
         FROM active_session s
         JOIN portal_user u ON s.user_id = u.id
         JOIN remote_app a ON s.app_id = a.id
-        WHERE s.status = 'active'
-          AND s.last_heartbeat > DATE_SUB(NOW(), INTERVAL %(timeout)s SECOND)
+        LEFT JOIN resource_pool p ON p.id = s.pool_id
+        WHERE s.status IN ('active', 'reclaim_pending')
+          AND TIMESTAMPDIFF(SECOND, s.last_heartbeat, NOW()) <= COALESCE(p.stale_timeout_seconds, %(timeout)s)
         ORDER BY s.started_at DESC
         """,
         {"timeout": timeout},
@@ -153,16 +251,43 @@ def monitor_sessions(admin: UserInfo = Depends(require_admin)):
 # ---- 后台清理任务 ----
 
 def cleanup_stale_sessions():
-    """清理超时会话: last_heartbeat 超过阈值且 status 仍为 active 的行"""
-    timeout = SESSION_TIMEOUT_SECONDS
-    rows = db.execute_update(
-        """
-        UPDATE active_session
-        SET status = 'disconnected', ended_at = NOW()
-        WHERE status = 'active'
-          AND last_heartbeat < DATE_SUB(NOW(), INTERVAL %(timeout)s SECOND)
-        """,
-        {"timeout": timeout},
-    )
-    if rows > 0:
-        logger.info("清理超时会话: %d 条", rows)
+    """按资源池 stale 策略回收失联会话。"""
+    reclaimed = pool_service.reclaim_stale_sessions()
+    if reclaimed:
+        from backend.router import guac_service
+        for item in reclaimed:
+            invalidate_user_session_if_safe(
+                guac_service,
+                int(item["user_id"]),
+                exclude_session_id=str(item["session_id"]),
+            )
+        logger.info("清理超时会话: %d 条", len(reclaimed))
+        dispatch_ready_queue_entries()
+    return len(reclaimed)
+
+
+def cleanup_idle_sessions():
+    """按资源池 idle 策略回收空闲会话。"""
+    reclaimed = pool_service.reclaim_idle_sessions()
+    if reclaimed:
+        from backend.router import guac_service
+        for item in reclaimed:
+            invalidate_user_session_if_safe(
+                guac_service,
+                int(item["user_id"]),
+                exclude_session_id=str(item["session_id"]),
+            )
+        logger.info("清理空闲会话: %d 条", len(reclaimed))
+    return len(reclaimed)
+
+
+def dispatch_ready_queue_entries():
+    """有容量时自动把队首放行到 ready。"""
+    try:
+        moved = pool_service.dispatch_ready_entries()
+    except RuntimeError:
+        logger.info("资源池当前有锁竞争，跳过本次自动放行")
+        return 0
+    if moved:
+        logger.info("自动放行队列: %d 条", len(moved))
+    return len(moved)

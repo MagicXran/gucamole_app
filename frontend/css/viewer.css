@@ -84,6 +84,13 @@ html, body {
     overflow-y: auto;
 }
 
+.dataset-path {
+    margin-bottom: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--accent);
+    word-break: break-all;
+}
+
 .dataset-item {
     padding: 0.5rem 0.75rem;
     border-radius: 6px;
@@ -111,11 +118,20 @@ html, body {
     flex: 1;
 }
 
+.dataset-item__name--dir {
+    color: var(--accent);
+    font-weight: 600;
+}
+
 .dataset-item__size {
     color: var(--text-muted);
     font-size: 0.75rem;
     margin-left: 0.5rem;
     flex-shrink: 0;
+}
+
+.dataset-item__size:empty {
+    display: none;
 }
 
 .dataset-empty {

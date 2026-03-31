@@ -161,6 +161,11 @@ class GuacamoleService:
         self._cache.invalidate_all()
         logger.info("已清空全部 Guacamole session 缓存")
 
+    def invalidate_user_session(self, username: str):
+        """尽力让指定门户用户的 Guacamole token 失效。"""
+        self._cache.invalidate(username)
+        logger.info("已清除用户 Guacamole session 缓存: %s", username)
+
     async def _validate_token(self, auth_token: str) -> bool:
         """向 Guacamole 验证 authToken 是否仍然有效
 

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Guacamole RemoteApp 门户 - FastAPI 主应用
 """
 
@@ -19,7 +19,14 @@ from backend.database import CONFIG
 from backend.auth import router as auth_router
 from backend.router import router
 from backend.admin_router import router as admin_router
-from backend.monitor import router as monitor_router, admin_monitor_router, cleanup_stale_sessions
+from backend.admin_pool_router import router as admin_pool_router
+from backend.monitor import (
+    router as monitor_router,
+    admin_monitor_router,
+    cleanup_stale_sessions,
+    cleanup_idle_sessions,
+    dispatch_ready_queue_entries,
+)
 from backend.dataset_router import router as dataset_router
 from backend.file_router import router as file_router, cleanup_stale_uploads
 
@@ -36,13 +43,15 @@ CLEANUP_INTERVAL = _monitor_cfg.get("cleanup_interval_seconds", 60)
 
 
 async def _cleanup_loop():
-    """后台循环: 定期清理超时会话"""
+    """后台循环: 定期清理占用并自动放行队首"""
     while True:
         await asyncio.sleep(CLEANUP_INTERVAL)
         try:
             cleanup_stale_sessions()
+            cleanup_idle_sessions()
+            dispatch_ready_queue_entries()
         except Exception:
-            logger.exception("清理超时会话异常")
+            logger.exception("资源池清理/放行异常")
 
 
 async def _upload_cleanup_loop():
@@ -99,6 +108,7 @@ def health():
 app.include_router(auth_router)
 app.include_router(router)
 app.include_router(admin_router)
+app.include_router(admin_pool_router)
 app.include_router(monitor_router)
 app.include_router(admin_monitor_router)
 app.include_router(dataset_router)

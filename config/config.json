@@ -1,4 +1,4 @@
-﻿{
+{
   "database": {
     "host": "127.0.0.1",
     "port": 33060,
@@ -24,6 +24,7 @@
       "enabled": true,
       "name": "GuacDrive",
       "base_path": "/drive",
+      "results_root": "Output",
       "create_path": true
     }
   },

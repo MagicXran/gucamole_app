@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D 仿真查看器 - VTK.js</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="css/viewer.css">
 </head>
 <body>
@@ -19,11 +20,12 @@
             <!-- 数据集列表 -->
             <div class="sidebar__section">
                 <div class="sidebar__section-title">数据集</div>
+                <div id="dataset-path" class="dataset-path">Output/</div>
                 <div id="dataset-loading" style="color:var(--text-muted);font-size:0.85rem;">加载中...</div>
                 <ul id="dataset-list" class="dataset-list" style="display:none;"></ul>
                 <div id="dataset-empty" class="dataset-empty" style="display:none;">
                     暂无数据文件<br>
-                    <span style="font-size:0.75rem;">请将 .vtp / .vtu / .stl 文件放入 data/samples/</span>
+                    <span style="font-size:0.75rem;">请将 .vtp / .vtu / .stl / .obj 文件放入个人空间的 Output/ 目录</span>
                 </div>
             </div>
 
@@ -94,7 +96,7 @@
                 <div class="welcome-hint">
                     <span class="welcome-hint__icon">&#x1F52C;</span>
                     <div class="welcome-hint__title">选择数据集开始查看</div>
-                    <div class="welcome-hint__desc">支持 VTP / VTU / STL / OBJ 格式</div>
+                    <div class="welcome-hint__desc">支持 VTP / STL / OBJ 在线预览，VTU 暂不支持</div>
                 </div>
             </div>
 
@@ -125,14 +127,6 @@
         </div>
     </div>
 
-    <!-- VTK.js via ESM importmap -->
-    <script type="importmap">
-    {
-        "imports": {
-            "@kitware/vtk.js/": "https://esm.sh/@kitware/vtk.js/"
-        }
-    }
-    </script>
-    <script type="module" src="js/viewer.js"></script>
+    <script type="module" src="js/viewer.bundle.js"></script>
 </body>
 </html>

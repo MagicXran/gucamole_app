@@ -1,4 +1,4 @@
-﻿"""
+"""
 FastAPI 路由 - RemoteApp 门户 API
 """
 
@@ -6,12 +6,19 @@ import logging
 import uuid
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 
 from backend.database import db, CONFIG
-from backend.models import RemoteAppResponse, LaunchResponse, UserInfo
+from backend.models import (
+    LaunchOrQueueResponse,
+    LaunchQueueConsumeRequest,
+    QueueStatusResponse,
+    ResourcePoolCardResponse,
+    UserInfo,
+)
 from backend.guacamole_crypto import GuacamoleCrypto
 from backend.guacamole_service import GuacamoleService
+from backend.resource_pool_service import ResourcePoolService
 from backend.auth import get_current_user
 from backend.audit import log_action
 
@@ -31,6 +38,7 @@ guac_service = GuacamoleService(
     expire_minutes=_guac_cfg["token_expire_minutes"],
     db=db,
 )
+pool_service = ResourcePoolService(db=db)
 
 
 def _build_all_connections(user_id: int) -> dict:
@@ -100,57 +108,73 @@ def _build_all_connections(user_id: int) -> dict:
     return connections
 
 
-@router.get("/", response_model=List[RemoteAppResponse])
+@router.get("/", response_model=List[ResourcePoolCardResponse])
 def list_apps(user: UserInfo = Depends(get_current_user)):
-    """获取当前用户可访问的 RemoteApp 列表"""
-    query = """
-        SELECT a.id, a.name, a.icon, a.protocol, a.hostname,
-               a.port, a.remote_app, a.is_active
-        FROM remote_app a
-        JOIN remote_app_acl acl ON a.id = acl.app_id
-        WHERE acl.user_id = %(user_id)s
-          AND a.is_active = 1
-        ORDER BY a.name
-    """
-    return db.execute_query(query, {"user_id": user.user_id})
+    """获取当前用户可访问的资源池卡片列表"""
+    return pool_service.list_user_pools(user.user_id)
 
 
-@router.post("/launch/{app_id}", response_model=LaunchResponse)
+@router.get("/queue/{queue_id}", response_model=QueueStatusResponse)
+def get_queue_status(
+    queue_id: int,
+    user: UserInfo = Depends(get_current_user),
+):
+    try:
+        return pool_service.get_queue_status(queue_id=queue_id, user_id=user.user_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+
+
+@router.delete("/queue/{queue_id}", response_model=QueueStatusResponse)
+def cancel_queue(
+    queue_id: int,
+    user: UserInfo = Depends(get_current_user),
+):
+    try:
+        result = pool_service.cancel_queue(queue_id=queue_id, user_id=user.user_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    from backend.monitor import dispatch_ready_queue_entries
+    dispatch_ready_queue_entries()
+    return result
+
+
+@router.post("/launch/{app_id}", response_model=LaunchOrQueueResponse)
 async def launch_app(
     app_id: int,
     request: Request,
+    req: LaunchQueueConsumeRequest | None = Body(default=None),
     user: UserInfo = Depends(get_current_user),
 ):
-    """启动 RemoteApp，返回 Guacamole 重定向 URL"""
+    """启动资源池成员或进入排队。"""
+    try:
+        decision = pool_service.prepare_launch(
+            user_id=user.user_id,
+            requested_app_id=app_id,
+            queue_id=req.queue_id if req else None,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        code = status.HTTP_403_FORBIDDEN if "无权访问" in detail else status.HTTP_409_CONFLICT
+        raise HTTPException(code, detail)
 
-    # 1. ACL 权限校验
-    acl_query = """
-        SELECT 1 FROM remote_app_acl
-        WHERE user_id = %(user_id)s AND app_id = %(app_id)s
-    """
-    acl = db.execute_query(acl_query, {"user_id": user.user_id, "app_id": app_id}, fetch_one=True)
-    if not acl:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权访问该应用",
+    if decision["status"] != "started":
+        return LaunchOrQueueResponse(
+            status=str(decision["status"]),
+            queue_id=int(decision.get("queue_id") or 0),
+            position=int(decision.get("position") or 0),
+            pool_id=int(decision.get("pool_id") or 0),
         )
 
-    # 2. 验证目标应用存在
-    app_check = """
-        SELECT id, name FROM remote_app WHERE id = %(app_id)s AND is_active = 1
-    """
-    app = db.execute_query(app_check, {"app_id": app_id}, fetch_one=True)
-    if not app:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="应用不存在或已禁用",
-        )
-
-    # 3. 构建该用户所有可用应用的连接参数
-    #    全部打包到一个 token，确保多标签共享同一 session
-    connection_name = f"app_{app_id}"
+    # 构建该用户所有可用成员的连接参数；token 继续按用户复用
+    connection_name = str(decision["connection_name"])
     connections = _build_all_connections(user.user_id)
     if connection_name not in connections:
+        if decision.get("queue_id"):
+            pool_service.requeue_after_launch_failure(
+                queue_id=int(decision["queue_id"]),
+                last_error="连接构建异常",
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="连接构建异常",
@@ -170,7 +194,12 @@ async def launch_app(
             target_connection_name=connection_name,
             external_url=dynamic_external_url,
         )
-    except Exception:
+    except Exception as exc:
+        if decision.get("queue_id"):
+            pool_service.requeue_after_launch_failure(
+                queue_id=int(decision["queue_id"]),
+                last_error=str(exc),
+            )
         logger.exception("启动 Guacamole 连接失败: app_id=%d", app_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -181,26 +210,53 @@ async def launch_app(
     client_ip = request.client.host if request.client else "unknown"
     log_action(
         user_id=user.user_id, username=user.username, action="launch_app",
-        target_type="app", target_id=app_id, target_name=app["name"],
+        target_type="app",
+        target_id=int(decision["member_app_id"]),
+        target_name=str(decision["requested_app_name"]),
         ip_address=client_ip,
     )
 
-    # 6. 创建活跃会话记录 (实时监控)
+    # 6. 创建活跃会话记录 (实时监控 + 资源池占用)
     session_id = str(uuid.uuid4())
     try:
-        db.execute_update(
+        inserted = db.execute_update(
             """
-            INSERT INTO active_session (session_id, user_id, app_id)
-            VALUES (%(sid)s, %(uid)s, %(aid)s)
+            INSERT INTO active_session (session_id, user_id, app_id, pool_id, queue_id, last_activity_at)
+            VALUES (%(sid)s, %(uid)s, %(aid)s, %(pid)s, %(qid)s, NOW())
             """,
-            {"sid": session_id, "uid": user.user_id, "aid": app_id},
+            {
+                "sid": session_id,
+                "uid": user.user_id,
+                "aid": int(decision["member_app_id"]),
+                "pid": int(decision["pool_id"]),
+                "qid": decision.get("queue_id"),
+            },
         )
-    except Exception:
-        logger.warning("插入 active_session 失败 (不影响连接)", exc_info=True)
-        session_id = ""
+        if inserted <= 0:
+            raise RuntimeError("active_session 未写入")
+    except Exception as exc:
+        logger.warning("插入 active_session 失败", exc_info=True)
+        if decision.get("queue_id"):
+            pool_service.requeue_after_launch_failure(
+                queue_id=int(decision["queue_id"]),
+                last_error=str(exc),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="会话记录写入失败，请重试",
+        )
 
-    return LaunchResponse(
+    if decision.get("queue_id"):
+        pool_service.mark_queue_fulfilled(
+            queue_id=int(decision["queue_id"]),
+            assigned_app_id=int(decision["member_app_id"]),
+        )
+
+    return LaunchOrQueueResponse(
+        status="started",
         redirect_url=redirect_url,
         connection_name=connection_name,
         session_id=session_id,
+        pool_id=int(decision["pool_id"]),
+        queue_id=int(decision.get("queue_id") or 0),
     )

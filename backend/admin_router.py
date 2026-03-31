@@ -1,4 +1,4 @@
-﻿"""
+"""
 管理后台 API 路由 - 应用/用户/ACL/审计日志管理
 """
 
@@ -12,6 +12,7 @@ from backend.database import db
 from backend.auth import require_admin
 from backend.audit import log_action
 from backend.router import guac_service
+from backend.resource_pool_service import ResourcePoolService
 from backend.models import (
     UserInfo,
     AppCreateRequest, AppUpdateRequest, AppAdminResponse,
@@ -22,6 +23,19 @@ from backend.models import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+pool_service = ResourcePoolService(db=db)
+
+
+def _ensure_pool_exists(pool_id: int | None):
+    if pool_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "应用必须绑定到资源池")
+    pool = db.execute_query(
+        "SELECT id FROM resource_pool WHERE id = %(id)s AND is_active = 1",
+        {"id": pool_id},
+        fetch_one=True,
+    )
+    if not pool:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "资源池不存在或已禁用")
 
 
 # ============================================
@@ -41,6 +55,8 @@ def create_app(
     admin: UserInfo = Depends(require_admin),
 ):
     """创建应用"""
+    _ensure_pool_exists(req.pool_id)
+
     db.execute_update(
         """
         INSERT INTO remote_app
@@ -51,7 +67,8 @@ def create_app(
              enable_wallpaper, enable_font_smoothing,
              disable_copy, disable_paste,
              enable_audio, enable_audio_input, enable_printing,
-             timezone, keyboard_layout)
+             timezone, keyboard_layout,
+             pool_id, member_max_concurrent)
         VALUES
             (%(name)s, %(icon)s, %(protocol)s, %(hostname)s, %(port)s,
              %(rdp_username)s, %(rdp_password)s, %(domain)s, %(security)s, %(ignore_cert)s,
@@ -60,7 +77,8 @@ def create_app(
              %(enable_wallpaper)s, %(enable_font_smoothing)s,
              %(disable_copy)s, %(disable_paste)s,
              %(enable_audio)s, %(enable_audio_input)s, %(enable_printing)s,
-             %(timezone)s, %(keyboard_layout)s)
+             %(timezone)s, %(keyboard_layout)s,
+             %(pool_id)s, %(member_max_concurrent)s)
         """,
         {
             "name": req.name, "icon": req.icon, "protocol": req.protocol,
@@ -84,6 +102,8 @@ def create_app(
             "enable_printing": 1 if req.enable_printing else 0,
             "timezone": req.timezone or None,
             "keyboard_layout": req.keyboard_layout or None,
+            "pool_id": req.pool_id,
+            "member_max_concurrent": req.member_max_concurrent,
         },
     )
     app = db.execute_query(
@@ -116,6 +136,8 @@ def update_app(
     updates = req.model_dump(exclude_none=True)
     if not updates:
         return existing
+    if "pool_id" in updates:
+        _ensure_pool_exists(updates["pool_id"])
 
     # 构建动态 SET 子句
     _BOOL_COLUMNS = {
@@ -135,6 +157,7 @@ def update_app(
         f"UPDATE remote_app SET {', '.join(set_parts)} WHERE id = %(id)s", params,
     )
     guac_service.invalidate_all_sessions()
+    pool_service.cleanup_invalid_queue_entries(requested_app_id=app_id)
     client_ip = request.client.host if request.client else "unknown"
     log_action(
         admin.user_id, admin.username, "admin_update_app",
@@ -162,6 +185,7 @@ def delete_app(
         "UPDATE remote_app SET is_active = 0 WHERE id = %(id)s", {"id": app_id},
     )
     guac_service.invalidate_all_sessions()
+    pool_service.cleanup_invalid_queue_entries(requested_app_id=app_id)
     client_ip = request.client.host if request.client else "unknown"
     log_action(
         admin.user_id, admin.username, "admin_delete_app",
@@ -355,6 +379,7 @@ def update_user_acl(
             {"uid": user_id, "aid": app_id},
         )
     guac_service.invalidate_all_sessions()
+    pool_service.cleanup_invalid_queue_entries(user_id=user_id)
 
     client_ip = request.client.host if request.client else "unknown"
     log_action(

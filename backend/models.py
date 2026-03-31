@@ -1,4 +1,4 @@
-﻿"""
+"""
 Pydantic 数据模型
 """
 
@@ -79,6 +79,8 @@ class AppCreateRequest(BaseModel):
     enable_printing: bool = False
     timezone: Optional[str] = Field(default=None, max_length=50)
     keyboard_layout: Optional[str] = Field(default=None, max_length=50)
+    pool_id: Optional[int] = Field(default=None, ge=1)
+    member_max_concurrent: int = Field(default=1, ge=1, le=9999)
 
     @field_validator("color_depth")
     @classmethod
@@ -121,6 +123,8 @@ class AppUpdateRequest(BaseModel):
     enable_printing: Optional[bool] = None
     timezone: Optional[str] = Field(default=None, max_length=50)
     keyboard_layout: Optional[str] = Field(default=None, max_length=50)
+    pool_id: Optional[int] = Field(default=None, ge=1)
+    member_max_concurrent: Optional[int] = Field(default=None, ge=1, le=9999)
     is_active: Optional[bool] = None
 
     @field_validator("color_depth")
@@ -166,6 +170,8 @@ class AppAdminResponse(BaseModel):
     enable_printing: bool = False
     timezone: Optional[str] = None
     keyboard_layout: Optional[str] = None
+    pool_id: Optional[int] = None
+    member_max_concurrent: int = 1
     is_active: bool = True
 
 
@@ -221,3 +227,80 @@ class PaginatedResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class ResourcePoolCardResponse(BaseModel):
+    """资源池卡片数据"""
+    id: int = Field(..., description="代表性 launch_app_id")
+    pool_id: int
+    name: str
+    icon: str = "desktop"
+    protocol: str = "rdp"
+    active_count: int = 0
+    queued_count: int = 0
+    max_concurrent: int = 1
+    has_capacity: bool = True
+
+
+class LaunchQueueConsumeRequest(BaseModel):
+    """消费 ready 资格时的请求体"""
+    queue_id: Optional[int] = None
+
+
+class QueueStatusResponse(BaseModel):
+    """排队状态响应"""
+    queue_id: int
+    pool_id: int
+    status: str
+    position: int = 0
+    ready_expires_at: Any = None
+
+
+class LaunchOrQueueResponse(BaseModel):
+    """启动或入队的联合响应"""
+    status: str
+    redirect_url: str = ""
+    connection_name: str = ""
+    session_id: str = ""
+    queue_id: int = 0
+    position: int = 0
+    pool_id: int = 0
+
+
+class ResourcePoolCreateRequest(BaseModel):
+    """创建资源池"""
+    name: str = Field(..., min_length=1, max_length=200)
+    icon: str = Field(default="desktop", max_length=100)
+    max_concurrent: int = Field(default=1, ge=1, le=9999)
+    auto_dispatch_enabled: bool = True
+    dispatch_grace_seconds: int = Field(default=120, ge=10, le=86400)
+    stale_timeout_seconds: int = Field(default=120, ge=30, le=86400)
+    idle_timeout_seconds: Optional[int] = Field(default=None, ge=60, le=604800)
+    is_active: bool = True
+
+
+class ResourcePoolUpdateRequest(BaseModel):
+    """修改资源池"""
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    icon: Optional[str] = Field(default=None, max_length=100)
+    max_concurrent: Optional[int] = Field(default=None, ge=1, le=9999)
+    auto_dispatch_enabled: Optional[bool] = None
+    dispatch_grace_seconds: Optional[int] = Field(default=None, ge=10, le=86400)
+    stale_timeout_seconds: Optional[int] = Field(default=None, ge=30, le=86400)
+    idle_timeout_seconds: Optional[int] = Field(default=None, ge=60, le=604800)
+    is_active: Optional[bool] = None
+
+
+class ResourcePoolAdminResponse(BaseModel):
+    """资源池管理响应"""
+    id: int
+    name: str
+    icon: str = "desktop"
+    max_concurrent: int
+    auto_dispatch_enabled: bool = True
+    dispatch_grace_seconds: int
+    stale_timeout_seconds: int
+    idle_timeout_seconds: Optional[int] = None
+    is_active: bool = True
+    active_count: int = 0
+    queued_count: int = 0

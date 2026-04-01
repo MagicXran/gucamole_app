@@ -15,8 +15,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.database import CONFIG
+from backend.database import CONFIG, db
 from backend.auth import router as auth_router
+from backend.bootstrap_admin import ensure_bootstrap_admin
 from backend.router import router
 from backend.admin_router import router as admin_router
 from backend.admin_pool_router import router as admin_pool_router
@@ -67,6 +68,9 @@ async def _upload_cleanup_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期: 启动后台清理任务"""
+    bootstrap_result = ensure_bootstrap_admin(db)
+    if bootstrap_result.get("created"):
+        logger.warning("启动管理员已创建: %s", bootstrap_result.get("username"))
     task = asyncio.create_task(_cleanup_loop())
     upload_task = asyncio.create_task(_upload_cleanup_loop())
     logger.info("会话清理任务已启动 (间隔 %ds)", CLEANUP_INTERVAL)

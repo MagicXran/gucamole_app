@@ -15,7 +15,7 @@ services:
     user: root  # /drive volume 需要写权限; guacd 仅在内网不对外暴露
     environment:
       TZ: ${TZ}
-      GUACD_LOG_LEVEL: debug
+      GUACD_LOG_LEVEL: ${GUACD_LOG_LEVEL:-info}
     volumes:
       - guacd_drive:/drive
 
@@ -80,7 +80,10 @@ services:
       GUACAMOLE_INTERNAL_URL: http://guac-web:8080/guacamole
       GUACAMOLE_EXTERNAL_URL: http://${PORTAL_HOST:-localhost}:${PORTAL_PORT:-80}/guacamole
       GUACAMOLE_JSON_SECRET_KEY: ${JSON_SECRET_KEY:-${GUACAMOLE_JSON_SECRET_KEY}}
-      PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-f7a3d9e2c1b5084a6e3f1d8b2a5c7e09}
+      PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-${JSON_SECRET_KEY:-${GUACAMOLE_JSON_SECRET_KEY}}}
+      PORTAL_BOOTSTRAP_ADMIN_USERNAME: ${PORTAL_BOOTSTRAP_ADMIN_USERNAME:-}
+      PORTAL_BOOTSTRAP_ADMIN_PASSWORD: ${PORTAL_BOOTSTRAP_ADMIN_PASSWORD:-}
+      PORTAL_BOOTSTRAP_ADMIN_DISPLAY_NAME: ${PORTAL_BOOTSTRAP_ADMIN_DISPLAY_NAME:-管理员}
     volumes:
       - guacd_drive:/drive
     depends_on:

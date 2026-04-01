@@ -1,510 +1,501 @@
 """
-file_router.py 综合测试 — Mock DB, 测试所有关键逻辑
+Pytest coverage for backend.file_router helpers and endpoints.
 """
 
-import sys
-import os
+import asyncio
+import importlib
+import io
 import json
-import tempfile
-import shutil
-import re
-import time
-import uuid
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
-# ================================================================
-# Phase 0: Mock DB layer BEFORE any backend import
-# ================================================================
+import httpx
+import jwt as pyjwt
+import pytest
+from fastapi import FastAPI, HTTPException
 
-# Load config
-config_path = Path(__file__).parent.parent / "config" / "config.json"
+# Inject mocked upstream modules before importing backend.file_router so the
+# tests stay isolated from the real DB/auth stack.
+config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"
 mock_config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+original_backend_pkg = sys.modules.get("backend")
+had_backend_file_router_attr = (
+    hasattr(original_backend_pkg, "file_router") if original_backend_pkg else False
+)
+original_backend_file_router_attr = (
+    getattr(original_backend_pkg, "file_router")
+    if had_backend_file_router_attr
+    else None
+)
+_original_modules = {
+    "backend.database": sys.modules.get("backend.database"),
+    "backend.audit": sys.modules.get("backend.audit"),
+    "backend.auth": sys.modules.get("backend.auth"),
+    "backend.file_router": sys.modules.get("backend.file_router"),
+}
 
-# Create mock database module and inject into sys.modules BEFORE import
-mock_db = MagicMock()
-mock_database_module = MagicMock()
-mock_database_module.db = mock_db
-mock_database_module.CONFIG = mock_config
-mock_database_module.Database = MagicMock
+mock_db = Mock(spec_set=["execute_query"])
+mock_db.execute_query.return_value = None
+mock_database_module = SimpleNamespace(
+    db=mock_db,
+    CONFIG=mock_config,
+    Database=object,
+)
 sys.modules["backend.database"] = mock_database_module
 
-# Mock audit module
-mock_audit_module = MagicMock()
-mock_audit_module.log_action = MagicMock()
+mock_audit_module = SimpleNamespace(log_action=Mock())
 sys.modules["backend.audit"] = mock_audit_module
 
-# Mock auth module — create real JWT functions
-import jwt as pyjwt
-mock_auth_module = MagicMock()
-mock_auth_module.JWT_SECRET = "test-secret-key"
-mock_auth_module.JWT_ALGORITHM = "HS256"
-
-# Real get_current_user (will be overridden in TestClient)
-from backend.models import UserInfo
-mock_auth_module.get_current_user = MagicMock()
-sys.modules["backend.auth"] = mock_auth_module
-
-# Now import file_router
-from backend.file_router import (
-    _safe_resolve, _validate_filename, _validate_upload_id,
-    _format_bytes, _create_download_token, _verify_download_token,
-    _calc_dir_size, _user_dir, DRIVE_BASE,
+mock_auth_module = SimpleNamespace(
+    JWT_SECRET="0123456789abcdef0123456789abcdef",
+    JWT_ALGORITHM="HS256",
 )
-import backend.file_router as fr
 
-print("[OK] file_router imported successfully")
-
-all_errors = []
-
-
-def run_test(name, fn):
-    try:
-        fn()
-        print(f"  {name}: [OK]")
-    except AssertionError as e:
-        all_errors.append(f"{name}: {e}")
-        print(f"  {name}: [FAIL] {e}")
-    except Exception as e:
-        all_errors.append(f"{name}: {e}")
-        print(f"  {name}: [ERROR] {e}")
-
-
-# ================================================================
-# Phase 1: _format_bytes
-# ================================================================
-
-print("\n" + "=" * 60)
-print("Phase 1: _format_bytes")
-print("=" * 60)
-
-tests_fb = [
-    (0, "0 B"), (512, "512 B"), (1024, "1.0 KB"),
-    (1048576, "1.0 MB"), (1073741824, "1.00 GB"),
-    (5368709120, "5.00 GB"),
-]
-for inp, exp in tests_fb:
-    def test(i=inp, e=exp):
-        result = _format_bytes(i)
-        assert result == e, f"expected '{e}', got '{result}'"
-    run_test(f"_format_bytes({inp})", test)
-
-# ================================================================
-# Phase 2: _validate_filename
-# ================================================================
-
-print("\n" + "=" * 60)
-print("Phase 2: _validate_filename")
-print("=" * 60)
-
-valid_names = ["report.pdf", "my file.docx", "\u4e2d\u6587\u6587\u4ef6.txt", "data_2024.csv"]
-for name in valid_names:
-    def test(n=name):
-        _validate_filename(n)  # should not raise
-    run_test(f"accept '{name}'", test)
-
-invalid_names = ["", ".", "..", "CON", "CON.txt", "NUL", "file<name", "a:b"]
-for name in invalid_names:
-    def test(n=name):
-        try:
-            _validate_filename(n)
-            raise AssertionError("should have been rejected")
-        except Exception as e:
-            if "AssertionError" in str(type(e)):
-                raise
-    run_test(f"reject '{name}'", test)
-
-# ================================================================
-# Phase 3: _validate_upload_id
-# ================================================================
-
-print("\n" + "=" * 60)
-print("Phase 3: _validate_upload_id (path traversal defense)")
-print("=" * 60)
-
-valid_ids = ["a1b2c3d4e5f67890", "0000000000000000", "abcdef0123456789"]
-for uid in valid_ids:
-    def test(u=uid):
-        _validate_upload_id(u)
-    run_test(f"accept '{uid}'", test)
-
-invalid_ids = [
-    ("empty", ""),
-    ("traversal", "../../etc/passwd"),
-    ("too_short", "a1b2c3d4e5f6789"),
-    ("too_long", "a1b2c3d4e5f678901"),
-    ("uppercase", "ABCDEF0123456789"),
-    ("bad_char", "a1b2c3d4e5f6789g"),
-    ("path_attack", "../../../evil.meta"),
-]
-for label, uid in invalid_ids:
-    def test(u=uid):
-        try:
-            _validate_upload_id(u)
-            raise AssertionError("should have been rejected")
-        except Exception as e:
-            if "AssertionError" in str(type(e)):
-                raise
-    run_test(f"reject {label}: '{uid}'", test)
-
-# ================================================================
-# Phase 4: _safe_resolve (path traversal)
-# ================================================================
-
-print("\n" + "=" * 60)
-print("Phase 4: _safe_resolve path traversal")
-print("=" * 60)
-
-tmpdir = Path(tempfile.mkdtemp())
-original_base = fr.DRIVE_BASE
-fr.DRIVE_BASE = tmpdir
-
-user_dir = tmpdir / "portal_u1"
-user_dir.mkdir()
-(user_dir / "test.txt").write_text("hello")
-(user_dir / "subdir").mkdir()
-(user_dir / "subdir" / "nested.txt").write_text("nested")
-
-# Valid paths
-valid_paths = ["", ".", "/", "test.txt", "subdir", "subdir/nested.txt"]
-for p in valid_paths:
-    def test(path=p):
-        result = _safe_resolve(1, path)
-        # Must be inside user_dir
-        resolved_user = user_dir.resolve()
-        resolved_result = result.resolve()
-        assert str(resolved_result).startswith(str(resolved_user)), \
-            f"result {resolved_result} outside user dir {resolved_user}"
-    run_test(f"valid path '{p}'", test)
-
-# Attack paths
-attack_paths = [
-    ("parent traversal", "../../../etc/passwd"),
-    ("backslash traversal", "..\\..\\..\\etc\\passwd"),
-    ("mid-path traversal", "subdir/../../etc/passwd"),
-    ("user escape", "../portal_u2/secret.txt"),
-]
-for label, p in attack_paths:
-    def test(path=p):
-        try:
-            result = _safe_resolve(1, path)
-            # If it returned, check it's still inside user_dir
-            resolved_user = user_dir.resolve()
-            resolved_result = result.resolve()
-            if not str(resolved_result).startswith(str(resolved_user)):
-                raise AssertionError(f"ESCAPED to {resolved_result}")
-        except Exception as e:
-            if "AssertionError" in str(type(e)):
-                raise
-            # HTTPException = correctly blocked
-            pass
-    run_test(f"block {label}", test)
-
-fr.DRIVE_BASE = original_base
-shutil.rmtree(tmpdir)
-
-# ================================================================
-# Phase 5: Download token security
-# ================================================================
-
-print("\n" + "=" * 60)
-print("Phase 5: Download token security")
-print("=" * 60)
-
-import jwt as pyjwt
-
-# Valid token
-def test_valid_token():
-    token = _create_download_token(1, "test/file.pdf")
-    payload = _verify_download_token(token)
-    assert payload["user_id"] == 1
-    assert payload["path"] == "test/file.pdf"
-    assert payload["type"] == "download"
-run_test("valid download token", test_valid_token)
-
-# Regular JWT should be rejected
-def test_regular_jwt():
-    regular = pyjwt.encode(
-        {"user_id": 1, "username": "test",
-         "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
-        "test-secret-key", algorithm="HS256"
-    )
-    try:
-        _verify_download_token(regular)
-        raise AssertionError("regular JWT accepted as download token")
-    except Exception as e:
-        if "AssertionError" in str(type(e)):
-            raise
-run_test("reject regular JWT as download token", test_regular_jwt)
-
-# Expired token
-def test_expired():
-    expired = pyjwt.encode(
-        {"user_id": 1, "path": "x.txt", "type": "download",
-         "exp": datetime.now(timezone.utc) - timedelta(minutes=1)},
-        "test-secret-key", algorithm="HS256"
-    )
-    try:
-        _verify_download_token(expired)
-        raise AssertionError("expired token accepted")
-    except Exception as e:
-        if "AssertionError" in str(type(e)):
-            raise
-run_test("reject expired token", test_expired)
-
-# Wrong secret
-def test_wrong_secret():
-    bad = pyjwt.encode(
-        {"user_id": 1, "path": "x.txt", "type": "download",
-         "exp": datetime.now(timezone.utc) + timedelta(minutes=5)},
-        "wrong-secret", algorithm="HS256"
-    )
-    try:
-        _verify_download_token(bad)
-        raise AssertionError("wrong-secret token accepted")
-    except Exception as e:
-        if "AssertionError" in str(type(e)):
-            raise
-run_test("reject wrong-secret token", test_wrong_secret)
-
-# ================================================================
-# Phase 6: _calc_dir_size
-# ================================================================
-
-print("\n" + "=" * 60)
-print("Phase 6: _calc_dir_size")
-print("=" * 60)
-
-tmpdir = Path(tempfile.mkdtemp())
-(tmpdir / "a.txt").write_bytes(b"x" * 1000)
-(tmpdir / "sub").mkdir()
-(tmpdir / "sub" / "b.txt").write_bytes(b"y" * 2000)
-(tmpdir / ".hidden").write_bytes(b"z" * 500)
-
-def test_dir_size():
-    total = _calc_dir_size(tmpdir)
-    assert total == 3500, f"expected 3500, got {total}"
-run_test("dir size (1000+2000+500=3500)", test_dir_size)
-
-def test_empty_dir():
-    empty = tmpdir / "empty"
-    empty.mkdir()
-    assert _calc_dir_size(empty) == 0
-run_test("empty dir = 0", test_empty_dir)
-
-def test_nonexistent():
-    assert _calc_dir_size(tmpdir / "nonexistent") == 0
-run_test("nonexistent dir = 0", test_nonexistent)
-
-shutil.rmtree(tmpdir)
-
-# ================================================================
-# Phase 7: Upload/Download E2E flow (mocked)
-# ================================================================
-
-print("\n" + "=" * 60)
-print("Phase 7: Upload + Download E2E (with TestClient)")
-print("=" * 60)
-
-from fastapi import FastAPI
-import httpx
-
-# Build test app with file_router
-test_app = FastAPI()
+from backend.models import UserInfo
 
 test_user = UserInfo(user_id=99, username="tester", display_name="Tester")
 
-def mock_current_user():
+
+def _fake_get_current_user():
     return test_user
 
-# Override the get_current_user reference used by file_router
-get_current_user_ref = mock_auth_module.get_current_user
-test_app.include_router(fr.router)
-test_app.dependency_overrides[get_current_user_ref] = mock_current_user
 
-# Override DRIVE_BASE to temp dir
-e2e_tmpdir = Path(tempfile.mkdtemp())
-fr.DRIVE_BASE = e2e_tmpdir
+mock_auth_module.get_current_user = _fake_get_current_user
+sys.modules["backend.auth"] = mock_auth_module
 
-# Mock DB for quota
-mock_db.execute_query.return_value = None  # quota_bytes = None -> use default
+sys.modules.pop("backend.file_router", None)
+fr = importlib.import_module("backend.file_router")
+for module_name, original_module in _original_modules.items():
+    if original_module is None:
+        sys.modules.pop(module_name, None)
+    else:
+        sys.modules[module_name] = original_module
+current_backend_pkg = sys.modules.get("backend")
+if current_backend_pkg is not None:
+    if had_backend_file_router_attr:
+        current_backend_pkg.file_router = original_backend_file_router_attr
+    elif hasattr(current_backend_pkg, "file_router"):
+        delattr(current_backend_pkg, "file_router")
 
-transport = httpx.ASGITransport(app=test_app)
-client = httpx.Client(transport=transport, base_url="http://test")
 
-# Test: GET /api/files/space
-def test_space():
-    resp = client.get("/api/files/space")
+@pytest.fixture(autouse=True)
+def reset_test_state():
+    mock_db.reset_mock()
+    mock_db.execute_query.return_value = None
+    mock_audit_module.log_action.reset_mock()
+    fr._usage_cache.clear()
+    yield
+    fr._usage_cache.clear()
+
+
+@pytest.fixture
+def drive_base(tmp_path, monkeypatch):
+    base = tmp_path / "drive"
+    base.mkdir()
+    monkeypatch.setattr(fr, "DRIVE_BASE", base)
+    return base
+
+
+@pytest.fixture
+def api_app(drive_base):
+    app = FastAPI()
+    app.include_router(fr.router)
+    app.dependency_overrides[fr.get_current_user] = _fake_get_current_user
+    return app
+
+
+def run_request(app: FastAPI, method: str, path: str, **kwargs) -> httpx.Response:
+    async def _run() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            return await client.request(method, path, **kwargs)
+
+    return asyncio.run(_run())
+
+
+def _prepare_user_dir(drive_base: Path) -> Path:
+    user_dir = drive_base / f"portal_u{test_user.user_id}"
+    user_dir.mkdir(parents=True, exist_ok=True)
+    (user_dir / "test.txt").write_text("hello", encoding="utf-8")
+    (user_dir / "subdir").mkdir(exist_ok=True)
+    (user_dir / "subdir" / "nested.txt").write_text("nested", encoding="utf-8")
+    return user_dir
+
+
+def _create_user_file(drive_base: Path, rel_path: str, content: bytes = b"data") -> Path:
+    target = drive_base / f"portal_u{test_user.user_id}" / Path(rel_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+    return target
+
+
+def _build_auth_header() -> dict[str, str]:
+    token = pyjwt.encode(
+        {
+            "user_id": test_user.user_id,
+            "username": test_user.username,
+            "display_name": test_user.display_name,
+            "is_admin": test_user.is_admin,
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+        },
+        mock_auth_module.JWT_SECRET,
+        algorithm=mock_auth_module.JWT_ALGORITHM,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (0, "0 B"),
+        (512, "512 B"),
+        (1024, "1.0 KB"),
+        (1048576, "1.0 MB"),
+        (1073741824, "1.00 GB"),
+        (5368709120, "5.00 GB"),
+    ],
+)
+def test_format_bytes(value, expected):
+    assert fr._format_bytes(value) == expected
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["report.pdf", "my file.docx", "中文文件.txt", "data_2024.csv"],
+)
+def test_validate_filename_accepts(name):
+    fr._validate_filename(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["", ".", "..", "CON", "CON.txt", "file<name", "a:b", "NUL"],
+)
+def test_validate_filename_rejects(name):
+    with pytest.raises(HTTPException):
+        fr._validate_filename(name)
+
+
+@pytest.mark.parametrize(
+    "upload_id",
+    ["a1b2c3d4e5f67890", "0000000000000000", "abcdef0123456789"],
+)
+def test_validate_upload_id_accepts(upload_id):
+    fr._validate_upload_id(upload_id)
+
+
+@pytest.mark.parametrize(
+    "upload_id",
+    [
+        "",
+        "../../etc/passwd",
+        "a1b2c3d4e5f6789",
+        "a1b2c3d4e5f678901",
+        "ABCDEF0123456789",
+        "a1b2c3d4e5f6789g",
+    ],
+)
+def test_validate_upload_id_rejects(upload_id):
+    with pytest.raises(HTTPException):
+        fr._validate_upload_id(upload_id)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["", ".", "/", "test.txt", "subdir", "subdir/nested.txt"],
+)
+def test_safe_resolve_accepts_paths(drive_base, path):
+    user_dir = _prepare_user_dir(drive_base)
+    resolved = fr._safe_resolve(test_user.user_id, path)
+    assert str(resolved).startswith(str(user_dir.resolve()))
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../../../etc/passwd",
+        "..\\..\\..\\etc\\passwd",
+        "subdir/../../etc/passwd",
+        "../portal_u2/secret.txt",
+    ],
+)
+def test_safe_resolve_blocks_traversal(drive_base, path):
+    _prepare_user_dir(drive_base)
+    with pytest.raises(HTTPException):
+        fr._safe_resolve(test_user.user_id, path)
+
+
+def test_create_download_token_roundtrip():
+    token = fr._create_download_token(
+        test_user.user_id,
+        "documents/report.pdf",
+        username="tester",
+    )
+    payload = fr._verify_download_token(token)
+    assert payload["user_id"] == test_user.user_id
+    assert payload["path"] == "documents/report.pdf"
+    assert payload["type"] == "download"
+
+
+def test_verify_download_token_rejects_regular_jwt():
+    regular = pyjwt.encode(
+        {
+            "user_id": test_user.user_id,
+            "username": test_user.username,
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+        },
+        mock_auth_module.JWT_SECRET,
+        algorithm=mock_auth_module.JWT_ALGORITHM,
+    )
+    with pytest.raises(HTTPException):
+        fr._verify_download_token(regular)
+
+
+def test_verify_download_token_rejects_expired():
+    expired = pyjwt.encode(
+        {
+            "user_id": test_user.user_id,
+            "path": "x.txt",
+            "type": "download",
+            "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
+        },
+        mock_auth_module.JWT_SECRET,
+        algorithm=mock_auth_module.JWT_ALGORITHM,
+    )
+    with pytest.raises(HTTPException):
+        fr._verify_download_token(expired)
+
+
+def test_verify_download_token_rejects_wrong_secret():
+    wrong = pyjwt.encode(
+        {
+            "user_id": test_user.user_id,
+            "path": "x.txt",
+            "type": "download",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+        },
+        "fedcba9876543210fedcba9876543210",
+        algorithm=mock_auth_module.JWT_ALGORITHM,
+    )
+    with pytest.raises(HTTPException):
+        fr._verify_download_token(wrong)
+
+
+def test_calc_dir_size_counts_files(tmp_path):
+    root = tmp_path / "dir"
+    root.mkdir()
+    (root / "a.txt").write_bytes(b"x" * 1000)
+    (root / "sub").mkdir()
+    (root / "sub" / "b.txt").write_bytes(b"y" * 2000)
+    (root / ".hidden").write_bytes(b"z" * 500)
+    assert fr._calc_dir_size(root) == 3500
+
+
+def test_calc_dir_size_handles_empty_and_missing_paths(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert fr._calc_dir_size(empty) == 0
+    assert fr._calc_dir_size(empty / "nope") == 0
+
+
+def test_space_info(api_app):
+    resp = run_request(api_app, "GET", "/api/files/space")
     assert resp.status_code == 200
     data = resp.json()
-    assert "used_bytes" in data
+    assert data["used_bytes"] == 0
     assert "quota_bytes" in data
     assert "usage_percent" in data
-    assert data["used_bytes"] == 0
-run_test("GET /api/files/space", test_space)
 
-# Test: GET /api/files/list (auto-create root)
-def test_list_root():
-    resp = client.get("/api/files/list")
+
+def test_list_root_auto_creates(api_app, drive_base):
+    resp = run_request(api_app, "GET", "/api/files/list")
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["items"] == []
-    # user dir should now exist
-    assert (e2e_tmpdir / "portal_u99").exists()
-run_test("GET /api/files/list (auto-create)", test_list_root)
+    assert resp.json()["items"] == []
+    assert (drive_base / f"portal_u{test_user.user_id}").exists()
 
-# Test: POST /api/files/mkdir
-def test_mkdir():
-    resp = client.post("/api/files/mkdir", json={"path": "Documents"})
+
+def test_mkdir(api_app, drive_base):
+    resp = run_request(api_app, "POST", "/api/files/mkdir", json={"path": "Documents"})
     assert resp.status_code == 200
-    assert (e2e_tmpdir / "portal_u99" / "Documents").is_dir()
-run_test("POST /api/files/mkdir", test_mkdir)
+    assert (drive_base / f"portal_u{test_user.user_id}" / "Documents").is_dir()
 
-# Test: mkdir with Windows reserved name
-def test_mkdir_con():
-    resp = client.post("/api/files/mkdir", json={"path": "CON"})
+
+def test_mkdir_rejects_reserved_name(api_app):
+    resp = run_request(api_app, "POST", "/api/files/mkdir", json={"path": "CON"})
     assert resp.status_code == 400
-run_test("POST /api/files/mkdir CON (reject)", test_mkdir_con)
 
-# Test: Upload init + chunk + completion
-def test_upload_flow():
-    file_content = b"Hello World! " * 100  # 1300 bytes
-    file_size = len(file_content)
 
-    # Init
-    resp = client.post("/api/files/upload/init", data={
-        "path": "Documents/test.txt",
-        "size": str(file_size),
-    })
-    assert resp.status_code == 200, f"init failed: {resp.text}"
-    init_data = resp.json()
-    upload_id = init_data["upload_id"]
-    assert init_data["offset"] == 0
+def test_upload_flow(api_app, drive_base):
+    content = b"Hello World! " * 100
+    size = len(content)
 
-    # Chunk (single chunk for small file)
-    import io
-    resp = client.post("/api/files/upload/chunk", data={
-        "upload_id": upload_id,
-        "offset": "0",
-    }, files={"chunk": ("test.txt", io.BytesIO(file_content), "application/octet-stream")})
-    assert resp.status_code == 200, f"chunk failed: {resp.text}"
-    chunk_data = resp.json()
-    assert chunk_data["complete"] is True
-    assert chunk_data["offset"] == file_size
-
-    # Verify file exists
-    final_path = e2e_tmpdir / "portal_u99" / "Documents" / "test.txt"
-    assert final_path.exists(), "file not found after upload"
-    assert final_path.read_bytes() == file_content, "file content mismatch"
-run_test("Upload flow (init + chunk + complete)", test_upload_flow)
-
-# Test: List files after upload
-def test_list_after_upload():
-    resp = client.get("/api/files/list?path=Documents")
+    resp = run_request(
+        api_app,
+        "POST",
+        "/api/files/upload/init",
+        data={"path": "Documents/test.txt", "size": str(size)},
+    )
     assert resp.status_code == 200
-    items = resp.json()["items"]
-    names = [i["name"] for i in items]
+    init_payload = resp.json()
+    upload_id = init_payload["upload_id"]
+    assert init_payload["offset"] == 0
+
+    resp = run_request(
+        api_app,
+        "POST",
+        "/api/files/upload/chunk",
+        data={"upload_id": upload_id, "offset": "0"},
+        files={"chunk": ("test.txt", io.BytesIO(content), "application/octet-stream")},
+    )
+    assert resp.status_code == 200
+    chunk_payload = resp.json()
+    assert chunk_payload["complete"] is True
+    assert chunk_payload["offset"] == size
+
+    final_path = drive_base / f"portal_u{test_user.user_id}" / "Documents" / "test.txt"
+    assert final_path.exists()
+    assert final_path.read_bytes() == content
+
+
+def test_list_shows_uploaded_file(api_app, drive_base):
+    _create_user_file(drive_base, "Documents/test.txt", b"xyz")
+    resp = run_request(api_app, "GET", "/api/files/list", params={"path": "Documents"})
+    assert resp.status_code == 200
+    names = [entry["name"] for entry in resp.json()["items"]]
     assert "test.txt" in names
-run_test("GET /api/files/list after upload", test_list_after_upload)
 
-# Test: Download token + download
-def test_download_flow():
-    # Get download token
-    resp = client.post("/api/files/download-token", json={"path": "Documents/test.txt"})
-    assert resp.status_code == 200
-    token = resp.json()["token"]
 
-    # Download (will return X-Accel-Redirect header)
-    resp = client.get(f"/api/files/download?path=Documents/test.txt&_token={token}")
+def test_download_flow_returns_accel_header(api_app, drive_base):
+    _create_user_file(drive_base, "Documents/keep.txt", b"download me")
+    token_resp = run_request(
+        api_app,
+        "POST",
+        "/api/files/download-token",
+        json={"path": "Documents/keep.txt"},
+    )
+    assert token_resp.status_code == 200
+    token = token_resp.json()["token"]
+
+    resp = run_request(
+        api_app,
+        "GET",
+        "/api/files/download",
+        params={"path": "Documents/keep.txt", "_token": token},
+    )
     assert resp.status_code == 200
     assert "X-Accel-Redirect" in resp.headers
-    accel = resp.headers["X-Accel-Redirect"]
-    assert accel.startswith("/internal-drive/portal_u99/")
+    assert resp.headers["X-Accel-Redirect"].startswith(
+        f"/internal-drive/portal_u{test_user.user_id}/"
+    )
     assert "Content-Disposition" in resp.headers
-run_test("Download flow (token + X-Accel-Redirect)", test_download_flow)
 
-# Test: Delete file
-def test_delete_file():
-    resp = client.delete("/api/files/file?path=Documents/test.txt")
+
+def test_download_flow_encodes_non_ascii_segments(api_app, drive_base):
+    relative_path = "输出/中文 报告.txt"
+    _create_user_file(drive_base, relative_path, "内容".encode("utf-8"))
+    token_resp = run_request(
+        api_app,
+        "POST",
+        "/api/files/download-token",
+        json={"path": relative_path},
+    )
+    assert token_resp.status_code == 200
+
+    resp = run_request(
+        api_app,
+        "GET",
+        "/api/files/download",
+        params={"path": relative_path, "_token": token_resp.json()["token"]},
+    )
     assert resp.status_code == 200
-    assert not (e2e_tmpdir / "portal_u99" / "Documents" / "test.txt").exists()
-run_test("DELETE /api/files/file", test_delete_file)
+    assert resp.headers["X-Accel-Redirect"].endswith(
+        "/%E8%BE%93%E5%87%BA/%E4%B8%AD%E6%96%87%20%E6%8A%A5%E5%91%8A.txt"
+    )
+    assert (
+        "filename*=UTF-8''%E4%B8%AD%E6%96%87%20%E6%8A%A5%E5%91%8A.txt"
+        in resp.headers["Content-Disposition"]
+    )
 
-# Test: Delete root (should fail)
-def test_delete_root():
-    resp = client.delete("/api/files/file?path=")
+
+def test_download_flow_accepts_bearer_jwt(api_app, drive_base):
+    _create_user_file(drive_base, "Documents/from-jwt.txt", b"download me")
+    resp = run_request(
+        api_app,
+        "GET",
+        "/api/files/download",
+        params={"path": "Documents/from-jwt.txt"},
+        headers=_build_auth_header(),
+    )
+    assert resp.status_code == 200
+    assert resp.headers["X-Accel-Redirect"].endswith("/Documents/from-jwt.txt")
+
+
+def test_delete_file(api_app, drive_base):
+    target = _create_user_file(drive_base, "Documents/toremove.txt", b"bye")
+    resp = run_request(
+        api_app,
+        "DELETE",
+        "/api/files/file",
+        params={"path": "Documents/toremove.txt"},
+    )
+    assert resp.status_code == 200
+    assert not target.exists()
+
+
+def test_delete_root_rejected(api_app):
+    resp = run_request(api_app, "DELETE", "/api/files/file", params={"path": ""})
     assert resp.status_code == 400
-run_test("DELETE root (reject)", test_delete_root)
 
-# Test: Path traversal via API
-def test_api_traversal():
-    resp = client.get("/api/files/list?path=../../etc")
+
+def test_api_path_traversal_rejected(api_app):
+    resp = run_request(api_app, "GET", "/api/files/list", params={"path": "../../etc"})
     assert resp.status_code == 400
-run_test("API path traversal (reject)", test_api_traversal)
 
-# Test: Upload with oversized file (exceed declared size)
-def test_upload_oversize():
-    # Init with size=100
-    resp = client.post("/api/files/upload/init", data={
-        "path": "oversize.txt",
-        "size": "100",
-    })
+
+def test_upload_oversize_chunk_rejected(api_app):
+    resp = run_request(
+        api_app,
+        "POST",
+        "/api/files/upload/init",
+        data={"path": "oversize.txt", "size": "100"},
+    )
     assert resp.status_code == 200
     upload_id = resp.json()["upload_id"]
 
-    # Send chunk larger than declared size
-    import io
-    big_data = b"x" * 200
-    resp = client.post("/api/files/upload/chunk", data={
-        "upload_id": upload_id,
-        "offset": "0",
-    }, files={"chunk": ("oversize.txt", io.BytesIO(big_data), "application/octet-stream")})
-    assert resp.status_code == 400, f"oversize accepted: {resp.status_code} {resp.text}"
-run_test("Upload oversize chunk (reject)", test_upload_oversize)
+    resp = run_request(
+        api_app,
+        "POST",
+        "/api/files/upload/chunk",
+        data={"upload_id": upload_id, "offset": "0"},
+        files={"chunk": ("oversize.txt", io.BytesIO(b"x" * 200), "application/octet-stream")},
+    )
+    assert resp.status_code == 400
 
-# Test: Cancel upload
-def test_cancel_upload():
-    resp = client.post("/api/files/upload/init", data={
-        "path": "cancel_me.txt",
-        "size": "10000",
-    })
+
+def test_cancel_upload_cleans_temp_files(api_app, drive_base):
+    resp = run_request(
+        api_app,
+        "POST",
+        "/api/files/upload/init",
+        data={"path": "cancel_me.txt", "size": "10000"},
+    )
     assert resp.status_code == 200
     upload_id = resp.json()["upload_id"]
 
-    resp = client.delete(f"/api/files/upload/{upload_id}")
-    assert resp.status_code == 200
+    cancel = run_request(api_app, "DELETE", f"/api/files/upload/{upload_id}")
+    assert cancel.status_code == 200
 
-    # Verify cleanup
-    uploads_dir = e2e_tmpdir / "portal_u99" / ".uploads"
-    meta = uploads_dir / f"{upload_id}.meta"
-    tmp = uploads_dir / f"{upload_id}.tmp"
-    assert not meta.exists()
-    assert not tmp.exists()
-run_test("Cancel upload (cleanup)", test_cancel_upload)
+    uploads_dir = drive_base / f"portal_u{test_user.user_id}" / ".uploads"
+    assert not (uploads_dir / f"{upload_id}.meta").exists()
+    assert not (uploads_dir / f"{upload_id}.tmp").exists()
 
-# Test: Upload ID traversal attack via API
-def test_upload_id_attack():
-    resp = client.delete("/api/files/upload/../../etc/passwd")
-    assert resp.status_code in (400, 422), f"traversal accepted: {resp.status_code}"
-run_test("Upload ID traversal attack (reject)", test_upload_id_attack)
 
-# Cleanup
-fr.DRIVE_BASE = Path(mock_config["guacamole"]["drive"]["base_path"])
-shutil.rmtree(e2e_tmpdir)
-
-# ================================================================
-# Summary
-# ================================================================
-
-print("\n" + "=" * 60)
-print("FINAL SUMMARY")
-print("=" * 60)
-if all_errors:
-    print(f"TOTAL ERRORS: {len(all_errors)}")
-    for e in all_errors:
-        print(f"  [ERROR] {e}")
-    sys.exit(1)
-else:
-    print("ALL TESTS PASSED!")
-    sys.exit(0)
+def test_upload_id_attack_rejected(api_app):
+    resp = run_request(api_app, "DELETE", "/api/files/upload/not-hex-upload-id")
+    assert resp.status_code == 400

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from backend.database import CONFIG
+from backend.resource_pool_reclaim import ResourcePoolReclaimService
 
 
 def build_default_pool_seed_rows(app_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -34,6 +35,12 @@ class ResourcePoolService:
     def __init__(self, db, now_provider: Callable[[], datetime] | None = None):
         self._db = db
         self._now_provider = now_provider or datetime.now
+        self._reclaim_service = ResourcePoolReclaimService(
+            db,
+            now_provider=self._now_provider,
+            fallback_stale_timeout_seconds=self.DEFAULT_STALE_TIMEOUT_SECONDS,
+            fallback_idle_timeout_seconds=self.DEFAULT_ORPHAN_IDLE_TIMEOUT_SECONDS,
+        )
 
     def _now(self) -> datetime:
         return self._now_provider()
@@ -761,73 +768,18 @@ class ResourcePoolService:
         return moved_ids
 
     def _mark_session_reclaimed(self, *, session_id: str, reason: str, ended_at: datetime, target_status: str = "reclaimed") -> int:
-        return self._db.execute_update(
-            """
-            /* rps:session_mark_reclaimed */
-            UPDATE active_session
-            SET status = %(target_status)s,
-                reclaim_reason = %(reason)s,
-                ended_at = %(ended_at)s
-            WHERE session_id = %(session_id)s
-              AND status IN ('active', 'reclaim_pending')
-            """,
-            {"session_id": session_id, "reason": reason, "ended_at": ended_at, "target_status": target_status},
+        return self._reclaim_service.mark_session_reclaimed(
+            session_id=session_id,
+            reason=reason,
+            ended_at=ended_at,
+            target_status=target_status,
         )
 
     def reclaim_stale_sessions(self) -> list[dict[str, Any]]:
-        rows = self._db.execute_query(
-            """
-            /* rps:list_stale_sessions */
-            SELECT s.session_id, s.user_id
-            FROM active_session s
-            LEFT JOIN resource_pool p ON p.id = s.pool_id
-            WHERE s.status IN ('active', 'reclaim_pending')
-              AND TIMESTAMPDIFF(SECOND, s.last_heartbeat, %(now_ts)s) > COALESCE(p.stale_timeout_seconds, %(fallback_stale_timeout_seconds)s)
-            ORDER BY s.session_id ASC
-            """,
-            {
-                "now_ts": self._now(),
-                "fallback_stale_timeout_seconds": self.DEFAULT_STALE_TIMEOUT_SECONDS,
-            },
-        )
-        reclaimed: list[dict[str, Any]] = []
-        for row in rows:
-            if self._mark_session_reclaimed(session_id=str(row["session_id"]), reason="stale", ended_at=self._now(), target_status="reclaimed") > 0:
-                reclaimed.append({"session_id": str(row["session_id"]), "user_id": int(row["user_id"])})
-        return reclaimed
+        return self._reclaim_service.reclaim_stale_sessions()
 
     def reclaim_idle_sessions(self) -> list[dict[str, Any]]:
-        rows = self._db.execute_query(
-            """
-            /* rps:list_idle_sessions */
-            SELECT s.session_id, s.user_id
-            FROM active_session s
-            LEFT JOIN resource_pool p ON p.id = s.pool_id
-            WHERE s.status = 'active'
-              AND s.last_activity_at IS NOT NULL
-              AND (
-                    (
-                        s.pool_id IS NULL
-                        AND TIMESTAMPDIFF(SECOND, s.last_activity_at, %(now_ts)s) > %(fallback_idle_timeout_seconds)s
-                    )
-                    OR (
-                        s.pool_id IS NOT NULL
-                        AND p.idle_timeout_seconds IS NOT NULL
-                        AND TIMESTAMPDIFF(SECOND, s.last_activity_at, %(now_ts)s) > COALESCE(p.idle_timeout_seconds, %(fallback_idle_timeout_seconds)s)
-                    )
-              )
-            ORDER BY s.session_id ASC
-            """,
-            {
-                "now_ts": self._now(),
-                "fallback_idle_timeout_seconds": self.DEFAULT_ORPHAN_IDLE_TIMEOUT_SECONDS,
-            },
-        )
-        reclaimed: list[dict[str, Any]] = []
-        for row in rows:
-            if self._mark_session_reclaimed(session_id=str(row["session_id"]), reason="idle", ended_at=self._now(), target_status="reclaim_pending") > 0:
-                reclaimed.append({"session_id": str(row["session_id"]), "user_id": int(row["user_id"])})
-        return reclaimed
+        return self._reclaim_service.reclaim_idle_sessions()
 
     def list_admin_pools(self) -> list[dict[str, Any]]:
         rows = self._db.execute_query(

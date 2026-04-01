@@ -1,10 +1,10 @@
-{
+﻿{
   "database": {
     "host": "127.0.0.1",
     "port": 33060,
     "database": "guacamole_portal_db",
     "user": "root",
-    "password": "xran"
+    "password": "change-me-db-password"
   },
   "api": {
     "host": "0.0.0.0",
@@ -16,7 +16,7 @@
     ]
   },
   "guacamole": {
-    "json_secret_key": "4c0b569e4c96df157eee1b65dd0e4d41",
+    "json_secret_key": "00112233445566778899aabbccddeeff",
     "internal_url": "http://localhost:8080",
     "external_url": "http://localhost:8080",
     "token_expire_minutes": 480,
@@ -29,7 +29,7 @@
     }
   },
   "auth": {
-    "jwt_secret": "f7a3d9e2c1b5084a6e3f1d8b2a5c7e09",
+    "jwt_secret": "change-me-portal-jwt-secret",
     "token_expire_minutes": 480
   },
   "monitor": {

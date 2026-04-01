@@ -58,6 +58,20 @@ class DatasetPreviewConversionError(DatasetPreviewError):
     """VTU 转换失败"""
 
 
+def _normalized_resolved_path(path: Path) -> str:
+    resolved = str(path.resolve())
+    if os.name == "nt" and resolved.startswith("\\\\?\\"):
+        return resolved[4:]
+    return resolved
+
+
+def _ensure_within_root(target: Path, root: Path, error_message: str):
+    root_str = _normalized_resolved_path(root)
+    target_str = _normalized_resolved_path(target)
+    if target_str != root_str and not target_str.startswith(root_str + os.sep):
+        raise DatasetPreviewPathError(error_message)
+
+
 def _normalize_relative_path(path: str) -> str:
     if not path or path in (".", "/", "\\"):
         return ""
@@ -103,10 +117,7 @@ def _preview_target(results_root: Path, source: Path) -> tuple[Path, str]:
     relative_source = source.relative_to(results_root)
     relative_preview = Path(PREVIEW_CACHE_DIR_NAME).joinpath(relative_source).with_suffix(".vtp")
     preview_target = (results_root / relative_preview).resolve()
-    try:
-        preview_target.relative_to(results_root)
-    except ValueError as exc:
-        raise DatasetPreviewPathError("非法路径") from exc
+    _ensure_within_root(preview_target, results_root, "非法路径")
     return preview_target, relative_preview.as_posix()
 
 

@@ -1,18 +1,91 @@
-import { chromium } from 'playwright';
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const BASE_URL = 'http://127.0.0.1:8880';
+import { chromium } from 'playwright';
+
+const repoRoot = process.cwd();
+
+function readEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+
+  const env = {};
+  const text = fs.readFileSync(filePath, 'utf8');
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#') || !line.includes('=')) {
+      continue;
+    }
+    const [keyPart, ...valueParts] = line.split('=');
+    const key = keyPart.trim();
+    let value = valueParts.join('=').trim();
+    if (value.length >= 2 && value[0] === value[value.length - 1] && (`"'`.includes(value[0]))) {
+      value = value.slice(1, -1);
+    }
+    if (key) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
+function resolveConfig(names, fallback) {
+  const deployEnv = readEnvFile(path.join(repoRoot, 'deploy', '.env'));
+  for (const source of [process.env, deployEnv]) {
+    for (const name of names) {
+      const value = source[name];
+      if (value) {
+        return value;
+      }
+    }
+  }
+  if (fallback !== undefined) {
+    return fallback;
+  }
+  throw new Error(`missing required config: ${names.join(' / ')}`);
+}
+
+const BASE_URL = `http://127.0.0.1:${resolveConfig(['PORTAL_PORT'], '8880')}`;
+const MYSQL_ROOT_PASSWORD = resolveConfig(['MYSQL_ROOT_PASSWORD', 'GUAC_DB_ROOT_PASSWORD']);
 const MYSQL_ARGS = [
   'exec',
   '-i',
   'nercar-portal-guac-sql',
   'mysql',
   '-uroot',
-  '-pxran',
+  `-p${MYSQL_ROOT_PASSWORD}`,
   '--default-character-set=utf8mb4',
   '-N',
   '-B',
 ];
+
+const E2E = {
+  adminUsername: 'e2e_admin',
+  adminPassword: 'E2E_admin_123!',
+  adminHash: '$2b$12$fTo5s/L/v/ZR56NaMzTBzukuZcmnjMJ7bjdF10SY2z5hS9pbr5ZYi',
+  adminDisplay: 'E2E 管理员',
+  testUsername: 'e2e_user',
+  testPassword: 'E2E_user_123!',
+  testHash: '$2b$12$xou1nm.SnhktTYxZw4EMb.LW0vSxyj.NWsb6OXWQ5MfzRvkaQ.PwO',
+  testDisplay: 'E2E 测试用户',
+  notepadPoolName: 'E2E 池-记事本',
+  calcPoolName: 'E2E 池-计算器',
+  notepadAppName: 'E2E 记事本',
+  calcAppName: 'E2E 计算器',
+  notepadRemoteApp: '||notepad',
+  calcRemoteApp: '||calc',
+  rdpHost: '192.168.1.6',
+  rdpPort: 3389,
+  rdpUsername: 'e2e',
+  rdpPassword: 'not-used',
+  viewerDirName: '_e2e_viewer',
+};
+
+function sqlQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
 
 function runMysql(sql) {
   const result = spawnSync('docker', MYSQL_ARGS, {
@@ -34,30 +107,142 @@ function queryRows(sql) {
     .map((line) => line.split('\t'));
 }
 
-function prepareData() {
-  const [[poolMaxConcurrent = '1']] = queryRows(`
+function queryScalar(sql) {
+  const rows = queryRows(sql);
+  return rows[0]?.[0] ?? '';
+}
+
+function deleteViewerData(userIds) {
+  for (const userId of userIds.filter(Boolean)) {
+    spawnSync(
+      'docker',
+      ['exec', '-i', 'nercar-portal-backend', 'python', '-'],
+      {
+        input: [
+          'from pathlib import Path',
+          'import shutil',
+          `target = Path('/drive/portal_u${userId}/Output/${E2E.viewerDirName}')`,
+          'if target.exists():',
+          '    shutil.rmtree(target)',
+        ].join('\n'),
+        encoding: 'utf8',
+      },
+    );
+  }
+}
+
+function cleanupData(snapshot = {}) {
+  const usernameList = [E2E.adminUsername, E2E.testUsername].map(sqlQuote).join(', ');
+  const appNameList = [E2E.notepadAppName, E2E.calcAppName].map(sqlQuote).join(', ');
+  const poolNameList = [E2E.notepadPoolName, E2E.calcPoolName].map(sqlQuote).join(', ');
+
+  const userRows = queryRows(`
 USE guacamole_portal_db;
-SELECT max_concurrent FROM resource_pool WHERE id = 2;
+SELECT id, username FROM portal_user WHERE username IN (${usernameList});
 `);
-  const [[memberMaxConcurrent = '1']] = queryRows(`
+  const appRows = queryRows(`
 USE guacamole_portal_db;
-SELECT member_max_concurrent FROM remote_app WHERE id = 2;
+SELECT id, name FROM remote_app WHERE name IN (${appNameList});
 `);
-  const aclRows = queryRows(`
+  const poolRows = queryRows(`
 USE guacamole_portal_db;
-SELECT COUNT(*) FROM remote_app_acl WHERE user_id = 2 AND app_id = 2;
+SELECT id, name FROM resource_pool WHERE name IN (${poolNameList});
 `);
-  const [[aclCount = '0']] = aclRows;
+
+  const userIds = userRows.map(([id]) => Number(id));
+  const appIds = appRows.map(([id]) => Number(id));
+  const poolIds = poolRows.map(([id]) => Number(id));
+  const tokenUsernames = userIds.map((id) => sqlQuote(`portal_u${id}`));
+
+  const userIdList = userIds.length ? userIds.join(', ') : 'NULL';
+  const appIdList = appIds.length ? appIds.join(', ') : 'NULL';
+  const poolIdList = poolIds.length ? poolIds.join(', ') : 'NULL';
 
   runMysql(`
 USE guacamole_portal_db;
-UPDATE resource_pool SET max_concurrent = 2 WHERE id = 2;
-UPDATE remote_app SET member_max_concurrent = 2 WHERE id = 2;
-INSERT IGNORE INTO remote_app_acl (user_id, app_id) VALUES (2, 2);
-UPDATE active_session
-SET status='disconnected', ended_at=NOW(), reclaim_reason=NULL
-WHERE user_id = 2 AND status IN ('active', 'reclaim_pending');
-DELETE FROM token_cache WHERE username='portal_u2';
+DELETE FROM active_session
+WHERE user_id IN (${userIdList}) OR app_id IN (${appIdList});
+DELETE FROM launch_queue
+WHERE user_id IN (${userIdList})
+   OR pool_id IN (${poolIdList})
+   OR requested_app_id IN (${appIdList})
+   OR assigned_app_id IN (${appIdList});
+DELETE FROM remote_app_acl
+WHERE user_id IN (${userIdList}) OR app_id IN (${appIdList});
+${tokenUsernames.length ? `DELETE FROM token_cache WHERE username IN (${tokenUsernames.join(', ')});` : ''}
+DELETE FROM remote_app WHERE id IN (${appIdList});
+DELETE FROM resource_pool WHERE id IN (${poolIdList});
+DELETE FROM portal_user WHERE id IN (${userIdList});
+`);
+
+  const cleanupIds = new Set(userIds);
+  if (snapshot.adminUserId) {
+    cleanupIds.add(snapshot.adminUserId);
+  }
+  deleteViewerData([...cleanupIds]);
+}
+
+function prepareData() {
+  cleanupData();
+
+  runMysql(`
+USE guacamole_portal_db;
+INSERT INTO portal_user (username, password_hash, display_name, is_admin, is_active)
+VALUES
+  (${sqlQuote(E2E.adminUsername)}, ${sqlQuote(E2E.adminHash)}, ${sqlQuote(E2E.adminDisplay)}, 1, 1),
+  (${sqlQuote(E2E.testUsername)}, ${sqlQuote(E2E.testHash)}, ${sqlQuote(E2E.testDisplay)}, 0, 1);
+INSERT INTO resource_pool
+  (name, icon, max_concurrent, auto_dispatch_enabled, dispatch_grace_seconds, stale_timeout_seconds, idle_timeout_seconds, is_active)
+VALUES
+  (${sqlQuote(E2E.notepadPoolName)}, 'edit', 1, 1, 120, 120, NULL, 1),
+  (${sqlQuote(E2E.calcPoolName)}, 'calculate', 2, 1, 120, 120, NULL, 1);
+`);
+
+  const adminUserId = Number(queryScalar(`
+USE guacamole_portal_db;
+SELECT id FROM portal_user WHERE username = ${sqlQuote(E2E.adminUsername)};
+`));
+  const testUserId = Number(queryScalar(`
+USE guacamole_portal_db;
+SELECT id FROM portal_user WHERE username = ${sqlQuote(E2E.testUsername)};
+`));
+  const notepadPoolId = Number(queryScalar(`
+USE guacamole_portal_db;
+SELECT id FROM resource_pool WHERE name = ${sqlQuote(E2E.notepadPoolName)};
+`));
+  const calcPoolId = Number(queryScalar(`
+USE guacamole_portal_db;
+SELECT id FROM resource_pool WHERE name = ${sqlQuote(E2E.calcPoolName)};
+`));
+
+  runMysql(`
+USE guacamole_portal_db;
+INSERT INTO remote_app
+  (name, icon, hostname, port, rdp_username, rdp_password, remote_app, pool_id, member_max_concurrent)
+VALUES
+  (${sqlQuote(E2E.notepadAppName)}, 'edit', ${sqlQuote(E2E.rdpHost)}, ${E2E.rdpPort}, ${sqlQuote(E2E.rdpUsername)}, ${sqlQuote(E2E.rdpPassword)}, ${sqlQuote(E2E.notepadRemoteApp)}, ${notepadPoolId}, 1),
+  (${sqlQuote(E2E.calcAppName)}, 'calculate', ${sqlQuote(E2E.rdpHost)}, ${E2E.rdpPort}, ${sqlQuote(E2E.rdpUsername)}, ${sqlQuote(E2E.rdpPassword)}, ${sqlQuote(E2E.calcRemoteApp)}, ${calcPoolId}, 2);
+`);
+
+  const notepadAppId = Number(queryScalar(`
+USE guacamole_portal_db;
+SELECT id FROM remote_app WHERE name = ${sqlQuote(E2E.notepadAppName)};
+`));
+  const calcAppId = Number(queryScalar(`
+USE guacamole_portal_db;
+SELECT id FROM remote_app WHERE name = ${sqlQuote(E2E.calcAppName)};
+`));
+
+  runMysql(`
+USE guacamole_portal_db;
+INSERT INTO remote_app_acl (user_id, app_id)
+VALUES
+  (${adminUserId}, ${notepadAppId}),
+  (${adminUserId}, ${calcAppId}),
+  (${testUserId}, ${notepadAppId}),
+  (${testUserId}, ${calcAppId});
+DELETE FROM token_cache
+WHERE username IN (${sqlQuote(`portal_u${adminUserId}`)}, ${sqlQuote(`portal_u${testUserId}`)});
 `);
 
   const seed = spawnSync(
@@ -69,7 +254,7 @@ DELETE FROM token_cache WHERE username='portal_u2';
         'from vtkmodules.vtkCommonCore import vtkPoints',
         'from vtkmodules.vtkCommonDataModel import vtkTetra, vtkUnstructuredGrid',
         'from vtkmodules.vtkIOXML import vtkXMLUnstructuredGridWriter',
-        "root = Path('/drive/portal_u1/Output/_e2e_viewer')",
+        `root = Path('/drive/portal_u${adminUserId}/Output/${E2E.viewerDirName}')`,
         'root.mkdir(parents=True, exist_ok=True)',
         "(root / 'mesh.obj').write_text('o e2e\\n', encoding='utf-8')",
         "file_path = root / 'sample.vtu'",
@@ -96,38 +281,11 @@ DELETE FROM token_cache WHERE username='portal_u2';
   }
 
   return {
-    poolMaxConcurrent,
-    memberMaxConcurrent,
-    aclInserted: aclCount === '0',
+    adminUserId,
+    testUserId,
+    notepadAppId,
+    calcAppId,
   };
-}
-
-function cleanupData(snapshot) {
-  runMysql(`
-USE guacamole_portal_db;
-UPDATE resource_pool SET max_concurrent = ${Number(snapshot.poolMaxConcurrent)} WHERE id = 2;
-UPDATE remote_app SET member_max_concurrent = ${Number(snapshot.memberMaxConcurrent)} WHERE id = 2;
-${snapshot.aclInserted ? 'DELETE FROM remote_app_acl WHERE user_id = 2 AND app_id = 2;' : ''}
-UPDATE active_session
-SET status='disconnected', ended_at=NOW(), reclaim_reason=NULL
-WHERE user_id = 2 AND status IN ('active', 'reclaim_pending');
-DELETE FROM token_cache WHERE username='portal_u2';
-`);
-  spawnSync(
-    'docker',
-    ['exec', '-i', 'nercar-portal-backend', 'python', '-'],
-    {
-      input: [
-        'from pathlib import Path',
-        "Path('/drive/portal_u1/Output/_e2e_viewer').mkdir(parents=True, exist_ok=True)",
-        "target = Path('/drive/portal_u1/Output/_e2e_viewer')",
-        'if target.exists():',
-        '    import shutil',
-        '    shutil.rmtree(target)',
-      ].join('\n'),
-      encoding: 'utf8',
-    },
-  );
 }
 
 async function login(page, username, password) {
@@ -142,27 +300,29 @@ async function login(page, username, password) {
 
 async function main() {
   const snapshot = prepareData();
-  const browser = await chromium.launch({ headless: true });
-  const adminCtx = await browser.newContext({ viewport: { width: 1440, height: 960 } });
-  const testCtx = await browser.newContext({ viewport: { width: 1440, height: 960 } });
-  const adminPage = await adminCtx.newPage();
-  const testPage = await testCtx.newPage();
-  const artifacts = { consoleErrors: [], pageErrors: [], failedRequests: [] };
-
-  for (const page of [adminPage, testPage]) {
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') artifacts.consoleErrors.push(msg.text());
-    });
-    page.on('pageerror', (err) => {
-      artifacts.pageErrors.push({ message: err.message, stack: err.stack });
-    });
-    page.on('requestfailed', (req) => {
-      artifacts.failedRequests.push(`${req.method()} ${req.url()} :: ${req.failure() ? req.failure().errorText : 'unknown'}`);
-    });
-  }
+  let browser;
 
   try {
-    await login(adminPage, 'admin', 'admin123');
+    browser = await chromium.launch({ headless: true });
+    const adminCtx = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+    const testCtx = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+    const adminPage = await adminCtx.newPage();
+    const testPage = await testCtx.newPage();
+    const artifacts = { consoleErrors: [], pageErrors: [], failedRequests: [] };
+
+    for (const page of [adminPage, testPage]) {
+      page.on('console', (msg) => {
+        if (msg.type() === 'error') artifacts.consoleErrors.push(msg.text());
+      });
+      page.on('pageerror', (err) => {
+        artifacts.pageErrors.push({ message: err.message, stack: err.stack });
+      });
+      page.on('requestfailed', (req) => {
+        artifacts.failedRequests.push(`${req.method()} ${req.url()} :: ${req.failure() ? req.failure().errorText : 'unknown'}`);
+      });
+    }
+
+    await login(adminPage, E2E.adminUsername, E2E.adminPassword);
     await adminPage.waitForSelector('.app-card');
     const portal = {
       title: await adminPage.title(),
@@ -179,7 +339,7 @@ async function main() {
       adminPage.waitForResponse((resp) => resp.url().includes('/api/files/list?path=Output') && resp.status() === 200),
       adminPage.locator('span.files-table__name').filter({ hasText: 'Output' }).first().click(),
     ]);
-    await adminPage.locator('span.files-table__name').filter({ hasText: '_e2e_viewer' }).first().click();
+    await adminPage.locator('span.files-table__name').filter({ hasText: E2E.viewerDirName }).first().click();
     await adminPage.fill('#files-search', 'sample');
     await adminPage.check('#files-group-ext');
     await adminPage.waitForTimeout(500);
@@ -189,7 +349,7 @@ async function main() {
       hasViewButton: await adminPage.locator('button', { hasText: '查看' }).count(),
     };
 
-    await adminPage.goto(`${BASE_URL}/viewer.html?path=_e2e_viewer/sample.vtu`, { waitUntil: 'networkidle' });
+    await adminPage.goto(`${BASE_URL}/viewer.html?path=${E2E.viewerDirName}/sample.vtu`, { waitUntil: 'networkidle' });
     await adminPage.waitForTimeout(4000);
     const viewer = {
       datasetPath: await adminPage.locator('#dataset-path').innerText(),
@@ -197,15 +357,15 @@ async function main() {
       statusBarVisible: await adminPage.locator('#status-bar').isVisible(),
     };
 
-    await login(testPage, 'test', 'test123');
+    await login(testPage, E2E.testUsername, E2E.testPassword);
     await testPage.waitForSelector('.app-card');
     const popupNotepadPromise = testPage.waitForEvent('popup', { timeout: 15000 });
-    await testPage.locator('.app-card').filter({ hasText: '记事本' }).first().click();
+    await testPage.locator('.app-card').filter({ hasText: E2E.notepadPoolName }).first().click();
     const popupNotepad = await popupNotepadPromise;
     await popupNotepad.waitForTimeout(3000);
 
     const popupCalcPromise = testPage.waitForEvent('popup', { timeout: 15000 });
-    await testPage.locator('.app-card').filter({ hasText: '计算器' }).first().click();
+    await testPage.locator('.app-card').filter({ hasText: E2E.calcPoolName }).first().click();
     const popupCalc = await popupCalcPromise;
     await popupCalc.waitForTimeout(4000);
 
@@ -224,7 +384,7 @@ async function main() {
     for (let i = 0; i < count; i += 1) {
       const row = rows.nth(i);
       const text = await row.innerText();
-      if (text.includes('测试用户') && text.includes('计算器')) {
+      if (text.includes(E2E.testDisplay) && text.includes(E2E.calcAppName)) {
         calcRow = row;
         break;
       }
@@ -248,27 +408,25 @@ async function main() {
       notepadStillOpen: !popupNotepad.isClosed(),
     };
 
-    const sessionResult = spawnSync('docker', MYSQL_ARGS, {
-      input: `
+    const sessionResult = runMysql(`
 USE guacamole_portal_db;
 SELECT app_id, status, COALESCE(reclaim_reason, '') AS reclaim_reason
 FROM active_session
-WHERE user_id = 2
+WHERE user_id = ${snapshot.testUserId}
 ORDER BY id DESC
 LIMIT 5;
-`,
-      encoding: 'utf8',
-    });
-    if (sessionResult.status !== 0) {
-      throw new Error(sessionResult.stderr || sessionResult.stdout || 'session query failed');
-    }
-    const sessionRows = sessionResult.stdout
+`);
+    const sessionRows = sessionResult
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => line.split('\t'));
-    const calcReclaimed = sessionRows.some((row) => row[0] === '2' && row[1] === 'disconnected' && row[2] === 'admin');
-    const notepadActive = sessionRows.some((row) => row[0] === '1' && row[1] === 'active');
+    const calcReclaimed = sessionRows.some(
+      (row) => Number(row[0]) === snapshot.calcAppId && row[1] === 'disconnected' && row[2] === 'admin',
+    );
+    const notepadActive = sessionRows.some(
+      (row) => Number(row[0]) === snapshot.notepadAppId && row[1] === 'active',
+    );
 
     const summary = { portal, fileTree, viewer, poolUsageCount, reclaim, calcReclaimed, notepadActive, artifacts };
     console.log(JSON.stringify(summary, null, 2));
@@ -278,6 +436,9 @@ LIMIT 5;
     }
     if (!portal.appCardCount) {
       throw new Error('portal app cards missing');
+    }
+    if (!portal.userText.includes(E2E.adminDisplay)) {
+      throw new Error('portal admin identity missing');
     }
     if (!fileTree.groupHeaders.some((label) => label.toLowerCase() === '.vtu')) {
       throw new Error('file tree did not group VTU results');
@@ -301,7 +462,9 @@ LIMIT 5;
       throw new Error('database session state regression');
     }
   } finally {
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
     cleanupData(snapshot);
   }
 }

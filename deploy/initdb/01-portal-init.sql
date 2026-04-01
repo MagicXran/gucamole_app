@@ -81,23 +81,10 @@ CREATE TABLE IF NOT EXISTS resource_pool (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- 示例数据（请根据实际环境修改 hostname/密码）
+-- 生产部署不再预置 demo 用户、示例远程应用或明文 RDP 凭据。
+-- 首次启动时请通过 PORTAL_BOOTSTRAP_ADMIN_* 环境变量创建管理员，
+-- 登录后台后再按实际环境添加资源池、应用与 ACL。
 -- ============================================
-
-INSERT IGNORE INTO resource_pool
-    (id, name, icon, max_concurrent, auto_dispatch_enabled,
-     dispatch_grace_seconds, stale_timeout_seconds, idle_timeout_seconds, is_active)
-VALUES
-    (1, '默认池-1-记事本',   'edit',      1, 1, 120, 120, NULL, 1),
-    (2, '默认池-2-计算器',   'calculate', 1, 1, 120, 120, NULL, 1),
-    (3, '默认池-3-远程桌面', 'desktop',   1, 1, 120, 120, NULL, 1);
-
-INSERT IGNORE INTO remote_app
-    (id, name, icon, hostname, port, rdp_username, rdp_password, remote_app, pool_id, member_max_concurrent)
-VALUES
-    (1, '记事本',   'edit',      '192.168.1.6', 3389, 'admin', 'password', '||notepad', 1, 1),
-    (2, '计算器',   'calculate', '192.168.1.6', 3389, 'admin', 'password', '||calc',    2, 1),
-    (3, '远程桌面', 'desktop',   '192.168.1.6', 3389, 'admin', 'password', NULL,        3, 1);
 
 -- Token 缓存表（确保后端重启后复用已有 Guacamole session）
 CREATE TABLE IF NOT EXISTS token_cache (
@@ -179,18 +166,3 @@ CREATE TABLE IF NOT EXISTS launch_queue (
     INDEX idx_user_status (user_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 默认管理员 (密码: admin123，生产环境请立即修改)
-INSERT IGNORE INTO portal_user (id, username, password_hash, display_name, is_admin)
-VALUES (1, 'admin', '$2b$12$.zHt5ZnYYg9BLJ8sXI84U.Doz2rhgbAbghicuxjUNz5vN3lFdlytu', '管理员', 1);
-
--- 测试用户 (密码: test123)
-INSERT IGNORE INTO portal_user (id, username, password_hash, display_name, is_admin)
-VALUES (2, 'test', '$2b$12$L91JPIXfv6upob1STuLlJuIZqese8iUsJdf9G/YwYCw3mIzm7TJs6', '测试用户', 0);
-
--- 给 admin (user_id=1) 分配所有应用
-INSERT IGNORE INTO remote_app_acl (user_id, app_id)
-SELECT 1, id FROM remote_app;
-
--- 给 test (user_id=2) 只分配记事本
-INSERT IGNORE INTO remote_app_acl (user_id, app_id)
-SELECT 2, id FROM remote_app WHERE name = '记事本';

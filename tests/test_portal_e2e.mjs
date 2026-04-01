@@ -66,9 +66,27 @@ DELETE FROM token_cache WHERE username='portal_u2';
     {
       input: [
         'from pathlib import Path',
+        'from vtkmodules.vtkCommonCore import vtkPoints',
+        'from vtkmodules.vtkCommonDataModel import vtkTetra, vtkUnstructuredGrid',
+        'from vtkmodules.vtkIOXML import vtkXMLUnstructuredGridWriter',
         "root = Path('/drive/portal_u1/Output/_e2e_viewer')",
         'root.mkdir(parents=True, exist_ok=True)',
         "(root / 'mesh.obj').write_text('o e2e\\n', encoding='utf-8')",
+        "file_path = root / 'sample.vtu'",
+        'points = vtkPoints()',
+        'points.InsertNextPoint(0.0, 0.0, 0.0)',
+        'points.InsertNextPoint(1.0, 0.0, 0.0)',
+        'points.InsertNextPoint(0.0, 1.0, 0.0)',
+        'points.InsertNextPoint(0.0, 0.0, 1.0)',
+        'tetra = vtkTetra()',
+        'for idx in range(4): tetra.GetPointIds().SetId(idx, idx)',
+        'grid = vtkUnstructuredGrid()',
+        'grid.SetPoints(points)',
+        'grid.InsertNextCell(tetra.GetCellType(), tetra.GetPointIds())',
+        'writer = vtkXMLUnstructuredGridWriter()',
+        'writer.SetFileName(str(file_path))',
+        'writer.SetInputData(grid)',
+        'writer.Write()',
       ].join('\n'),
       encoding: 'utf8',
     },
@@ -152,7 +170,26 @@ async function main() {
       userText: await adminPage.locator('#user-display-name').innerText(),
     };
 
-    await adminPage.goto(`${BASE_URL}/viewer.html?path=_e2e_viewer/mesh.obj`, { waitUntil: 'networkidle' });
+    await Promise.all([
+      adminPage.waitForResponse((resp) => resp.url().includes('/api/files/list?path=') && resp.status() === 200),
+      adminPage.evaluate(() => switchPortalTab('files')),
+    ]);
+    await adminPage.waitForTimeout(1000);
+    await Promise.all([
+      adminPage.waitForResponse((resp) => resp.url().includes('/api/files/list?path=Output') && resp.status() === 200),
+      adminPage.locator('span.files-table__name').filter({ hasText: 'Output' }).first().click(),
+    ]);
+    await adminPage.locator('span.files-table__name').filter({ hasText: '_e2e_viewer' }).first().click();
+    await adminPage.fill('#files-search', 'sample');
+    await adminPage.check('#files-group-ext');
+    await adminPage.waitForTimeout(500);
+    const fileTree = {
+      groupHeaders: await adminPage.locator('.files-group-header td').allInnerTexts(),
+      rows: await adminPage.locator('#files-table tbody tr').allInnerTexts(),
+      hasViewButton: await adminPage.locator('button', { hasText: '查看' }).count(),
+    };
+
+    await adminPage.goto(`${BASE_URL}/viewer.html?path=_e2e_viewer/sample.vtu`, { waitUntil: 'networkidle' });
     await adminPage.waitForTimeout(4000);
     const viewer = {
       datasetPath: await adminPage.locator('#dataset-path').innerText(),
@@ -175,6 +212,11 @@ async function main() {
     adminPage.on('dialog', async (dialog) => { await dialog.accept(); });
     await adminPage.goto(`${BASE_URL}/admin.html`, { waitUntil: 'networkidle' });
     await adminPage.waitForTimeout(2500);
+    await adminPage.click('[data-tab="pools"]');
+    await adminPage.waitForTimeout(1500);
+    const poolUsageCount = await adminPage.locator('.pool-usage').count();
+    await adminPage.click('[data-tab="monitor"]');
+    await adminPage.waitForTimeout(1500);
 
     const rows = adminPage.locator('#monitor-table tbody tr');
     const count = await rows.count();
@@ -228,7 +270,7 @@ LIMIT 5;
     const calcReclaimed = sessionRows.some((row) => row[0] === '2' && row[1] === 'disconnected' && row[2] === 'admin');
     const notepadActive = sessionRows.some((row) => row[0] === '1' && row[1] === 'active');
 
-    const summary = { portal, viewer, reclaim, calcReclaimed, notepadActive, artifacts };
+    const summary = { portal, fileTree, viewer, poolUsageCount, reclaim, calcReclaimed, notepadActive, artifacts };
     console.log(JSON.stringify(summary, null, 2));
 
     if (artifacts.consoleErrors.length || artifacts.pageErrors.length || artifacts.failedRequests.length) {
@@ -237,8 +279,20 @@ LIMIT 5;
     if (!portal.appCardCount) {
       throw new Error('portal app cards missing');
     }
+    if (!fileTree.groupHeaders.some((label) => label.toLowerCase() === '.vtu')) {
+      throw new Error('file tree did not group VTU results');
+    }
+    if (!fileTree.hasViewButton) {
+      throw new Error('file tree did not expose viewer action');
+    }
     if (!viewer.statusBarVisible) {
       throw new Error('viewer did not load model');
+    }
+    if (!viewer.modelInfo.includes('sample.vtu')) {
+      throw new Error('viewer did not load VTU preview');
+    }
+    if (!poolUsageCount) {
+      throw new Error('admin pool usage UI missing');
     }
     if (!reclaim.calcClosed || !reclaim.notepadStillOpen) {
       throw new Error('reclaim behavior regression');

@@ -24,6 +24,11 @@ export function buildDatasetListUrl(path) {
     return '/api/datasets?path=' + encodeURIComponent(normalizedPath);
 }
 
+export function buildDatasetPreviewUrl(path) {
+    var normalizedPath = normalizeViewerPath(path);
+    return '/api/datasets/preview?path=' + encodeURIComponent(normalizedPath);
+}
+
 export function buildDatasetFileCandidates(path) {
     var normalizedPath = normalizeViewerPath(path);
     var encodedPath = encodeURIComponent(normalizedPath);

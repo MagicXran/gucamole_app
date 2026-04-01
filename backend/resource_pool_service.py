@@ -505,7 +505,7 @@ class ResourcePoolService:
         row = self._db.execute_query(
             """
             /* rps:get_queue_status */
-            SELECT id, pool_id, status, ready_expires_at
+            SELECT id, pool_id, status, ready_expires_at, cancel_reason
             FROM launch_queue
             WHERE id = %(queue_id)s
               AND user_id = %(user_id)s
@@ -522,7 +522,7 @@ class ResourcePoolService:
             row = self._db.execute_query(
                 """
                 /* rps:get_queue_status */
-                SELECT id, pool_id, status, ready_expires_at
+                SELECT id, pool_id, status, ready_expires_at, cancel_reason
                 FROM launch_queue
                 WHERE id = %(queue_id)s
                   AND user_id = %(user_id)s
@@ -539,7 +539,7 @@ class ResourcePoolService:
             row = self._db.execute_query(
                 """
                 /* rps:get_queue_status */
-                SELECT id, pool_id, status, ready_expires_at
+                SELECT id, pool_id, status, ready_expires_at, cancel_reason
                 FROM launch_queue
                 WHERE id = %(queue_id)s
                   AND user_id = %(user_id)s
@@ -585,13 +585,14 @@ class ResourcePoolService:
             "status": str(row["status"]),
             "position": position,
             "ready_expires_at": row.get("ready_expires_at"),
+            "cancel_reason": row.get("cancel_reason"),
         }
 
     def cancel_queue(self, *, queue_id: int, user_id: int) -> dict[str, Any]:
         row = self._db.execute_query(
             """
             /* rps:get_queue_status */
-            SELECT id, pool_id, status, ready_expires_at
+            SELECT id, pool_id, status, ready_expires_at, cancel_reason
             FROM launch_queue
             WHERE id = %(queue_id)s
               AND user_id = %(user_id)s
@@ -623,6 +624,7 @@ class ResourcePoolService:
             "status": "cancelled",
             "position": 0,
             "ready_expires_at": row.get("ready_expires_at"),
+            "cancel_reason": "user",
         }
 
     def _cancel_queue_as_invalid(self, queue_id: int, reason: str) -> int:
@@ -948,7 +950,7 @@ class ResourcePoolService:
             """
             /* rps:list_admin_queues */
             SELECT q.id, q.pool_id, p.name AS pool_name, q.user_id,
-                   u.username, u.display_name, q.status, q.created_at, q.ready_expires_at
+                   u.username, u.display_name, q.status, q.created_at, q.ready_expires_at, q.cancel_reason
             FROM launch_queue q
             JOIN resource_pool p ON p.id = q.pool_id
             JOIN portal_user u ON u.id = q.user_id
@@ -967,6 +969,7 @@ class ResourcePoolService:
                 "status": str(row["status"]),
                 "created_at": str(row["created_at"]) if row.get("created_at") else "",
                 "ready_expires_at": str(row["ready_expires_at"]) if row.get("ready_expires_at") else "",
+                "cancel_reason": str(row["cancel_reason"]) if row.get("cancel_reason") else "",
             }
             for row in rows
         ]

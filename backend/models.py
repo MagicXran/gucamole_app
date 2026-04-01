@@ -254,6 +254,7 @@ class QueueStatusResponse(BaseModel):
     status: str
     position: int = 0
     ready_expires_at: Any = None
+    cancel_reason: Optional[str] = None
 
 
 class LaunchOrQueueResponse(BaseModel):

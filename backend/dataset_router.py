@@ -12,6 +12,14 @@ from pydantic import BaseModel
 
 from backend.auth import get_current_user
 from backend.database import CONFIG
+from backend.dataset_preview_service import (
+    DatasetPreviewConversionError,
+    DatasetPreviewConfigError,
+    DatasetPreviewNotFoundError,
+    DatasetPreviewPathError,
+    DatasetPreviewUnavailableError,
+    ensure_preview_path,
+)
 from backend.models import UserInfo
 
 logger = logging.getLogger(__name__)
@@ -47,6 +55,11 @@ class DatasetListResponse(BaseModel):
     """结果目录响应"""
     path: str
     items: List[DatasetItem]
+
+
+class DatasetPreviewResponse(BaseModel):
+    """预览转换结果"""
+    path: str
 
 
 def _human_size(size_bytes: int) -> str:
@@ -188,6 +201,42 @@ def get_dataset_file(
         media_type=_MIME_MAP.get(extension, "application/octet-stream"),
         filename=target.name,
     )
+
+
+@router.get("/preview", response_model=DatasetPreviewResponse)
+def get_dataset_preview(
+    path: str,
+    user: UserInfo = Depends(get_current_user),
+):
+    """获取 VTU 预览文件路径（必要时先做服务端转换）"""
+    try:
+        preview_path = ensure_preview_path(user.user_id, path)
+    except DatasetPreviewConfigError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc) or "结果目录配置无效",
+        ) from exc
+    except DatasetPreviewPathError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc) or "非法路径",
+        ) from exc
+    except DatasetPreviewNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc) or "文件不存在",
+        ) from exc
+    except DatasetPreviewUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc) or "预览服务不可用",
+        ) from exc
+    except DatasetPreviewConversionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc) or "VTU 预览转换失败",
+        ) from exc
+    return DatasetPreviewResponse(path=preview_path)
 
 
 @router.get("/{file_path:path}")

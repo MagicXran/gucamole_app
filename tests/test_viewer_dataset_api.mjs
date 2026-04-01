@@ -10,6 +10,7 @@ const helperModule = await import(`data:text/javascript;base64,${Buffer.from(hel
 const {
   buildDatasetFileCandidates,
   buildDatasetListUrl,
+  buildDatasetPreviewUrl,
   extractDatasetItems,
   normalizeViewerPath,
   parentPath,
@@ -17,6 +18,10 @@ const {
 
 assert.equal(buildDatasetListUrl(''), '/api/datasets');
 assert.equal(buildDatasetListUrl('nested/run-1'), '/api/datasets?path=nested%2Frun-1');
+assert.equal(
+  buildDatasetPreviewUrl('nested/mesh.vtu'),
+  '/api/datasets/preview?path=nested%2Fmesh.vtu',
+);
 
 assert.deepEqual(
   buildDatasetFileCandidates('nested/mesh.obj'),

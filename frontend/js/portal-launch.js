@@ -2,6 +2,11 @@
 var _launchLock = {};
 var _queueTickets = {};
 var _queuePollers = {};
+var _queueRenderTicker = 0;
+
+function _getQueueUi() {
+    return window.PortalQueueUI || null;
+}
 
 async function launchApp(appId, appName, poolId) {
     await _launchWithWindow(appId, appName, poolId, null, false);
@@ -37,6 +42,21 @@ function _renderQueueWindow(win, appName, status, position) {
         '<title>' + safeName + ' - 排队中</title>' +
         '<style>*{margin:0;padding:0;box-sizing:border-box}body{display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"Microsoft YaHei\",sans-serif;background:linear-gradient(135deg,#1f2a44,#314c7a);color:#fff;padding:1.5rem}.box{max-width:420px;background:rgba(255,255,255,.08);padding:1.5rem;border-radius:18px;text-align:center;backdrop-filter:blur(10px)}.pill{display:inline-block;background:rgba(255,255,255,.14);padding:.2rem .7rem;border-radius:999px;font-size:.8rem;margin-bottom:.9rem}.desc{font-size:.92rem;color:rgba(255,255,255,.84);margin-top:.5rem}</style></head><body>' +
         '<div class="box"><div class="pill">资源池排队</div><h1 style="font-size:1.15rem">' + safeName + '</h1><p style="margin-top:.9rem;font-size:1rem">' + escapeHtml(message) + '</p><p class="desc">当前位置: ' + (position > 0 ? ('#' + position) : '-') + '</p><p class="desc">保持此窗口开启，轮到时会自动继续。</p></div>' +
+        '</body></html>'
+    );
+    win.document.close();
+}
+
+function _renderQueueTerminalWindow(win, appName, message) {
+    if (!win || win.closed) return;
+    var safeName = escapeHtml(appName);
+    var safeMessage = escapeHtml(message || '排队状态已结束');
+    win.document.open();
+    win.document.write(
+        '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">' +
+        '<title>' + safeName + ' - 队列结束</title>' +
+        '<style>*{margin:0;padding:0;box-sizing:border-box}body{display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"Microsoft YaHei\",sans-serif;background:linear-gradient(135deg,#2b1f3a,#5b2f56);color:#fff;padding:1.5rem}.box{max-width:420px;background:rgba(255,255,255,.08);padding:1.5rem;border-radius:18px;text-align:center;backdrop-filter:blur(10px)}</style></head><body>' +
+        '<div class="box"><h1 style="font-size:1.1rem">' + safeName + '</h1><p style="margin-top:.8rem;font-size:.95rem">' + safeMessage + '</p></div>' +
         '</body></html>'
     );
     win.document.close();
@@ -164,18 +184,32 @@ function renderQueueTickets() {
     if (!container) return;
     var ids = Object.keys(_queueTickets);
     if (!ids.length) {
+        if (_queueRenderTicker) {
+            clearInterval(_queueRenderTicker);
+            _queueRenderTicker = 0;
+        }
         container.style.display = 'none';
         container.innerHTML = '';
         return;
+    }
+    if (!_queueRenderTicker) {
+        _queueRenderTicker = setInterval(renderQueueTickets, 1000);
     }
 
     container.style.display = '';
     container.innerHTML = ids.map(function(id) {
         var ticket = _queueTickets[id];
-        var label = '排队中';
-        if (ticket.status === 'ready') label = '已就绪';
-        else if (ticket.status === 'launching') label = '正在启动';
-        return '<div class="queue-ticket"><div class="queue-ticket__row"><div><div class="queue-ticket__title">' + escapeHtml(ticket.appName) + ' · ' + label + '</div><div class="queue-ticket__meta">队列编号 #' + ticket.queueId + ' · 当前位置 ' + (ticket.position > 0 ? ('#' + ticket.position) : '-') + '</div></div><div class="queue-ticket__actions">' +
+        var queueUi = _getQueueUi();
+        var described = queueUi
+            ? queueUi.describeQueueTicket(ticket, Date.now())
+            : {
+                label: ticket.status,
+                meta: '队列编号 #' + ticket.queueId + ' · 当前位置 ' + (ticket.position > 0 ? ('#' + ticket.position) : '-'),
+            };
+        var metaClass = (ticket.status === 'cancelled' || ticket.status === 'expired' || ticket.status === 'fulfilled')
+            ? 'queue-ticket__meta queue-ticket__meta--terminal'
+            : 'queue-ticket__meta';
+        return '<div class="queue-ticket"><div class="queue-ticket__row"><div><div class="queue-ticket__title">' + escapeHtml(ticket.appName) + ' · ' + escapeHtml(described.label) + '</div><div class="' + metaClass + '">' + escapeHtml(described.meta) + '</div></div><div class="queue-ticket__actions">' +
             (ticket.status === 'ready' ? '<button class="queue-ticket__btn queue-ticket__btn--primary" onclick="resumeQueuedLaunch(' + ticket.queueId + ')">立即启动</button>' : '') +
             '<button class="queue-ticket__btn queue-ticket__btn--ghost" onclick="cancelQueuedLaunch(' + ticket.queueId + ')">取消</button></div></div></div>';
     }).join('');
@@ -239,8 +273,19 @@ async function _pollQueueStatus(queueId) {
         var data = await resp.json();
         ticket.status = data.status;
         ticket.position = data.position || 0;
+        ticket.readyExpiresAt = data.ready_expires_at || '';
+        ticket.cancelReason = data.cancel_reason || '';
         if (ticket.status === 'cancelled' || ticket.status === 'expired' || ticket.status === 'fulfilled') {
-            if (ticket.win && !ticket.win.closed) ticket.win.close();
+            if (ticket.win && !ticket.win.closed) {
+                var queueUi = _getQueueUi();
+                var terminalInfo = queueUi
+                    ? queueUi.describeQueueTicket(ticket, Date.now())
+                    : { meta: '排队状态已结束' };
+                _renderQueueTerminalWindow(ticket.win, ticket.appName, terminalInfo.meta);
+                setTimeout(function(winRef) {
+                    if (winRef && !winRef.closed) winRef.close();
+                }, 2000, ticket.win);
+            }
             _removeQueueTicket(queueId);
             return;
         }

@@ -22,6 +22,7 @@ import {
     baseName,
     buildDatasetFileCandidates,
     buildDatasetListUrl,
+    buildDatasetPreviewUrl,
     extractDatasetItems,
     normalizeViewerPath,
     parentPath,
@@ -215,6 +216,21 @@ async function fetchDatasetArrayBuffer(datasetPath) {
 }
 
 
+async function requestDatasetPreviewPath(datasetPath) {
+    var resp = await fetch(buildDatasetPreviewUrl(datasetPath), { headers: authHeaders() });
+    if (resp.status === 401) {
+        window.location.href = '/login.html';
+        return null;
+    }
+    if (!resp.ok) {
+        var err = await resp.json().catch(function() { return {}; });
+        throw new Error(err.detail || ('预览转换失败: HTTP ' + resp.status));
+    }
+    var payload = await resp.json();
+    return normalizeViewerPath(payload.path || '');
+}
+
+
 async function loadDataset(datasetPath, sizeHuman, listItem) {
     var normalizedPath = normalizeViewerPath(datasetPath);
     var displayName = baseName(normalizedPath);
@@ -235,23 +251,31 @@ async function loadDataset(datasetPath, sizeHuman, listItem) {
     hideError();
 
     try {
-        // 1. 下载文件
+        // 1. 预处理 + 下载文件
+        var parseExt = displayName.split('.').pop().toLowerCase();
+        var resolvedPath = normalizedPath;
+        if (parseExt === 'vtu') {
+            $loadingText.textContent = '正在转换 VTU 预览...';
+            resolvedPath = await requestDatasetPreviewPath(normalizedPath);
+            if (!resolvedPath) return;
+            parseExt = 'vtp';
+        }
+
         var startTime = performance.now();
-        var arrayBuffer = await fetchDatasetArrayBuffer(normalizedPath);
+        var arrayBuffer = await fetchDatasetArrayBuffer(resolvedPath);
         if (arrayBuffer === null) return;
         var downloadTime = ((performance.now() - startTime) / 1000).toFixed(2);
 
         $loadingText.textContent = '解析 ' + displayName + '...';
 
         // 2. 根据扩展名选择 Reader
-        var ext = displayName.split('.').pop().toLowerCase();
-        var reader = await createReader(ext);
+        var reader = await createReader(parseExt);
         if (!reader) {
-            throw new Error('不支持的格式: .' + ext);
+            throw new Error('不支持的格式: .' + parseExt);
         }
 
         // 3. 解析数据
-        parseData(reader, arrayBuffer, ext);
+        parseData(reader, arrayBuffer, parseExt);
 
         // 4. 获取输出
         var output = reader.getOutputData(0);
@@ -321,8 +345,6 @@ async function loadDataset(datasetPath, sizeHuman, listItem) {
 function createReader(ext) {
     switch (ext) {
         case 'vtp': return vtkXMLPolyDataReader.newInstance();
-        case 'vtu':
-            throw new Error('VTU 暂不支持在线预览，请先导出为 VTP / OBJ / STL');
         case 'stl': return vtkSTLReader.newInstance();
         case 'obj': return vtkOBJReader.newInstance();
         default:    return null;
@@ -330,7 +352,7 @@ function createReader(ext) {
 }
 
 function parseData(reader, arrayBuffer, ext) {
-    if (ext === 'vtp' || ext === 'vtu') {
+    if (ext === 'vtp') {
         reader.parseAsArrayBuffer(arrayBuffer);
     } else if (ext === 'stl') {
         reader.parseAsArrayBuffer(arrayBuffer);

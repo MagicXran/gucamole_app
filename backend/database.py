@@ -42,6 +42,13 @@ def load_config() -> dict:
     config["guacamole"]["external_url"] = os.environ.get(
         "GUACAMOLE_EXTERNAL_URL", config["guacamole"]["external_url"]
     )
+    drive_cfg = config.setdefault("guacamole", {}).setdefault("drive", {})
+    drive_cfg["base_path"] = os.environ.get(
+        "GUACAMOLE_DRIVE_BASE_PATH", drive_cfg.get("base_path", "/drive")
+    )
+    drive_cfg["results_root"] = os.environ.get(
+        "GUACAMOLE_DRIVE_RESULTS_ROOT", drive_cfg.get("results_root", "Output")
+    )
     return config
 
 

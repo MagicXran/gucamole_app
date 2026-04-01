@@ -1,4 +1,10 @@
 var _currentPath = '';
+var _filesState = {
+    items: [],
+    query: '',
+    sortKey: 'name',
+    groupByExt: false,
+};
 
 async function loadSpaceInfo() {
     try {
@@ -31,7 +37,8 @@ async function loadFiles(path) {
             return;
         }
         var data = await resp.json();
-        renderFileTable(data.items || []);
+        _filesState.items = data.items || [];
+        renderFileTable();
     } catch (e) {
         showError('加载文件列表失败: ' + (e.message || ''));
     }
@@ -61,9 +68,17 @@ function renderBreadcrumb(path) {
     }
 }
 
-function renderFileTable(items) {
+function renderFileTable() {
     var tbody = document.querySelector('#files-table tbody');
     tbody.innerHTML = '';
+    var browser = window.PortalFileBrowser;
+    var items = _filesState.items || [];
+    if (browser && typeof browser.filterAndSortItems === 'function') {
+        items = browser.filterAndSortItems(items, {
+            query: _filesState.query,
+            sortKey: _filesState.sortKey,
+        });
+    }
 
     if (!items.length) {
         var tr = document.createElement('tr');
@@ -78,7 +93,20 @@ function renderFileTable(items) {
         return;
     }
 
-    items.forEach(function(item) {
+    var groups = [{ label: '', items: items }];
+    if (_filesState.groupByExt && browser && typeof browser.groupItemsByExtension === 'function') {
+        groups = browser.groupItemsByExtension(items);
+    }
+
+    groups.forEach(function(group) {
+        if (group.label) {
+            var headerTr = document.createElement('tr');
+            headerTr.className = 'files-group-header';
+            headerTr.innerHTML = '<td colspan="4">' + escapeHtml(group.label) + '</td>';
+            tbody.appendChild(headerTr);
+        }
+
+        group.items.forEach(function(item) {
         var tr = document.createElement('tr');
 
         var nameTd = document.createElement('td');
@@ -117,7 +145,7 @@ function renderFileTable(items) {
         var filePath = (_currentPath ? _currentPath + '/' : '') + item.name;
 
         if (!item.is_dir) {
-            if (isViewerResultFile(filePath)) {
+            if (browser ? browser.isViewerResultFile(filePath) : isViewerResultFile(filePath)) {
                 var viewBtn = document.createElement('button');
                 viewBtn.className = 'btn btn--outline';
                 viewBtn.style.padding = '0.2rem 0.5rem';
@@ -166,7 +194,18 @@ function renderFileTable(items) {
         tr.appendChild(actionTd);
 
         tbody.appendChild(tr);
+        });
     });
+}
+
+function updateFileBrowserControls() {
+    var searchEl = document.getElementById('files-search');
+    var sortEl = document.getElementById('files-sort');
+    var groupEl = document.getElementById('files-group-ext');
+    _filesState.query = searchEl ? searchEl.value.trim() : '';
+    _filesState.sortKey = sortEl ? sortEl.value : 'name';
+    _filesState.groupByExt = !!(groupEl && groupEl.checked);
+    renderFileTable();
 }
 
 async function downloadFile(path) {

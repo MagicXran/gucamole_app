@@ -57,6 +57,16 @@
             <div class="files-toolbar">
                 <div class="files-breadcrumb" id="files-breadcrumb"></div>
                 <div style="display:flex;gap:0.4rem;">
+                    <input type="text" id="files-search" placeholder="筛选文件名" style="padding:0.45rem 0.6rem;border:1px solid #ddd;border-radius:6px;font-size:0.85rem;">
+                    <select id="files-sort" style="padding:0.45rem 0.6rem;border:1px solid #ddd;border-radius:6px;font-size:0.85rem;">
+                        <option value="name">按名称</option>
+                        <option value="size">按大小</option>
+                        <option value="mtime">按时间</option>
+                    </select>
+                    <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.82rem;color:#555;">
+                        <input type="checkbox" id="files-group-ext">
+                        按扩展名分组
+                    </label>
                     <button class="btn btn--outline" onclick="createFolder()">新建文件夹</button>
                     <button class="btn btn--primary" onclick="triggerUpload()">上传文件</button>
                     <input type="file" id="file-input" multiple style="display:none">
@@ -84,6 +94,8 @@
     <script src="js/shared-dom.js"></script>
     <script src="js/shared-icons.js"></script>
     <script src="js/app.js"></script>
+    <script type="module" src="js/portal-queue-ui.js"></script>
+    <script type="module" src="js/portal-file-browser.js"></script>
     <script src="js/portal-launch.js"></script>
     <script src="js/portal-files.js"></script>
     <script src="js/portal-uploads.js"></script>

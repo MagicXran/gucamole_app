@@ -93,8 +93,16 @@ function renderPoolsTable() {
     var tbody = document.querySelector('#pools-table tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
+    var queueUi = window.PortalQueueUI || null;
 
     _pools.forEach(function(pool) {
+        var usage = queueUi
+            ? queueUi.summarizePoolUtilization(pool)
+            : {
+                percent: 0,
+                label: (pool.active_count || 0) + ' / ' + (pool.max_concurrent || 1),
+                queuedLabel: '排队 ' + (pool.queued_count || 0),
+            };
         var tr = document.createElement('tr');
         tr.innerHTML =
             '<td>' + pool.id + '</td>' +
@@ -102,6 +110,7 @@ function renderPoolsTable() {
             '<td>' + pool.max_concurrent + '</td>' +
             '<td>' + (pool.active_count || 0) + '</td>' +
             '<td>' + (pool.queued_count || 0) + '</td>' +
+            '<td><div class="pool-usage"><div class="pool-usage__bar"><div class="pool-usage__fill" style="width:' + usage.percent + '%"></div></div><div class="pool-usage__text">' + escapeHtml(usage.label) + ' · ' + escapeHtml(usage.queuedLabel) + '</div></div></td>' +
             '<td>' + (pool.is_active ? '<span class="badge badge--active">启用</span>' : '<span class="badge badge--inactive">禁用</span>') + '</td>' +
             '<td><button class="btn btn--outline btn--small" onclick="showPoolModal(' + pool.id + ')">编辑</button></td>';
         tbody.appendChild(tr);
@@ -127,7 +136,7 @@ function renderPoolQueueTable(items) {
             '<td>' + escapeHtml(item.display_name || item.username) + '</td>' +
             '<td>' + escapeHtml(item.status) + '</td>' +
             '<td>' + escapeHtml(item.created_at || '-') + '</td>' +
-            '<td>' + escapeHtml(item.ready_expires_at || '-') + '</td>' +
+            '<td>' + escapeHtml(item.ready_expires_at || '-') + (item.cancel_reason ? ('<br><span style="font-size:0.75rem;color:#999;">' + escapeHtml(item.cancel_reason) + '</span>') : '') + '</td>' +
             '<td><button class="btn btn--danger btn--small" onclick="cancelPoolQueue(' + item.queue_id + ')">取消</button></td>';
         tbody.appendChild(tr);
     });

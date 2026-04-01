@@ -70292,6 +70292,10 @@ function buildDatasetListUrl(path) {
   if (!normalizedPath) return "/api/datasets";
   return "/api/datasets?path=" + encodeURIComponent(normalizedPath);
 }
+function buildDatasetPreviewUrl(path) {
+  var normalizedPath = normalizeViewerPath(path);
+  return "/api/datasets/preview?path=" + encodeURIComponent(normalizedPath);
+}
 function buildDatasetFileCandidates(path) {
   var normalizedPath = normalizeViewerPath(path);
   var encodedPath = encodeURIComponent(normalizedPath);
@@ -70495,6 +70499,21 @@ async function fetchDatasetArrayBuffer(datasetPath) {
   }
   throw lastError || new Error("下载失败");
 }
+async function requestDatasetPreviewPath(datasetPath) {
+  var resp = await fetch(buildDatasetPreviewUrl(datasetPath), { headers: authHeaders() });
+  if (resp.status === 401) {
+    window.location.href = "/login.html";
+    return null;
+  }
+  if (!resp.ok) {
+    var err2 = await resp.json().catch(function() {
+      return {};
+    });
+    throw new Error(err2.detail || "预览转换失败: HTTP " + resp.status);
+  }
+  var payload = await resp.json();
+  return normalizeViewerPath(payload.path || "");
+}
 async function loadDataset(datasetPath, sizeHuman, listItem) {
   var normalizedPath = normalizeViewerPath(datasetPath);
   var displayName = baseName(normalizedPath);
@@ -70510,17 +70529,24 @@ async function loadDataset(datasetPath, sizeHuman, listItem) {
   $loadingText.textContent = "正在下载 " + displayName + "...";
   hideError();
   try {
+    var parseExt = displayName.split(".").pop().toLowerCase();
+    var resolvedPath = normalizedPath;
+    if (parseExt === "vtu") {
+      $loadingText.textContent = "正在转换 VTU 预览...";
+      resolvedPath = await requestDatasetPreviewPath(normalizedPath);
+      if (!resolvedPath) return;
+      parseExt = "vtp";
+    }
     var startTime = performance.now();
-    var arrayBuffer = await fetchDatasetArrayBuffer(normalizedPath);
+    var arrayBuffer = await fetchDatasetArrayBuffer(resolvedPath);
     if (arrayBuffer === null) return;
     var downloadTime = ((performance.now() - startTime) / 1e3).toFixed(2);
     $loadingText.textContent = "解析 " + displayName + "...";
-    var ext = displayName.split(".").pop().toLowerCase();
-    var reader = await createReader(ext);
+    var reader = await createReader(parseExt);
     if (!reader) {
-      throw new Error("不支持的格式: ." + ext);
+      throw new Error("不支持的格式: ." + parseExt);
     }
-    parseData(reader, arrayBuffer, ext);
+    parseData(reader, arrayBuffer, parseExt);
     var output = reader.getOutputData(0);
     if (!output) throw new Error("解析失败：无输出数据");
     currentPolyData = output;
@@ -70561,8 +70587,6 @@ function createReader(ext) {
   switch (ext) {
     case "vtp":
       return vtkXMLPolyDataReader$1.newInstance();
-    case "vtu":
-      throw new Error("VTU 暂不支持在线预览，请先导出为 VTP / OBJ / STL");
     case "stl":
       return vtkSTLReader$1.newInstance();
     case "obj":
@@ -70572,7 +70596,7 @@ function createReader(ext) {
   }
 }
 function parseData(reader, arrayBuffer, ext) {
-  if (ext === "vtp" || ext === "vtu") {
+  if (ext === "vtp") {
     reader.parseAsArrayBuffer(arrayBuffer);
   } else if (ext === "stl") {
     reader.parseAsArrayBuffer(arrayBuffer);

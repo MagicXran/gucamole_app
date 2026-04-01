@@ -45,6 +45,9 @@ function formatBytes(bytes) {
 }
 
 function isViewerResultFile(path) {
+    if (window.PortalFileBrowser && typeof window.PortalFileBrowser.isViewerResultFile === 'function') {
+        return window.PortalFileBrowser.isViewerResultFile(path);
+    }
     var normalized = String(path || '').replace(/\\/g, '/');
     if (normalized.toLowerCase().indexOf('output/') !== 0) return false;
     var dot = normalized.lastIndexOf('.');
@@ -100,6 +103,12 @@ async function init() {
         if (tab) switchPortalTab(tab);
     });
     document.getElementById('file-input').addEventListener('change', _handleFileSelect);
+    var filesSearch = document.getElementById('files-search');
+    var filesSort = document.getElementById('files-sort');
+    var filesGroup = document.getElementById('files-group-ext');
+    if (filesSearch) filesSearch.addEventListener('input', updateFileBrowserControls);
+    if (filesSort) filesSort.addEventListener('change', updateFileBrowserControls);
+    if (filesGroup) filesGroup.addEventListener('change', updateFileBrowserControls);
     _initDragDrop();
 
     var uploadsDiv = document.createElement('div');

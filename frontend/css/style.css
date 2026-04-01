@@ -81,6 +81,10 @@ body {
     color: #7a6a3d;
 }
 
+.queue-ticket__meta--terminal {
+    color: #8b1e1e;
+}
+
 .queue-ticket__actions {
     display: flex;
     gap: 0.5rem;
@@ -483,6 +487,37 @@ body {
 }
 
 .files-toolbar .btn--primary:hover { background: #1557b0; }
+
+.files-group-header td {
+    background: #f8f9fa;
+    color: #666;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.pool-usage {
+    min-width: 150px;
+}
+
+.pool-usage__bar {
+    height: 8px;
+    border-radius: 999px;
+    background: #edf2f7;
+    overflow: hidden;
+}
+
+.pool-usage__fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4f8cff, #1a73e8);
+}
+
+.pool-usage__text {
+    margin-top: 0.25rem;
+    font-size: 0.8rem;
+    color: #555;
+}
 
 /* 面包屑 */
 .files-breadcrumb {

@@ -57,16 +57,23 @@ def verify_schema(cursor) -> list[str]:
     return problems
 
 
-def _connect_live():
+def _build_connection_kwargs(args) -> dict:
     db_cfg = CONFIG["database"]
+    return {
+        "host": args.host or db_cfg["host"],
+        "port": args.port or db_cfg["port"],
+        "database": args.database or db_cfg["database"],
+        "user": args.user or db_cfg["user"],
+        "password": args.password or db_cfg["password"],
+        "charset": "utf8mb4",
+        "use_unicode": True,
+    }
+
+
+def _connect(args):
+    kwargs = _build_connection_kwargs(args)
     return mysql.connector.connect(
-        host=db_cfg["host"],
-        port=db_cfg["port"],
-        database=db_cfg["database"],
-        user=db_cfg["user"],
-        password=db_cfg["password"],
-        charset="utf8mb4",
-        use_unicode=True,
+        **kwargs,
     )
 
 
@@ -78,9 +85,14 @@ def main(argv=None) -> int:
         choices=["live"],
         help="schema target to verify",
     )
-    _ = parser.parse_args(argv)
+    parser.add_argument("--host")
+    parser.add_argument("--port", type=int)
+    parser.add_argument("--database")
+    parser.add_argument("--user")
+    parser.add_argument("--password")
+    args = parser.parse_args(argv)
 
-    conn = _connect_live()
+    conn = _connect(args)
     try:
         cursor = conn.cursor()
         problems = verify_schema(cursor)

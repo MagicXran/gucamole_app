@@ -13,6 +13,7 @@ import threading
 import httpx
 
 from backend.guacamole_crypto import GuacamoleCrypto
+from backend.structured_logging import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ class _SessionCache:
                 fetch_one=True,
             )
         except Exception:
-            logger.warning("token_cache 表读取失败，视为缓存未命中")
+            log_event(logger, logging.WARNING, "guac_cache_read_failed")
             return None
 
         if not row:
@@ -106,7 +107,7 @@ class _SessionCache:
                 },
             )
         except Exception:
-            logger.warning("token_cache 表写入失败，仅保留内存缓存")
+            log_event(logger, logging.WARNING, "guac_cache_write_failed")
 
     def promote(self, username: str, entry: dict):
         """将数据库恢复的条目提升到内存缓存"""
@@ -133,7 +134,7 @@ class _SessionCache:
         try:
             self._db.execute_update("DELETE FROM token_cache")
         except Exception:
-            logger.warning("token_cache 全量清除失败")
+            log_event(logger, logging.WARNING, "guac_cache_invalidate_all_failed")
 
 
 class GuacamoleService:
@@ -159,12 +160,12 @@ class GuacamoleService:
     def invalidate_all_sessions(self):
         """清空所有用户的 Guacamole session 缓存"""
         self._cache.invalidate_all()
-        logger.info("已清空全部 Guacamole session 缓存")
+        log_event(logger, logging.INFO, "guac_token_invalidated", scope="all")
 
     def invalidate_user_session(self, username: str):
         """尽力让指定门户用户的 Guacamole token 失效。"""
         self._cache.invalidate(username)
-        logger.info("已清除用户 Guacamole session 缓存: %s", username)
+        log_event(logger, logging.INFO, "guac_token_invalidated", username=username, scope="user")
 
     async def _validate_token(self, auth_token: str) -> bool:
         """向 Guacamole 验证 authToken 是否仍然有效
@@ -181,7 +182,7 @@ class GuacamoleService:
                 )
                 return resp.status_code == 200
         except Exception:
-            logger.warning("Guacamole token 验证失败（网络错误）")
+            log_event(logger, logging.WARNING, "guac_downstream_error", phase="validate_token")
             return False
 
     async def _create_session(
@@ -206,26 +207,22 @@ class GuacamoleService:
             )
 
         if resp.status_code != 200:
-            logger.error(
-                "Guacamole /api/tokens 返回 %d: %s", resp.status_code, resp.text
-            )
+            log_event(logger, logging.ERROR, "guac_downstream_error", phase="create_session", status_code=resp.status_code)
             resp.raise_for_status()
 
         try:
             result = resp.json()
         except Exception:
-            logger.error("Guacamole 返回非JSON响应: %s", resp.text[:500])
+            log_event(logger, logging.ERROR, "guac_downstream_error", phase="create_session_non_json")
             raise RuntimeError("Guacamole 返回了非预期的响应格式")
 
         auth_token = result.get("authToken")
         if not auth_token:
-            logger.error("Guacamole 响应缺少 authToken: %s", result)
+            log_event(logger, logging.ERROR, "guac_downstream_error", phase="missing_auth_token")
             raise RuntimeError("Guacamole 响应中无 authToken")
         data_source = result.get("dataSource", "json")
 
-        logger.info(
-            "创建新 session, username=%s, dataSource=%s", username, data_source,
-        )
+        log_event(logger, logging.INFO, "guac_session_created", username=username, data_source=data_source)
         return auth_token, data_source
 
     async def launch_connection(
@@ -252,16 +249,13 @@ class GuacamoleService:
             if await self._validate_token(cached["auth_token"]):
                 if cached.get("needs_validation"):
                     self._cache.promote(username, cached)
-                    logger.info("从数据库恢复 session: username=%s", username)
+                    log_event(logger, logging.INFO, "guac_session_reused", username=username, source="database")
                 else:
-                    logger.debug("复用缓存 session: username=%s", username)
+                    log_event(logger, logging.INFO, "guac_session_reused", username=username, source="memory")
             else:
                 self._cache.invalidate(username)
                 cached = None
-                logger.info(
-                    "缓存 token 在 Guacamole 端已失效，将重建: username=%s",
-                    username,
-                )
+                log_event(logger, logging.INFO, "guac_token_invalidated", username=username, scope="stale_cache")
 
         if not cached:
             auth_token, data_source = await self._create_session(

@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from backend.database import CONFIG
+from backend.resource_pool_queue import ResourcePoolQueueService
+from backend.resource_pool_queries import ResourcePoolQueryService
 from backend.resource_pool_reclaim import ResourcePoolReclaimService
 
 
@@ -35,6 +37,19 @@ class ResourcePoolService:
     def __init__(self, db, now_provider: Callable[[], datetime] | None = None):
         self._db = db
         self._now_provider = now_provider or datetime.now
+        self._queries = ResourcePoolQueryService(db)
+        self._queue_service = ResourcePoolQueueService(
+            db,
+            self._queries,
+            now_provider=self._now_provider,
+            pool_lock=self._pool_lock,
+            get_live_user_pool_state=self.get_live_user_pool_state,
+            pick_launchable_member=self.pick_launchable_member,
+            has_accessible_member=self._has_accessible_member,
+            count_pool_live_queue_entries=self._count_pool_live_queue_entries,
+            available_slots=self._available_slots,
+            live_queue_states=self.LIVE_QUEUE_STATES,
+        )
         self._reclaim_service = ResourcePoolReclaimService(
             db,
             now_provider=self._now_provider,
@@ -175,10 +190,6 @@ class ResourcePoolService:
         )
         return bool(row)
 
-    def _invalidate_queue_if_unusable(self, *, queue_id: int, user_id: int, pool_id: int, reason: str = "member_unavailable") -> dict[str, Any]:
-        self._cancel_queue_as_invalid(queue_id, reason)
-        return self.get_queue_status(queue_id=queue_id, user_id=user_id)
-
     def list_user_pools(self, user_id: int) -> list[dict[str, Any]]:
         rows = self._db.execute_query(
             """
@@ -288,484 +299,33 @@ class ResourcePoolService:
     def _pool_has_capacity(self, pool_id: int, *, exclude_queue_id: int | None = None) -> bool:
         return self._available_slots(pool_id, exclude_queue_id=exclude_queue_id) > 0
 
-    def _enqueue_request(self, user_id: int, pool_id: int, requested_app_id: int) -> dict[str, Any]:
-        self._db.execute_update(
-            """
-            /* rps:insert_queue_entry */
-            INSERT INTO launch_queue (pool_id, user_id, requested_app_id)
-            VALUES (%(pool_id)s, %(user_id)s, %(requested_app_id)s)
-            """,
-            {"pool_id": pool_id, "user_id": user_id, "requested_app_id": requested_app_id},
-        )
-        row = self._db.execute_query(
-            """
-            /* rps:get_latest_user_queue */
-            SELECT id
-            FROM launch_queue
-            WHERE pool_id = %(pool_id)s
-              AND user_id = %(user_id)s
-              AND status = 'queued'
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            {"pool_id": pool_id, "user_id": user_id},
-            fetch_one=True,
-        )
-        if not row:
-            raise RuntimeError("排队创建失败")
-        result = self.get_queue_status(queue_id=int(row["id"]), user_id=user_id)
-        result["status"] = "queued"
-        return result
-
-    def _create_launch_reservation(self, user_id: int, pool_id: int, requested_app_id: int, assigned_app_id: int) -> int:
-        now = self._now()
-        self._db.execute_update(
-            """
-            /* rps:insert_queue_entry */
-            INSERT INTO launch_queue (
-                pool_id, user_id, requested_app_id, assigned_app_id, status, ready_at, last_seen_at
-            )
-            VALUES (
-                %(pool_id)s, %(user_id)s, %(requested_app_id)s, %(assigned_app_id)s, 'launching', %(ready_at)s, %(last_seen_at)s
-            )
-            """,
-            {
-                "pool_id": pool_id,
-                "user_id": user_id,
-                "requested_app_id": requested_app_id,
-                "assigned_app_id": assigned_app_id,
-                "ready_at": now,
-                "last_seen_at": now,
-            },
-        )
-        row = self._db.execute_query(
-            """
-            /* rps:get_latest_user_queue */
-            SELECT id
-            FROM launch_queue
-            WHERE pool_id = %(pool_id)s
-              AND user_id = %(user_id)s
-              AND status IN ('queued', 'launching')
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            {"pool_id": pool_id, "user_id": user_id, "include_launching": True},
-            fetch_one=True,
-        )
-        if not row:
-            raise RuntimeError("占位创建失败")
-        return int(row["id"])
-
     def expire_ready_entries(self, *, pool_id: int | None = None) -> list[int]:
-        now = self._now()
-        rows = self._db.execute_query(
-            """
-            /* rps:list_expired_ready_entries */
-            SELECT id
-            FROM launch_queue
-            WHERE status = 'ready'
-              AND ready_expires_at IS NOT NULL
-              AND ready_expires_at < %(now_ts)s
-              AND (%(pool_id)s IS NULL OR pool_id = %(pool_id)s)
-            ORDER BY id ASC
-            """,
-            {"now_ts": now, "pool_id": pool_id},
-        )
-        if not rows:
-            return []
-        self._db.execute_update(
-            """
-            /* rps:expire_ready_entries */
-            UPDATE launch_queue
-            SET status = 'expired',
-                cancel_reason = 'timeout',
-                cancelled_at = %(now_ts)s
-            WHERE status = 'ready'
-              AND ready_expires_at IS NOT NULL
-              AND ready_expires_at < %(now_ts)s
-              AND (%(pool_id)s IS NULL OR pool_id = %(pool_id)s)
-            """,
-            {"now_ts": now, "pool_id": pool_id},
-        )
-        return [int(row["id"]) for row in rows]
+        return self._queue_service.expire_ready_entries(pool_id=pool_id)
 
     def prepare_launch(self, *, user_id: int, requested_app_id: int, queue_id: int | None = None) -> dict[str, Any]:
-        launch_target = self._db.execute_query(
-            """
-            /* rps:get_launch_target */
-            SELECT
-                a.id AS requested_app_id,
-                a.pool_id,
-                COALESCE(p.name, a.name) AS pool_name
-            FROM remote_app a
-            JOIN remote_app_acl acl
-              ON acl.app_id = a.id
-             AND acl.user_id = %(user_id)s
-            LEFT JOIN resource_pool p
-              ON p.id = a.pool_id
-            WHERE a.id = %(app_id)s
-              AND a.is_active = 1
-            LIMIT 1
-            """,
-            {"user_id": user_id, "app_id": requested_app_id},
-            fetch_one=True,
+        return self._queue_service.prepare_launch(
+            user_id=user_id,
+            requested_app_id=requested_app_id,
+            queue_id=queue_id,
         )
-        if not launch_target:
-            raise ValueError("无权访问该应用")
-        if launch_target.get("pool_id") is None:
-            raise ValueError("应用未分配资源池")
-
-        pool_id = int(launch_target["pool_id"])
-        pool_name = str(launch_target["pool_name"])
-
-        with self._pool_lock(pool_id):
-            self.expire_ready_entries(pool_id=pool_id)
-
-            if queue_id is not None:
-                entry = self._db.execute_query(
-                    """
-                    /* rps:get_queue_entry_for_consume */
-                    SELECT id, pool_id, status, assigned_app_id, ready_expires_at
-                    FROM launch_queue
-                    WHERE id = %(queue_id)s
-                      AND user_id = %(user_id)s
-                    LIMIT 1
-                    """,
-                    {"queue_id": queue_id, "user_id": user_id},
-                    fetch_one=True,
-                )
-                if not entry:
-                    raise ValueError("排队记录不存在")
-                if int(entry["pool_id"]) != pool_id:
-                    return self._invalidate_queue_if_unusable(queue_id=int(queue_id), user_id=user_id, pool_id=pool_id, reason="pool_mismatch")
-                if str(entry["status"]) != "ready":
-                    return self.get_queue_status(queue_id=queue_id, user_id=user_id)
-                if entry.get("ready_expires_at") and entry["ready_expires_at"] < self._now():
-                    self.expire_ready_entries(pool_id=pool_id)
-                    return self.get_queue_status(queue_id=queue_id, user_id=user_id)
-
-                member = self._db.execute_query(
-                    """
-                    /* rps:get_member_for_user */
-                    SELECT a.id, a.pool_id
-                    FROM remote_app a
-                    JOIN remote_app_acl acl ON acl.app_id = a.id AND acl.user_id = %(user_id)s
-                    WHERE a.id = %(member_app_id)s
-                      AND a.is_active = 1
-                    LIMIT 1
-                    """,
-                    {"member_app_id": int(entry["assigned_app_id"]), "user_id": user_id},
-                    fetch_one=True,
-                )
-                if not member:
-                    return self._invalidate_queue_if_unusable(queue_id=int(queue_id), user_id=user_id, pool_id=pool_id, reason="member_unavailable")
-
-                updated = self._db.execute_update(
-                    """
-                    /* rps:queue_mark_launching */
-                    UPDATE launch_queue
-                    SET status = 'launching'
-                    WHERE id = %(queue_id)s
-                      AND user_id = %(user_id)s
-                      AND status = 'ready'
-                    """,
-                    {"queue_id": queue_id, "user_id": user_id},
-                )
-                if updated <= 0:
-                    return self.get_queue_status(queue_id=queue_id, user_id=user_id)
-
-                return {
-                    "status": "started",
-                    "pool_id": pool_id,
-                    "member_app_id": int(entry["assigned_app_id"]),
-                    "requested_app_name": pool_name,
-                    "connection_name": f"app_{int(entry['assigned_app_id'])}",
-                    "queue_id": int(queue_id),
-                }
-
-            live_state = self.get_live_user_pool_state(user_id=user_id, pool_id=pool_id)
-            if live_state:
-                if live_state["state_kind"] == "queue":
-                    return self.get_queue_status(queue_id=int(live_state["id"]), user_id=user_id)
-                raise ValueError("当前资源池已有运行中的会话")
-
-            member = self.pick_launchable_member(user_id=user_id, pool_id=pool_id)
-            if self._count_pool_live_queue_entries(pool_id) > 0 or not self._pool_has_capacity(pool_id) or not member:
-                return self._enqueue_request(user_id, pool_id, requested_app_id)
-
-            reservation_id = self._create_launch_reservation(
-                user_id=user_id,
-                pool_id=pool_id,
-                requested_app_id=requested_app_id,
-                assigned_app_id=int(member["id"]),
-            )
-            return {
-                "status": "started",
-                "pool_id": pool_id,
-                "member_app_id": int(member["id"]),
-                "requested_app_name": pool_name,
-                "connection_name": f"app_{int(member['id'])}",
-                "queue_id": reservation_id,
-            }
 
     def get_queue_status(self, *, queue_id: int, user_id: int) -> dict[str, Any]:
-        row = self._db.execute_query(
-            """
-            /* rps:get_queue_status */
-            SELECT id, pool_id, status, ready_expires_at, cancel_reason
-            FROM launch_queue
-            WHERE id = %(queue_id)s
-              AND user_id = %(user_id)s
-            LIMIT 1
-            """,
-            {"queue_id": queue_id, "user_id": user_id},
-            fetch_one=True,
-        )
-        if not row:
-            raise ValueError("排队记录不存在")
-
-        if str(row["status"]) in self.LIVE_QUEUE_STATES and not self._has_accessible_member(user_id=user_id, pool_id=int(row["pool_id"])):
-            self._cancel_queue_as_invalid(int(row["id"]), "member_unavailable")
-            row = self._db.execute_query(
-                """
-                /* rps:get_queue_status */
-                SELECT id, pool_id, status, ready_expires_at, cancel_reason
-                FROM launch_queue
-                WHERE id = %(queue_id)s
-                  AND user_id = %(user_id)s
-                LIMIT 1
-                """,
-                {"queue_id": queue_id, "user_id": user_id},
-                fetch_one=True,
-            )
-            if not row:
-                raise ValueError("排队记录不存在")
-
-        if str(row["status"]) == "ready" and row.get("ready_expires_at") and row["ready_expires_at"] < self._now():
-            self.expire_ready_entries(pool_id=int(row["pool_id"]))
-            row = self._db.execute_query(
-                """
-                /* rps:get_queue_status */
-                SELECT id, pool_id, status, ready_expires_at, cancel_reason
-                FROM launch_queue
-                WHERE id = %(queue_id)s
-                  AND user_id = %(user_id)s
-                LIMIT 1
-                """,
-                {"queue_id": queue_id, "user_id": user_id},
-                fetch_one=True,
-            )
-            if not row:
-                raise ValueError("排队记录不存在")
-
-        if str(row["status"]) in self.LIVE_QUEUE_STATES:
-            self._db.execute_update(
-                """
-                /* rps:touch_queue */
-                UPDATE launch_queue
-                SET last_seen_at = NOW()
-                WHERE id = %(queue_id)s
-                  AND user_id = %(user_id)s
-                """,
-                {"queue_id": queue_id, "user_id": user_id},
-            )
-
-        position = 0
-        if str(row["status"]) in self.LIVE_QUEUE_STATES:
-            pos = self._db.execute_query(
-                """
-                /* rps:get_queue_position */
-                SELECT COUNT(*) AS position
-                FROM launch_queue
-                WHERE pool_id = %(pool_id)s
-                  AND status IN ('queued', 'ready', 'launching')
-                  AND id <= %(queue_id)s
-                """,
-                {"pool_id": row["pool_id"], "queue_id": queue_id},
-                fetch_one=True,
-            ) or {"position": 0}
-            position = int(pos["position"])
-
-        return {
-            "queue_id": int(row["id"]),
-            "pool_id": int(row["pool_id"]),
-            "status": str(row["status"]),
-            "position": position,
-            "ready_expires_at": row.get("ready_expires_at"),
-            "cancel_reason": row.get("cancel_reason"),
-        }
+        return self._queue_service.get_queue_status(queue_id=queue_id, user_id=user_id)
 
     def cancel_queue(self, *, queue_id: int, user_id: int) -> dict[str, Any]:
-        row = self._db.execute_query(
-            """
-            /* rps:get_queue_status */
-            SELECT id, pool_id, status, ready_expires_at, cancel_reason
-            FROM launch_queue
-            WHERE id = %(queue_id)s
-              AND user_id = %(user_id)s
-            LIMIT 1
-            """,
-            {"queue_id": queue_id, "user_id": user_id},
-            fetch_one=True,
-        )
-        if not row:
-            raise ValueError("排队记录不存在或已结束")
-        updated = self._db.execute_update(
-            """
-            /* rps:cancel_queue */
-            UPDATE launch_queue
-            SET status = 'cancelled',
-                cancel_reason = 'user',
-                cancelled_at = NOW()
-            WHERE id = %(queue_id)s
-              AND user_id = %(user_id)s
-              AND status IN ('queued', 'ready', 'launching')
-            """,
-            {"queue_id": queue_id, "user_id": user_id},
-        )
-        if updated <= 0:
-            raise ValueError("排队记录不存在或已结束")
-        return {
-            "queue_id": queue_id,
-            "pool_id": int(row["pool_id"]),
-            "status": "cancelled",
-            "position": 0,
-            "ready_expires_at": row.get("ready_expires_at"),
-            "cancel_reason": "user",
-        }
+        return self._queue_service.cancel_queue(queue_id=queue_id, user_id=user_id)
 
     def _cancel_queue_as_invalid(self, queue_id: int, reason: str) -> int:
-        return self._db.execute_update(
-            """
-            /* rps:cancel_queue_invalid */
-            UPDATE launch_queue
-            SET status = 'cancelled',
-                cancel_reason = %(reason)s,
-                cancelled_at = NOW()
-            WHERE id = %(queue_id)s
-              AND status IN ('queued', 'ready', 'launching')
-            """,
-            {"queue_id": queue_id, "reason": reason[:100]},
-        )
+        return self._queue_service._cancel_queue_as_invalid(queue_id, reason)
 
     def mark_queue_fulfilled(self, *, queue_id: int, assigned_app_id: int):
-        self._db.execute_update(
-            """
-            /* rps:queue_mark_fulfilled */
-            UPDATE launch_queue
-            SET status = 'fulfilled',
-                assigned_app_id = %(assigned_app_id)s,
-                fulfilled_at = NOW()
-            WHERE id = %(queue_id)s
-            """,
-            {"queue_id": queue_id, "assigned_app_id": assigned_app_id},
-        )
+        self._queue_service.mark_queue_fulfilled(queue_id=queue_id, assigned_app_id=assigned_app_id)
 
     def requeue_after_launch_failure(self, *, queue_id: int, last_error: str):
-        row = self._db.execute_query(
-            """
-            /* rps:get_launching_row */
-            SELECT id, ready_at
-            FROM launch_queue
-            WHERE id = %(queue_id)s
-            LIMIT 1
-            """,
-            {"queue_id": queue_id},
-            fetch_one=True,
-        )
-        if not row:
-            return
-        if row.get("ready_at") is None:
-            self._db.execute_update(
-                """
-                /* rps:cancel_queue_admin */
-                UPDATE launch_queue
-                SET status = 'cancelled',
-                    cancel_reason = 'launch_failed',
-                    cancelled_at = NOW()
-                WHERE id = %(queue_id)s
-                  AND status = 'launching'
-                """,
-                {"queue_id": queue_id},
-            )
-            return
-        self._db.execute_update(
-            """
-            /* rps:queue_restore_queued */
-            UPDATE launch_queue
-            SET status = 'queued',
-                failure_count = failure_count + 1,
-                last_error = %(last_error)s
-            WHERE id = %(queue_id)s
-              AND status = 'launching'
-            """,
-            {"queue_id": queue_id, "last_error": last_error[:500]},
-        )
+        self._queue_service.requeue_after_launch_failure(queue_id=queue_id, last_error=last_error)
 
     def dispatch_ready_entries(self) -> list[int]:
-        moved_ids: list[int] = []
-        pools = self._db.execute_query(
-            """
-            /* rps:list_dispatch_pools */
-            SELECT id, dispatch_grace_seconds
-            FROM resource_pool
-            WHERE is_active = 1
-              AND auto_dispatch_enabled = 1
-            ORDER BY id ASC
-            """
-        )
-        for pool in pools:
-            pool_id = int(pool["id"])
-            with self._pool_lock(pool_id):
-                self.expire_ready_entries(pool_id=pool_id)
-                available_slots = self._available_slots(pool_id)
-                while available_slots > 0:
-                    queue_head = self._db.execute_query(
-                        """
-                        /* rps:get_queue_head */
-                        SELECT id, user_id
-                        FROM launch_queue
-                        WHERE pool_id = %(pool_id)s
-                          AND status = 'queued'
-                        ORDER BY created_at ASC, id ASC
-                        LIMIT 1
-                        """,
-                        {"pool_id": pool_id},
-                        fetch_one=True,
-                    )
-                    if not queue_head:
-                        break
-                    if not self._has_accessible_member(user_id=int(queue_head["user_id"]), pool_id=pool_id):
-                        self._cancel_queue_as_invalid(int(queue_head["id"]), "member_unavailable")
-                        continue
-                    member = self.pick_launchable_member(user_id=int(queue_head["user_id"]), pool_id=pool_id)
-                    if not member:
-                        break
-                    ready_at = self._now()
-                    ready_expires_at = ready_at + timedelta(seconds=int(pool.get("dispatch_grace_seconds") or 120))
-                    updated = self._db.execute_update(
-                        """
-                        /* rps:queue_mark_ready */
-                        UPDATE launch_queue
-                        SET status = 'ready',
-                            ready_at = %(ready_at)s,
-                            ready_expires_at = %(ready_expires_at)s,
-                            assigned_app_id = %(assigned_app_id)s
-                        WHERE id = %(queue_id)s
-                          AND status = 'queued'
-                        """,
-                        {
-                            "queue_id": int(queue_head["id"]),
-                            "ready_at": ready_at,
-                            "ready_expires_at": ready_expires_at,
-                            "assigned_app_id": int(member["id"]),
-                        },
-                    )
-                    if updated <= 0:
-                        break
-                    moved_ids.append(int(queue_head["id"]))
-                    available_slots -= 1
-        return moved_ids
+        return self._queue_service.dispatch_ready_entries()
 
     def _mark_session_reclaimed(self, *, session_id: str, reason: str, ended_at: datetime, target_status: str = "reclaimed") -> int:
         return self._reclaim_service.mark_session_reclaimed(
@@ -927,70 +487,11 @@ class ResourcePoolService:
         ]
 
     def cleanup_invalid_queue_entries(self, *, user_id: int | None = None, requested_app_id: int | None = None, pool_id: int | None = None) -> list[int]:
-        rows = self._db.execute_query(
-            """
-            /* rps:list_live_queues */
-            SELECT id, pool_id, user_id, requested_app_id, assigned_app_id, status
-            FROM launch_queue
-            WHERE status IN ('queued', 'ready', 'launching')
-              AND (%(user_id)s IS NULL OR user_id = %(user_id)s)
-              AND (%(requested_app_id)s IS NULL OR requested_app_id = %(requested_app_id)s)
-              AND (%(pool_id)s IS NULL OR pool_id = %(pool_id)s)
-            ORDER BY id ASC
-            """,
-            {"user_id": user_id, "requested_app_id": requested_app_id, "pool_id": pool_id},
+        return self._queue_service.cleanup_invalid_queue_entries(
+            user_id=user_id,
+            requested_app_id=requested_app_id,
+            pool_id=pool_id,
         )
-        cancelled: list[int] = []
-        for row in rows:
-            qid = int(row["id"])
-            q_pool_id = int(row["pool_id"])
-            q_user_id = int(row["user_id"])
-            requested = self._db.execute_query(
-                """
-                /* rps:get_launch_target */
-                SELECT
-                    a.id AS requested_app_id,
-                    a.pool_id,
-                    COALESCE(p.name, a.name) AS pool_name
-                FROM remote_app a
-                JOIN remote_app_acl acl
-                  ON acl.app_id = a.id
-                 AND acl.user_id = %(user_id)s
-                LEFT JOIN resource_pool p
-                  ON p.id = a.pool_id
-                WHERE a.id = %(app_id)s
-                  AND a.is_active = 1
-                LIMIT 1
-                """,
-                {"user_id": q_user_id, "app_id": int(row["requested_app_id"])},
-                fetch_one=True,
-            )
-            if not requested or requested.get("pool_id") is None or int(requested["pool_id"]) != q_pool_id:
-                if self._cancel_queue_as_invalid(qid, "config_changed") > 0:
-                    cancelled.append(qid)
-                continue
-            if row.get("assigned_app_id") and str(row["status"]) in {"ready", "launching"}:
-                assigned = self._db.execute_query(
-                    """
-                    /* rps:get_member_for_user */
-                    SELECT id, pool_id
-                    FROM remote_app a
-                    JOIN remote_app_acl acl ON acl.app_id = a.id AND acl.user_id = %(user_id)s
-                    WHERE a.id = %(member_app_id)s
-                      AND a.is_active = 1
-                    LIMIT 1
-                    """,
-                    {"member_app_id": int(row["assigned_app_id"]), "user_id": q_user_id},
-                    fetch_one=True,
-                )
-                if not assigned or int(assigned["pool_id"]) != q_pool_id:
-                    if self._cancel_queue_as_invalid(qid, "member_unavailable") > 0:
-                        cancelled.append(qid)
-                    continue
-            if not self._has_accessible_member(q_user_id, q_pool_id):
-                if self._cancel_queue_as_invalid(qid, "member_unavailable") > 0:
-                    cancelled.append(qid)
-        return cancelled
 
     def cancel_queue_admin(self, *, queue_id: int) -> dict[str, Any]:
         updated = self._db.execute_update(

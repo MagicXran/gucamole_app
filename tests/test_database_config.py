@@ -29,14 +29,21 @@ SAMPLE_CONFIG = {
 
 
 class FakePool:
+    created_kwargs = []
+
     def __init__(self, **kwargs):
         self.kwargs = kwargs
+        FakePool.created_kwargs.append(kwargs)
 
     def get_connection(self):
-        raise AssertionError("test should not open real connections")
+        return SimpleNamespace(
+            ping=lambda **kwargs: None,
+            close=lambda: None,
+        )
 
 
 def _load_database_module(monkeypatch):
+    FakePool.created_kwargs = []
     fake_pooling = SimpleNamespace(MySQLConnectionPool=FakePool)
     fake_connector = ModuleType("mysql.connector")
     fake_connector.pooling = fake_pooling
@@ -68,6 +75,8 @@ def test_load_config_prefers_portal_specific_env_overrides(monkeypatch):
     assert module.CONFIG["database"]["port"] == 4306
     assert module.CONFIG["guacamole"]["json_secret_key"] == "fedcba9876543210fedcba9876543210"
     assert module.CONFIG["auth"]["jwt_secret"] == "portal-jwt-secret"
+    assert module.db._pool is None
+    module.db.get_connection()
     assert module.db._pool.kwargs["user"] == "portal-user"
     assert module.db._pool.kwargs["database"] == "portal-db"
 
@@ -180,3 +189,14 @@ def test_load_config_strips_wrapping_quotes_from_local_env(tmp_path, monkeypatch
     assert config["database"]["password"] == "quoted-pass"
     assert config["guacamole"]["json_secret_key"] == "abcdef0123456789abcdef0123456789"
     assert config["auth"]["jwt_secret"] == "abcdef0123456789abcdef0123456789"
+
+
+def test_database_pool_is_lazy_on_import(monkeypatch):
+    module = _load_database_module(monkeypatch)
+
+    assert module.db._pool is None
+    assert FakePool.created_kwargs == []
+
+    module.db.get_connection()
+
+    assert len(FakePool.created_kwargs) == 1

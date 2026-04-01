@@ -5,13 +5,16 @@ Guacamole RemoteApp 门户 - FastAPI 主应用
 import sys
 import asyncio
 import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 # 确保项目根目录在 sys.path 中（支持 python backend/app.py 直接运行）
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -30,12 +33,17 @@ from backend.monitor import (
 )
 from backend.dataset_router import router as dataset_router
 from backend.file_router import router as file_router, cleanup_stale_uploads
+from backend.structured_logging import StructuredLogFormatter, log_event
 
 # 日志配置
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+for handler in logging.getLogger().handlers:
+    handler.setFormatter(
+        StructuredLogFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +76,13 @@ async def _upload_cleanup_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期: 启动后台清理任务"""
-    bootstrap_result = ensure_bootstrap_admin(db)
+    try:
+        bootstrap_result = ensure_bootstrap_admin(db)
+    except RuntimeError:
+        raise
+    except Exception:
+        logger.warning("启动管理员检查失败，继续启动以保留 liveness", exc_info=True)
+        bootstrap_result = {"created": False, "reason": "startup_check_failed"}
     if bootstrap_result.get("created"):
         logger.warning("启动管理员已创建: %s", bootstrap_result.get("username"))
     task = asyncio.create_task(_cleanup_loop())
@@ -102,10 +116,63 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def request_access_log(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    request.state.request_id = request_id
+    started_at = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+    except Exception:
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        log_event(
+            logger,
+            logging.ERROR,
+            "request_completed",
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            client_ip=request.client.host if request.client else "unknown",
+        )
+        raise
+
+    response.headers["X-Request-ID"] = request_id
+    duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    log_event(
+        logger,
+        logging.INFO,
+        "request_completed",
+        request_id=request_id,
+        method=request.method,
+        path=request.url.path,
+        status_code=status_code,
+        duration_ms=duration_ms,
+        client_ip=request.client.host if request.client else "unknown",
+    )
+    return response
+
+
 # 健康检查
 @app.get("/health", tags=["ops"])
 def health():
     return {"status": "ok"}
+
+
+@app.get("/ready", tags=["ops"])
+def ready():
+    try:
+        if db.ping():
+            return {"status": "ready"}
+    except Exception:
+        pass
+    return JSONResponse(
+        status_code=503,
+        content={"status": "not_ready", "reason": "database_unavailable"},
+    )
 
 
 # API 路由
@@ -131,4 +198,5 @@ if __name__ == "__main__":
         host=CONFIG["api"]["host"],
         port=CONFIG["api"]["port"],
         log_level="info",
+        access_log=False,
     )

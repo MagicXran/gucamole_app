@@ -12,6 +12,7 @@ from backend.database import db, CONFIG
 from backend.auth import get_current_user, require_admin
 from backend.models import UserInfo
 from backend.resource_pool_service import ResourcePoolService
+from backend.structured_logging import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -273,12 +274,20 @@ def cleanup_stale_sessions():
     if reclaimed:
         from backend.router import guac_service
         for item in reclaimed:
+            log_event(
+                logger,
+                logging.INFO,
+                "session_reclaimed",
+                reason="stale",
+                user_id=int(item["user_id"]),
+                session_id=str(item["session_id"]),
+            )
             invalidate_user_session_if_safe(
                 guac_service,
                 int(item["user_id"]),
                 exclude_session_id=str(item["session_id"]),
             )
-        logger.info("清理超时会话: %d 条", len(reclaimed))
+        log_event(logger, logging.INFO, "cleanup_batch", reason="stale", count=len(reclaimed))
         dispatch_ready_queue_entries()
     return len(reclaimed)
 
@@ -289,12 +298,20 @@ def cleanup_idle_sessions():
     if reclaimed:
         from backend.router import guac_service
         for item in reclaimed:
+            log_event(
+                logger,
+                logging.INFO,
+                "session_reclaimed",
+                reason="idle",
+                user_id=int(item["user_id"]),
+                session_id=str(item["session_id"]),
+            )
             invalidate_user_session_if_safe(
                 guac_service,
                 int(item["user_id"]),
                 exclude_session_id=str(item["session_id"]),
             )
-        logger.info("清理空闲会话: %d 条", len(reclaimed))
+        log_event(logger, logging.INFO, "cleanup_batch", reason="idle", count=len(reclaimed))
     return len(reclaimed)
 
 
@@ -303,8 +320,8 @@ def dispatch_ready_queue_entries():
     try:
         moved = pool_service.dispatch_ready_entries()
     except RuntimeError:
-        logger.info("资源池当前有锁竞争，跳过本次自动放行")
+        log_event(logger, logging.INFO, "queue_auto_dispatched", count=0, status="lock_contended")
         return 0
     if moved:
-        logger.info("自动放行队列: %d 条", len(moved))
+        log_event(logger, logging.INFO, "queue_auto_dispatched", count=len(moved), status="moved")
     return len(moved)

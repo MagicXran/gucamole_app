@@ -83,3 +83,17 @@ test('PORTAL_JWT_SECRET still wins when explicitly configured', () => {
 
   assert.match(rendered, /PORTAL_JWT_SECRET: jwt_override_value/);
 });
+
+test('portal-backend defines a healthcheck that targets /ready', () => {
+  const rendered = renderConfig([
+    'TZ=Asia/Shanghai',
+    'PORTAL_PORT=8880',
+    'MYSQL_ROOT_PASSWORD=abcd',
+    'MYSQL_PASSWORD=efgh',
+    'MYSQL_USER=guacamole_user',
+    'MYSQL_DATABASE=guacamole_db',
+    'JSON_SECRET_KEY=00112233445566778899aabbccddeeff',
+  ].join('\n'));
+
+  assert.match(rendered, /portal-backend:[\s\S]*healthcheck:[\s\S]*\/ready/);
+});

@@ -3,6 +3,8 @@
 # 用法:
 #   ./backup.sh export [目标目录]   — 导出 MySQL dump + drive 文件
 #   ./backup.sh import <备份目录>   — 从备份恢复
+#   ./backup.sh verify <备份目录>   — 校验备份完整性
+#   ./backup.sh drill <备份目录>    — 在临时容器中恢复演练
 #   ./backup.sh status              — 显示卷状态和数据大小
 #
 # 默认备份到 ./backups/<时间戳>/
@@ -17,6 +19,7 @@ export MSYS_NO_PATHCONV=1
 # ── 加载 .env ──────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
+SCHEMA_VERIFY_SCRIPT="${PORTAL_SCHEMA_VERIFY_SCRIPT:-${SCRIPT_DIR}/../scripts/verify_portal_schema.py}"
 
 read_env_value() {
     local key="$1"
@@ -44,6 +47,27 @@ MYSQL_CONTAINER="nercar-portal-guac-sql"
 MYSQL_VOLUME="guacamole_mysql_data"
 DRIVE_VOLUME="guacamole_guacd_drive"
 COMPOSE_PROJECT="nercar-portal"
+DRILL_DB_PORT="${PORTAL_DRILL_DB_PORT:-33306}"
+
+find_python_bin() {
+    local preferred="${PORTAL_PYTHON_BIN:-}"
+    local repo_venv="${SCRIPT_DIR}/../.venv/Scripts/python.exe"
+
+    for candidate in "$preferred" "$repo_venv" python3 python; do
+        if [[ -z "$candidate" ]]; then
+            continue
+        fi
+        if command -v "$candidate" >/dev/null 2>&1; then
+            echo "$candidate"
+            return 0
+        fi
+        if [[ -x "$candidate" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
 
 # ── 函数 ───────────────────────────────────────────────────
 
@@ -64,8 +88,19 @@ check_volume_exists() {
     return 0
 }
 
+normalize_host_path() {
+    local raw_path="$1"
+    if [[ "$raw_path" =~ ^([A-Za-z]):/(.*)$ ]]; then
+        local drive_letter="${BASH_REMATCH[1],,}"
+        echo "/${drive_letter}/${BASH_REMATCH[2]}"
+        return
+    fi
+    echo "$raw_path"
+}
+
 do_export() {
     local backup_dir="${1:-${SCRIPT_DIR}/backups/$(date +%Y%m%d_%H%M%S)}"
+    backup_dir="$(normalize_host_path "$backup_dir")"
     mkdir -p "$backup_dir"
 
     echo "╔══════════════════════════════════════════════╗"
@@ -115,6 +150,18 @@ do_export() {
         echo "  ⊘ Drive 卷不存在，跳过"
     fi
 
+    if command -v sha256sum >/dev/null 2>&1; then
+        (
+            cd "$backup_dir"
+            if [[ -f portal_dump.sql ]]; then
+                sha256sum portal_dump.sql > SHA256SUMS
+            fi
+            if [[ -f drive_files.tar.gz ]]; then
+                sha256sum drive_files.tar.gz >> SHA256SUMS
+            fi
+        )
+    fi
+
     echo ""
     echo "═══════════════════════════════════════════════"
     echo "  备份完成: $backup_dir"
@@ -123,7 +170,8 @@ do_export() {
 }
 
 do_import() {
-    local backup_dir="$1"
+    local backup_dir
+    backup_dir="$(normalize_host_path "$1")"
 
     if [[ ! -d "$backup_dir" ]]; then
         echo "ERROR: 备份目录不存在: $backup_dir"
@@ -208,6 +256,95 @@ do_status() {
     echo "  (无法获取容器状态)"
 }
 
+do_verify() {
+    local backup_dir
+    backup_dir="$(normalize_host_path "$1")"
+
+    if [[ ! -d "$backup_dir" ]]; then
+        echo "ERROR: 备份目录不存在: $backup_dir"
+        exit 1
+    fi
+    if [[ ! -s "${backup_dir}/portal_dump.sql" ]]; then
+        echo "ERROR: 缺少或空的 portal_dump.sql"
+        exit 1
+    fi
+    if [[ -f "${backup_dir}/SHA256SUMS" ]]; then
+        (cd "$backup_dir" && sha256sum -c SHA256SUMS)
+    fi
+    if [[ -f "${backup_dir}/drive_files.tar.gz" ]]; then
+        tar tzf "${backup_dir}/drive_files.tar.gz" >/dev/null
+    fi
+    echo "backup verify ok"
+}
+
+do_drill() {
+    local backup_dir
+    backup_dir="$(normalize_host_path "$1")"
+    local drill_container="portal-drill-db-$(date +%s)-$$"
+    local drill_volume="portal_drill_drive_$(date +%s)_$$"
+    local drill_password="drill-password"
+
+    if [[ ! -d "$backup_dir" ]]; then
+        echo "ERROR: 备份目录不存在: $backup_dir"
+        exit 1
+    fi
+    if [[ ! -s "${backup_dir}/portal_dump.sql" ]]; then
+        echo "ERROR: 缺少或空的 portal_dump.sql"
+        exit 1
+    fi
+
+    trap "docker rm -f '$drill_container' >/dev/null 2>&1 || true; docker volume rm '$drill_volume' >/dev/null 2>&1 || true" EXIT
+
+    docker volume create "$drill_volume" >/dev/null
+    docker run -d --rm \
+        --name "$drill_container" \
+        -e MYSQL_ROOT_PASSWORD="$drill_password" \
+        -e MYSQL_DATABASE="guacamole_portal_db" \
+        -p "127.0.0.1:${DRILL_DB_PORT}:3306" \
+        mysql:8 >/dev/null
+
+    local ready=0
+    for _ in $(seq 1 30); do
+        if docker exec "$drill_container" \
+            mysqladmin ping -h 127.0.0.1 -uroot -p"${drill_password}" --silent >/dev/null 2>&1; then
+            ready=1
+            break
+        fi
+        sleep 1
+    done
+    if [[ "$ready" -ne 1 ]]; then
+        echo "ERROR: 临时 MySQL 恢复演练实例未就绪"
+        exit 1
+    fi
+
+    docker exec -i "$drill_container" \
+        mysql -uroot -p"${drill_password}" --default-character-set=utf8mb4 \
+        < "${backup_dir}/portal_dump.sql"
+
+    local python_bin
+    python_bin="$(find_python_bin)" || {
+        echo "ERROR: 找不到可用的 Python 解释器，请设置 PORTAL_PYTHON_BIN"
+        exit 1
+    }
+
+    "$python_bin" "$SCHEMA_VERIFY_SCRIPT" \
+        --host 127.0.0.1 \
+        --port "${DRILL_DB_PORT}" \
+        --database guacamole_portal_db \
+        --user root \
+        --password "${drill_password}"
+
+    if [[ -f "${backup_dir}/drive_files.tar.gz" ]]; then
+        docker run --rm \
+            -v "${drill_volume}:/data" \
+            -v "$(cd "$backup_dir" && pwd):/backup:ro" \
+            alpine \
+            sh -c "cd /data && tar xzf /backup/drive_files.tar.gz"
+    fi
+
+    echo "backup drill ok"
+}
+
 # ── 入口 ───────────────────────────────────────────────────
 
 case "${1:-help}" in
@@ -222,6 +359,20 @@ case "${1:-help}" in
         fi
         do_import "$2"
         ;;
+    verify)
+        if [[ -z "${2:-}" ]]; then
+            echo "用法: $0 verify <备份目录>"
+            exit 1
+        fi
+        do_verify "$2"
+        ;;
+    drill)
+        if [[ -z "${2:-}" ]]; then
+            echo "用法: $0 drill <备份目录>"
+            exit 1
+        fi
+        do_drill "$2"
+        ;;
     status)
         do_status
         ;;
@@ -231,6 +382,8 @@ case "${1:-help}" in
         echo "用法:"
         echo "  $0 export [目标目录]   导出 MySQL + Drive 数据"
         echo "  $0 import <备份目录>   从备份恢复数据"
+        echo "  $0 verify <备份目录>   校验备份完整性"
+        echo "  $0 drill <备份目录>    临时恢复演练"
         echo "  $0 status              查看卷状态和数据大小"
         echo ""
         echo "示例:"

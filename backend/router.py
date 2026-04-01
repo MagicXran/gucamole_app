@@ -21,6 +21,7 @@ from backend.guacamole_service import GuacamoleService
 from backend.resource_pool_service import ResourcePoolService
 from backend.auth import get_current_user
 from backend.audit import log_action
+from backend.structured_logging import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,18 @@ async def launch_app(
         raise HTTPException(code, detail)
 
     if decision["status"] != "started":
+        log_event(
+            logger,
+            logging.INFO,
+            "launch_queued",
+            request_id=getattr(request.state, "request_id", None),
+            user_id=user.user_id,
+            requested_app_id=app_id,
+            pool_id=int(decision.get("pool_id") or 0),
+            queue_id=int(decision.get("queue_id") or 0),
+            position=int(decision.get("position") or 0),
+            status=str(decision["status"]),
+        )
         return LaunchOrQueueResponse(
             status=str(decision["status"]),
             queue_id=int(decision.get("queue_id") or 0),
@@ -175,6 +188,28 @@ async def launch_app(
                 queue_id=int(decision["queue_id"]),
                 last_error="连接构建异常",
             )
+            log_event(
+                logger,
+                logging.WARNING,
+                "launch_requeued",
+                request_id=getattr(request.state, "request_id", None),
+                user_id=user.user_id,
+                requested_app_id=app_id,
+                pool_id=int(decision["pool_id"]),
+                queue_id=int(decision["queue_id"]),
+                reason="connections_missing",
+            )
+        log_event(
+            logger,
+            logging.ERROR,
+            "launch_failed",
+            request_id=getattr(request.state, "request_id", None),
+            user_id=user.user_id,
+            requested_app_id=app_id,
+            pool_id=int(decision["pool_id"]),
+            queue_id=int(decision.get("queue_id") or 0),
+            reason="connections_missing",
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="连接构建异常",
@@ -200,6 +235,28 @@ async def launch_app(
                 queue_id=int(decision["queue_id"]),
                 last_error=str(exc),
             )
+            log_event(
+                logger,
+                logging.WARNING,
+                "launch_requeued",
+                request_id=getattr(request.state, "request_id", None),
+                user_id=user.user_id,
+                requested_app_id=app_id,
+                pool_id=int(decision["pool_id"]),
+                queue_id=int(decision["queue_id"]),
+                reason="guacamole_unavailable",
+            )
+        log_event(
+            logger,
+            logging.ERROR,
+            "launch_failed",
+            request_id=getattr(request.state, "request_id", None),
+            user_id=user.user_id,
+            requested_app_id=app_id,
+            pool_id=int(decision["pool_id"]),
+            queue_id=int(decision.get("queue_id") or 0),
+            reason="guacamole_unavailable",
+        )
         logger.exception("启动 Guacamole 连接失败: app_id=%d", app_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -241,6 +298,28 @@ async def launch_app(
                 queue_id=int(decision["queue_id"]),
                 last_error=str(exc),
             )
+            log_event(
+                logger,
+                logging.WARNING,
+                "launch_requeued",
+                request_id=getattr(request.state, "request_id", None),
+                user_id=user.user_id,
+                requested_app_id=app_id,
+                pool_id=int(decision["pool_id"]),
+                queue_id=int(decision["queue_id"]),
+                reason="active_session_insert_failed",
+            )
+        log_event(
+            logger,
+            logging.ERROR,
+            "launch_failed",
+            request_id=getattr(request.state, "request_id", None),
+            user_id=user.user_id,
+            requested_app_id=app_id,
+            pool_id=int(decision["pool_id"]),
+            queue_id=int(decision.get("queue_id") or 0),
+            reason="active_session_insert_failed",
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="会话记录写入失败，请重试",
@@ -251,6 +330,18 @@ async def launch_app(
             queue_id=int(decision["queue_id"]),
             assigned_app_id=int(decision["member_app_id"]),
         )
+
+    log_event(
+        logger,
+        logging.INFO,
+        "launch_started",
+        request_id=getattr(request.state, "request_id", None),
+        user_id=user.user_id,
+        requested_app_id=app_id,
+        member_app_id=int(decision["member_app_id"]),
+        pool_id=int(decision["pool_id"]),
+        queue_id=int(decision.get("queue_id") or 0),
+    )
 
     return LaunchOrQueueResponse(
         status="started",

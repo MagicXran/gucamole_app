@@ -1,4 +1,4 @@
-﻿"""
+"""
 Portal 用户认证模块 - JWT 登录与验证
 """
 
@@ -15,6 +15,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from backend.database import db, CONFIG
 from backend.models import LoginRequest, LoginResponse, UserInfo
 from backend.audit import log_action
+from backend.structured_logging import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,14 @@ def login(req: LoginRequest, request: Request):
     # 速率限制: 每个 IP 每分钟最多 5 次登录尝试
     client_ip = request.client.host if request.client else "unknown"
     if not _login_limiter.check(client_ip):
+        log_event(
+            logger,
+            logging.WARNING,
+            "login_rate_limited",
+            username=req.username,
+            client_ip=client_ip,
+            request_id=getattr(request.state, "request_id", None),
+        )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="登录尝试过于频繁，请 1 分钟后再试",
@@ -134,6 +143,14 @@ def login(req: LoginRequest, request: Request):
     """
     user = db.execute_query(query, {"username": req.username}, fetch_one=True)
     if not user or not _verify_password(req.password, user["password_hash"]):
+        log_event(
+            logger,
+            logging.WARNING,
+            "login_failed",
+            username=req.username,
+            client_ip=client_ip,
+            request_id=getattr(request.state, "request_id", None),
+        )
         # 审计: 登录失败
         log_action(
             user_id=0, username=req.username, action="login_failed",
@@ -151,6 +168,16 @@ def login(req: LoginRequest, request: Request):
     log_action(
         user_id=user["id"], username=user["username"], action="login",
         ip_address=client_ip,
+    )
+    log_event(
+        logger,
+        logging.INFO,
+        "login_succeeded",
+        user_id=int(user["id"]),
+        username=user["username"],
+        client_ip=client_ip,
+        is_admin=is_admin,
+        request_id=getattr(request.state, "request_id", None),
     )
 
     return LoginResponse(

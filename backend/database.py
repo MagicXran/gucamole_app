@@ -6,6 +6,7 @@
 
 import json
 import os
+import threading
 from pathlib import Path
 
 import mysql.connector
@@ -129,21 +130,39 @@ class Database:
 
     def __init__(self):
         self.config = CONFIG["database"]
-        self._pool = pooling.MySQLConnectionPool(
-            pool_name="portal_pool",
-            pool_size=8,
-            pool_reset_session=True,
-            host=self.config["host"],
-            port=self.config["port"],
-            database=self.config["database"],
-            user=self.config["user"],
-            password=self.config["password"],
-            charset='utf8mb4',
-            use_unicode=True,
-        )
+        self._pool = None
+        self._pool_lock = threading.Lock()
+
+    def _ensure_pool(self):
+        if self._pool is not None:
+            return self._pool
+        with self._pool_lock:
+            if self._pool is None:
+                self._pool = pooling.MySQLConnectionPool(
+                    pool_name="portal_pool",
+                    pool_size=8,
+                    pool_reset_session=True,
+                    host=self.config["host"],
+                    port=self.config["port"],
+                    database=self.config["database"],
+                    user=self.config["user"],
+                    password=self.config["password"],
+                    charset='utf8mb4',
+                    use_unicode=True,
+                )
+        return self._pool
 
     def get_connection(self):
-        return self._pool.get_connection()
+        return self._ensure_pool().get_connection()
+
+    def ping(self) -> bool:
+        """轻量 readiness 检查：确认数据库连接可用。"""
+        conn = self.get_connection()
+        try:
+            conn.ping(reconnect=False, attempts=1, delay=0)
+            return True
+        finally:
+            conn.close()
 
     def execute_query(self, query: str, params=None, fetch_one: bool = False):
         """执行查询，返回字典列表或单条字典"""

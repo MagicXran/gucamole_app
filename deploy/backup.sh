@@ -18,16 +18,24 @@ export MSYS_NO_PATHCONV=1
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 
+read_env_value() {
+    local key="$1"
+    grep -E "^${key}=" "$ENV_FILE" | cut -d'=' -f2- || true
+}
+
 if [[ -f "$ENV_FILE" ]]; then
     # 只提取需要的变量，避免 export 污染
-    MYSQL_ROOT_PASSWORD=$(grep -E '^MYSQL_ROOT_PASSWORD=' "$ENV_FILE" | cut -d'=' -f2-)
+    MYSQL_ROOT_PASSWORD=$(read_env_value 'MYSQL_ROOT_PASSWORD')
+    if [[ -z "${MYSQL_ROOT_PASSWORD:-}" ]]; then
+        MYSQL_ROOT_PASSWORD=$(read_env_value 'GUAC_DB_ROOT_PASSWORD')
+    fi
 else
     echo "ERROR: 找不到 .env 文件: $ENV_FILE"
     exit 1
 fi
 
 if [[ -z "${MYSQL_ROOT_PASSWORD:-}" ]]; then
-    echo "ERROR: .env 中未设置 MYSQL_ROOT_PASSWORD"
+    echo "ERROR: .env 中未设置 MYSQL_ROOT_PASSWORD 或 GUAC_DB_ROOT_PASSWORD"
     exit 1
 fi
 

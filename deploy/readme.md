@@ -1,4 +1,4 @@
-﻿# Guacamole RemoteApp Portal — Docker 部署指南
+# Guacamole RemoteApp Portal — Docker 部署指南
 
 ## 包内容
 
@@ -61,6 +61,8 @@ JSON_SECRET_KEY=4c0b569e4c96df157eee1b65dd0e4d41
 # 时区
 TZ=Asia/Shanghai
 ```
+
+历史环境如果还在用旧字段名 `GUAC_DB_ROOT_PASSWORD`、`GUAC_DB_PASSWORD`、`GUACAMOLE_JSON_SECRET_KEY`，当前 compose 仍兼容；但别再继续沿用，规范名才是正道。
 
 ### 第三步：修改 RDP 连接信息（如目标服务器地址变了）
 

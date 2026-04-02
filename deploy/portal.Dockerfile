@@ -23,4 +23,4 @@ COPY config/ ./config/
 COPY --from=viewer-builder /app/frontend/js/viewer.bundle.js ./frontend/js/viewer.bundle.js
 
 EXPOSE 8000
-CMD ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "backend/app.py"]

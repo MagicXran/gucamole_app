@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from backend import configure_logging, log_extra
 from backend.database import CONFIG
 from backend.auth import router as auth_router
 from backend.router import router
@@ -29,12 +30,6 @@ from backend.monitor import (
 )
 from backend.dataset_router import router as dataset_router
 from backend.file_router import router as file_router, cleanup_stale_uploads
-
-# 日志配置
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +62,33 @@ async def _upload_cleanup_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期: 启动后台清理任务"""
+    configure_logging(logging.INFO)
     task = asyncio.create_task(_cleanup_loop())
     upload_task = asyncio.create_task(_upload_cleanup_loop())
-    logger.info("会话清理任务已启动 (间隔 %ds)", CLEANUP_INTERVAL)
-    logger.info("上传清理任务已启动 (间隔 3600s)")
+    logger.info(
+        "Portal 启动完成",
+        extra=log_extra(
+            "portal_startup",
+            cleanup_interval_seconds=CLEANUP_INTERVAL,
+            upload_cleanup_interval_seconds=3600,
+        ),
+    )
+    logger.info(
+        "会话清理任务已启动",
+        extra=log_extra(
+            "session_cleanup_loop_started",
+            cleanup_interval_seconds=CLEANUP_INTERVAL,
+        ),
+    )
+    logger.info(
+        "上传清理任务已启动",
+        extra=log_extra(
+            "upload_cleanup_loop_started",
+            cleanup_interval_seconds=3600,
+        ),
+    )
     yield
+    logger.info("Portal 开始关闭", extra=log_extra("portal_shutdown_started"))
     task.cancel()
     upload_task.cancel()
     for t in (task, upload_task):
@@ -79,6 +96,7 @@ async def lifespan(app: FastAPI):
             await t
         except asyncio.CancelledError:
             pass
+    logger.info("Portal 已关闭", extra=log_extra("portal_shutdown_completed"))
 
 
 app = FastAPI(
@@ -122,9 +140,11 @@ if frontend_path.exists():
 
 if __name__ == "__main__":
     import uvicorn
+    configure_logging(logging.INFO, replace_handlers=True)
     uvicorn.run(
         app,
         host=CONFIG["api"]["host"],
         port=CONFIG["api"]["port"],
         log_level="info",
+        log_config=None,
     )

@@ -50,6 +50,7 @@ test('canonical env names still work too', () => {
   const rendered = renderConfig([
     'TZ=Asia/Shanghai',
     'PORTAL_PORT=8880',
+    'PORTAL_INSTANCE_ID=portal-main',
     'MYSQL_ROOT_PASSWORD=abcd',
     'MYSQL_PASSWORD=efgh',
     'MYSQL_USER=guacamole_user',
@@ -62,4 +63,75 @@ test('canonical env names still work too', () => {
   assert.match(rendered, /MYSQL_USER: guacamole_user/);
   assert.match(rendered, /MYSQL_DATABASE: guacamole_db/);
   assert.match(rendered, /JSON_SECRET_KEY: 00112233445566778899aabbccddeeff/);
+});
+
+test('instance id drives compose project name without fixed container names or volume aliases', () => {
+  const rendered = renderConfig([
+    'TZ=Asia/Shanghai',
+    'PORTAL_PORT=8880',
+    'PORTAL_INSTANCE_ID=portal-feature-a',
+    'MYSQL_ROOT_PASSWORD=abcd',
+    'MYSQL_PASSWORD=efgh',
+    'JSON_SECRET_KEY=00112233445566778899aabbccddeeff',
+  ].join('\n'));
+
+  assert.match(rendered, /^name: portal-feature-a$/m);
+  assert.doesNotMatch(rendered, /container_name:/);
+  assert.doesNotMatch(rendered, /name: guacamole_/);
+  assert.doesNotMatch(rendered, /name: nercar-portal-/);
+});
+
+test('compose accepts server bind mounts for mysql data and drive mounts', () => {
+  const rendered = renderConfig([
+    'TZ=Asia/Shanghai',
+    'PORTAL_PORT=8880',
+    'PORTAL_INSTANCE_ID=portal-prod-a',
+    'MYSQL_ROOT_PASSWORD=abcd',
+    'MYSQL_PASSWORD=efgh',
+    'JSON_SECRET_KEY=00112233445566778899aabbccddeeff',
+    'MYSQL_DATA_SOURCE=/srv/portal-a/mysql',
+    'GUAC_DRIVE_SOURCE=/srv/portal-a/drive',
+  ].join('\n'));
+
+  assert.match(rendered, /source: \/srv\/portal-a\/mysql/);
+  assert.match(rendered, /target: \/var\/lib\/mysql/);
+  assert.match(rendered, /source: \/srv\/portal-a\/drive/);
+  assert.match(rendered, /target: \/drive/);
+});
+
+test('compose keeps the development MySQL host port fixed by default', () => {
+  const rendered = renderConfig([
+    'TZ=Asia/Shanghai',
+    'PORTAL_PORT=8880',
+    'PORTAL_INSTANCE_ID=portal-feature-b',
+    'MYSQL_ROOT_PASSWORD=abcd',
+    'MYSQL_PASSWORD=efgh',
+    'JSON_SECRET_KEY=00112233445566778899aabbccddeeff',
+  ].join('\n'));
+
+  assert.match(rendered, /published: "33060"/);
+});
+
+test('compose still supports an explicit MySQL host port when requested', () => {
+  const rendered = renderConfig([
+    'TZ=Asia/Shanghai',
+    'PORTAL_PORT=8880',
+    'PORTAL_INSTANCE_ID=portal-feature-c',
+    'MYSQL_ROOT_PASSWORD=abcd',
+    'MYSQL_PASSWORD=efgh',
+    'MYSQL_HOST_PORT=33160',
+    'JSON_SECRET_KEY=00112233445566778899aabbccddeeff',
+  ].join('\n'));
+
+  assert.match(rendered, /published: "33160"/);
+});
+
+test('portal e2e script avoids fixed container identities', () => {
+  const e2eSource = fs.readFileSync(path.join(repoRoot, 'tests', 'test_portal_e2e.mjs'), 'utf8');
+
+  assert.doesNotMatch(e2eSource, /nercar-portal-/);
+  assert.doesNotMatch(e2eSource, /guacamole_(mysql_data|guacd_drive)/);
+  assert.match(e2eSource, /['"]compose['"]/);
+  assert.match(e2eSource, /['"]guac-sql['"]/);
+  assert.match(e2eSource, /['"]portal-backend['"]/);
 });

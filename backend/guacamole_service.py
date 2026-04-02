@@ -12,6 +12,7 @@ import threading
 
 import httpx
 
+from backend import log_extra
 from backend.guacamole_crypto import GuacamoleCrypto
 
 logger = logging.getLogger(__name__)
@@ -159,12 +160,21 @@ class GuacamoleService:
     def invalidate_all_sessions(self):
         """清空所有用户的 Guacamole session 缓存"""
         self._cache.invalidate_all()
-        logger.info("已清空全部 Guacamole session 缓存")
+        logger.info(
+            "已清空全部 Guacamole session 缓存",
+            extra=log_extra("guac_session_cache_invalidated_all"),
+        )
 
     def invalidate_user_session(self, username: str):
         """尽力让指定门户用户的 Guacamole token 失效。"""
         self._cache.invalidate(username)
-        logger.info("已清除用户 Guacamole session 缓存: %s", username)
+        logger.info(
+            "已清除用户 Guacamole session 缓存",
+            extra=log_extra(
+                "guac_session_cache_invalidated_user",
+                username=username,
+            ),
+        )
 
     async def _validate_token(self, auth_token: str) -> bool:
         """向 Guacamole 验证 authToken 是否仍然有效
@@ -181,7 +191,13 @@ class GuacamoleService:
                 )
                 return resp.status_code == 200
         except Exception:
-            logger.warning("Guacamole token 验证失败（网络错误）")
+            logger.warning(
+                "Guacamole token 验证失败（网络错误）",
+                extra=log_extra(
+                    "guac_token_validation_failed",
+                    internal_url=self.internal_url,
+                ),
+            )
             return False
 
     async def _create_session(
@@ -224,7 +240,13 @@ class GuacamoleService:
         data_source = result.get("dataSource", "json")
 
         logger.info(
-            "创建新 session, username=%s, dataSource=%s", username, data_source,
+            "创建新 session",
+            extra=log_extra(
+                "guac_session_created",
+                username=username,
+                data_source=data_source,
+                connection_count=len(connections),
+            ),
         )
         return auth_token, data_source
 
@@ -252,15 +274,34 @@ class GuacamoleService:
             if await self._validate_token(cached["auth_token"]):
                 if cached.get("needs_validation"):
                     self._cache.promote(username, cached)
-                    logger.info("从数据库恢复 session: username=%s", username)
+                    logger.info(
+                        "从数据库恢复 session",
+                        extra=log_extra(
+                            "guac_session_restored",
+                            username=username,
+                            cache_source="database",
+                            data_source=cached.get("data_source", ""),
+                        ),
+                    )
                 else:
-                    logger.debug("复用缓存 session: username=%s", username)
+                    logger.debug(
+                        "复用缓存 session",
+                        extra=log_extra(
+                            "guac_session_reused",
+                            username=username,
+                            cache_source="memory",
+                            data_source=cached.get("data_source", ""),
+                        ),
+                    )
             else:
                 self._cache.invalidate(username)
                 cached = None
                 logger.info(
-                    "缓存 token 在 Guacamole 端已失效，将重建: username=%s",
-                    username,
+                    "缓存 token 在 Guacamole 端已失效，将重建",
+                    extra=log_extra(
+                        "guac_session_rebuild_required",
+                        username=username,
+                    ),
                 )
 
         if not cached:

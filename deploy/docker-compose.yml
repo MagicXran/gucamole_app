@@ -5,11 +5,10 @@
 # 如需重新初始化数据库，删除 mysql_data volume 后重建:
 #   docker compose down -v && docker compose up -d --build
 
-name: nercar-portal
+name: ${PORTAL_INSTANCE_ID:-nercar-portal}
 
 services:
   guacd:
-    container_name: nercar-portal-guacd
     image: guacamole/guacd:latest
     restart: unless-stopped
     user: root  # /drive volume 需要写权限; guacd 仅在内网不对外暴露
@@ -17,10 +16,9 @@ services:
       TZ: ${TZ}
       GUACD_LOG_LEVEL: debug
     volumes:
-      - guacd_drive:/drive
+      - ${GUAC_DRIVE_SOURCE:-guacd_drive}:/drive
 
   guac-sql:
-    container_name: nercar-portal-guac-sql
     image: mysql:8
     restart: unless-stopped
     environment:
@@ -30,10 +28,13 @@ services:
       MYSQL_USER: ${MYSQL_USER:-guacamole_user}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-${GUAC_DB_PASSWORD}}
     ports:
-      - "127.0.0.1:33060:3306"
+      - target: 3306
+        published: "${MYSQL_HOST_PORT:-33060}"
+        host_ip: 127.0.0.1
+        protocol: tcp
     volumes:
       - ./initdb:/docker-entrypoint-initdb.d:ro
-      - mysql_data:/var/lib/mysql
+      - ${MYSQL_DATA_SOURCE:-mysql_data}:/var/lib/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-${GUAC_DB_ROOT_PASSWORD}}"]
       interval: 10s
@@ -42,7 +43,6 @@ services:
       start_period: 30s
 
   guac-web:
-    container_name: nercar-portal-guac-web
     build:
       context: .
       dockerfile: guac-web.Dockerfile
@@ -67,12 +67,13 @@ services:
         condition: service_started
 
   portal-backend:
-    container_name: nercar-portal-backend
     build:
       context: ..
       dockerfile: deploy/portal.Dockerfile
     restart: unless-stopped
     environment:
+      PORTAL_INSTANCE_ID: ${PORTAL_INSTANCE_ID:-nercar-portal}
+      PORTAL_SERVICE_NAME: portal-backend
       TZ: ${TZ}
       PORTAL_DB_HOST: guac-sql
       PORTAL_DB_PORT: "3306"
@@ -82,13 +83,12 @@ services:
       GUACAMOLE_JSON_SECRET_KEY: ${JSON_SECRET_KEY:-${GUACAMOLE_JSON_SECRET_KEY}}
       PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-f7a3d9e2c1b5084a6e3f1d8b2a5c7e09}
     volumes:
-      - guacd_drive:/drive
+      - ${GUAC_DRIVE_SOURCE:-guacd_drive}:/drive
     depends_on:
       guac-sql:
         condition: service_healthy
 
   nginx:
-    container_name: nercar-portal-nginx
     image: nginx:alpine
     restart: unless-stopped
     ports:
@@ -96,7 +96,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - guacd_drive:/drive:ro
+      - ${GUAC_DRIVE_SOURCE:-guacd_drive}:/drive:ro
     depends_on:
       - portal-backend
       - guac-web
@@ -110,23 +110,11 @@ volumes:
   #   备份方式: deploy/backup.sh export
   #   ⚠️ docker compose down -v 会删除数据！
   #
-  # 【生产环境】取消下方 driver_opts 注释，改用 bind mount
-  #   需先创建目录: mkdir -p ${DATA_DIR}/mysql ${DATA_DIR}/drive
-  #   ⚠️ 不支持 Windows NTFS 路径 — MySQL 8 拒绝 case-insensitive 文件系统
+  # 【生产环境】通过 .env 指定宿主机目录绑定:
+  #   MYSQL_DATA_SOURCE=/srv/portal/mysql
+  #   GUAC_DRIVE_SOURCE=/srv/portal/drive
+  #   需先创建目录: mkdir -p ${MYSQL_DATA_SOURCE} ${GUAC_DRIVE_SOURCE}
+  #   ⚠️ MySQL 数据目录必须位于 Linux case-sensitive 文件系统上
   # ============================================================
   mysql_data:
-    name: guacamole_mysql_data
-    # --- 生产环境: 取消以下注释，DATA_DIR 指向 Linux 宿主机路径 ---
-    # driver: local
-    # driver_opts:
-    #   type: none
-    #   device: ${DATA_DIR}/mysql
-    #   o: bind
   guacd_drive:
-    name: guacamole_guacd_drive
-    # --- 生产环境: 取消以下注释 ---
-    # driver: local
-    # driver_opts:
-    #   type: none
-    #   device: ${DATA_DIR}/drive
-    #   o: bind

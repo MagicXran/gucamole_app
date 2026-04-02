@@ -16,3 +16,10 @@ test('portal docker image rebuilds viewer bundle from source', () => {
   assert.match(dockerfile, /npm ci/);
   assert.match(dockerfile, /npm run build:viewer/);
 });
+
+test('portal docker image starts backend via python entrypoint', () => {
+  const dockerfile = fs.readFileSync(dockerfilePath, 'utf8');
+
+  assert.match(dockerfile, /CMD \["python", "backend\/app\.py"\]/);
+  assert.doesNotMatch(dockerfile, /CMD \["uvicorn", "backend\.app:app"/);
+});

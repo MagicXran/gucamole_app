@@ -1,28 +1,83 @@
 import { chromium } from 'playwright';
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const BASE_URL = 'http://127.0.0.1:8880';
+const repoRoot = process.cwd();
+const deployRoot = path.join(repoRoot, 'deploy');
+const deployEnvPath = path.join(deployRoot, '.env');
+
+function readDotEnv(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+  const values = {};
+  const content = fs.readFileSync(filePath, 'utf8');
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+    const separatorIndex = line.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+    values[key] = value;
+  }
+  return values;
+}
+
+const deployEnv = readDotEnv(deployEnvPath);
+const portalPort = process.env.PORTAL_PORT || deployEnv.PORTAL_PORT || '8880';
+const BASE_URL = process.env.PORTAL_BASE_URL || `http://127.0.0.1:${portalPort}`;
+const PORTAL_INSTANCE_ID = process.env.PORTAL_INSTANCE_ID || deployEnv.PORTAL_INSTANCE_ID || '';
+const MYSQL_ROOT_PASSWORD =
+  process.env.MYSQL_ROOT_PASSWORD
+  || process.env.GUAC_DB_ROOT_PASSWORD
+  || deployEnv.MYSQL_ROOT_PASSWORD
+  || deployEnv.GUAC_DB_ROOT_PASSWORD
+  || 'xran';
+
+function composeArgs(args) {
+  const base = ['compose'];
+  if (fs.existsSync(deployEnvPath)) {
+    base.push('--env-file', deployEnvPath);
+  }
+  if (PORTAL_INSTANCE_ID) {
+    base.push('--project-name', PORTAL_INSTANCE_ID);
+  }
+  return [...base, ...args];
+}
+
+function runCompose(args, options = {}) {
+  const result = spawnSync('docker', composeArgs(args), {
+    cwd: deployRoot,
+    encoding: 'utf8',
+    env: process.env,
+    ...options,
+  });
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || 'docker compose command failed');
+  }
+  return result.stdout;
+}
+
 const MYSQL_ARGS = [
   'exec',
-  '-i',
-  'nercar-portal-guac-sql',
+  '-T',
+  'guac-sql',
   'mysql',
   '-uroot',
-  '-pxran',
+  `-p${MYSQL_ROOT_PASSWORD}`,
   '--default-character-set=utf8mb4',
   '-N',
   '-B',
 ];
 
 function runMysql(sql) {
-  const result = spawnSync('docker', MYSQL_ARGS, {
-    input: sql,
-    encoding: 'utf8',
-  });
-  if (result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || 'mysql failed');
-  }
-  return result.stdout;
+  return runCompose(MYSQL_ARGS, { input: sql });
 }
 
 function queryRows(sql) {
@@ -60,9 +115,8 @@ WHERE user_id = 2 AND status IN ('active', 'reclaim_pending');
 DELETE FROM token_cache WHERE username='portal_u2';
 `);
 
-  const seed = spawnSync(
-    'docker',
-    ['exec', '-i', 'nercar-portal-backend', 'python', '-'],
+  runCompose(
+    ['exec', '-T', 'portal-backend', 'python', '-'],
     {
       input: [
         'from pathlib import Path',
@@ -88,12 +142,8 @@ DELETE FROM token_cache WHERE username='portal_u2';
         'writer.SetInputData(grid)',
         'writer.Write()',
       ].join('\n'),
-      encoding: 'utf8',
     },
   );
-  if (seed.status !== 0) {
-    throw new Error(seed.stderr || seed.stdout || 'seed failed');
-  }
 
   return {
     poolMaxConcurrent,
@@ -113,9 +163,8 @@ SET status='disconnected', ended_at=NOW(), reclaim_reason=NULL
 WHERE user_id = 2 AND status IN ('active', 'reclaim_pending');
 DELETE FROM token_cache WHERE username='portal_u2';
 `);
-  spawnSync(
-    'docker',
-    ['exec', '-i', 'nercar-portal-backend', 'python', '-'],
+  runCompose(
+    ['exec', '-T', 'portal-backend', 'python', '-'],
     {
       input: [
         'from pathlib import Path',
@@ -125,7 +174,6 @@ DELETE FROM token_cache WHERE username='portal_u2';
         '    import shutil',
         '    shutil.rmtree(target)',
       ].join('\n'),
-      encoding: 'utf8',
     },
   );
 }
@@ -248,7 +296,7 @@ async function main() {
       notepadStillOpen: !popupNotepad.isClosed(),
     };
 
-    const sessionResult = spawnSync('docker', MYSQL_ARGS, {
+    const sessionOutput = runCompose(MYSQL_ARGS, {
       input: `
 USE guacamole_portal_db;
 SELECT app_id, status, COALESCE(reclaim_reason, '') AS reclaim_reason
@@ -257,12 +305,8 @@ WHERE user_id = 2
 ORDER BY id DESC
 LIMIT 5;
 `,
-      encoding: 'utf8',
     });
-    if (sessionResult.status !== 0) {
-      throw new Error(sessionResult.stderr || sessionResult.stdout || 'session query failed');
-    }
-    const sessionRows = sessionResult.stdout
+    const sessionRows = sessionOutput
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean)

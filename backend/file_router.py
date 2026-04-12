@@ -18,7 +18,7 @@ from urllib.parse import quote
 import jwt
 from fastapi import (
     APIRouter, Depends, File, Form, HTTPException,
-    Request, UploadFile, status,
+    Query, Request, UploadFile, status,
 )
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -34,6 +34,7 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 
 # ---- 配置 ----
 _ft_cfg = CONFIG.get("file_transfer", {})
+_drive_cfg = CONFIG.get("guacamole", {}).get("drive", {})
 DRIVE_BASE = Path(CONFIG["guacamole"]["drive"]["base_path"])  # /drive
 DEFAULT_QUOTA_BYTES = int(_ft_cfg.get("default_quota_gb", 10)) * 1073741824
 MAX_FILE_SIZE = int(_ft_cfg.get("max_file_size_gb", 50)) * 1073741824
@@ -41,6 +42,11 @@ CHUNK_SIZE_MB = _ft_cfg.get("chunk_size_mb", 10)
 USAGE_CACHE_SECONDS = _ft_cfg.get("usage_cache_seconds", 60)
 CLEANUP_STALE_HOURS = _ft_cfg.get("cleanup_stale_uploads_hours", 24)
 UPLOAD_TEMP_DIR = ".uploads"
+HIDDEN_ROOT_DIR_NAMES = frozenset(
+    str(name).strip().casefold()
+    for name in _drive_cfg.get("hidden_root_dirs", ["Download"])
+    if str(name).strip()
+)
 
 _executor = ThreadPoolExecutor(max_workers=4)
 _usage_cache: dict[int, tuple[int, float]] = {}  # user_id -> (bytes, ts)
@@ -120,10 +126,10 @@ def _calc_dir_size(path: Path) -> int:
     return total
 
 
-def _get_usage_sync(user_id: int) -> int:
+def _get_usage_sync(user_id: int, force_refresh: bool = False) -> int:
     now = time.time()
     cached = _usage_cache.get(user_id)
-    if cached and now - cached[1] < USAGE_CACHE_SECONDS:
+    if not force_refresh and cached and now - cached[1] < USAGE_CACHE_SECONDS:
         return cached[0]
     udir = _user_dir(user_id)
     size = _calc_dir_size(udir) if udir.exists() else 0
@@ -183,14 +189,26 @@ def _sync_append(path: Path, data: bytes):
         f.write(data)
 
 
+def _should_hide_entry(relative_path: str, entry_name: str, is_dir: bool) -> bool:
+    if not is_dir:
+        return False
+    normalized_path = str(relative_path or "").strip().strip("/\\")
+    if normalized_path:
+        return False
+    return entry_name.casefold() in HIDDEN_ROOT_DIR_NAMES
+
+
 # ============================================
 # API 端点
 # ============================================
 
 @router.get("/space")
-def get_space_info(user: UserInfo = Depends(get_current_user)):
+def get_space_info(
+    refresh: bool = Query(default=False),
+    user: UserInfo = Depends(get_current_user),
+):
     """配额概览"""
-    used = _get_usage_sync(user.user_id)
+    used = _get_usage_sync(user.user_id, force_refresh=refresh)
     quota = _get_quota(user.user_id)
     pct = round(used / quota * 100, 1) if quota > 0 else 0
     return {
@@ -223,6 +241,8 @@ def list_files(
         for entry in sorted(target.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
             name = entry.name
             if name.startswith("."):
+                continue
+            if _should_hide_entry(path, name, entry.is_dir()):
                 continue
             try:
                 st = entry.stat()

@@ -1,48 +1,71 @@
-{
-  "database": {
-    "host": "127.0.0.1",
-    "port": 33060,
-    "database": "guacamole_portal_db",
-    "user": "root",
-    "password": "xran"
-  },
-  "api": {
-    "host": "0.0.0.0",
-    "port": 8000,
-    "prefix": "/api/remote-apps",
-    "cors_origins": [
-      "http://localhost:8000",
-      "http://127.0.0.1:8000"
-    ]
-  },
-  "guacamole": {
-    "json_secret_key": "4c0b569e4c96df157eee1b65dd0e4d41",
-    "internal_url": "http://localhost:8080",
-    "external_url": "http://localhost:8080",
-    "token_expire_minutes": 480,
-    "drive": {
-      "enabled": true,
-      "name": "GuacDrive",
-      "base_path": "/drive",
-      "results_root": "Output",
-      "create_path": true
-    }
-  },
-  "auth": {
-    "jwt_secret": "f7a3d9e2c1b5084a6e3f1d8b2a5c7e09",
-    "token_expire_minutes": 480
-  },
-  "monitor": {
-    "heartbeat_interval_seconds": 30,
-    "session_timeout_seconds": 120,
-    "cleanup_interval_seconds": 60
-  },
-  "file_transfer": {
-    "enabled": true,
-    "default_quota_gb": 10,
-    "max_file_size_gb": 50,
-    "chunk_size_mb": 10,
-    "usage_cache_seconds": 60,
-    "cleanup_stale_uploads_hours": 24
-  }
+﻿{
+  "database": {
+    "host": "127.0.0.1",
+    "port": 33060,
+    "database": "guacamole_portal_db",
+    "user": "root",
+    "password": "xran"
+  },
+  "api": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "prefix": "/api/remote-apps",
+    "cors_origins": [
+      "http://localhost:8000",
+      "http://127.0.0.1:8000"
+    ]
+  },
+  "guacamole": {
+    "json_secret_key": "4c0b569e4c96df157eee1b65dd0e4d41",
+    "internal_url": "http://localhost:8080",
+    "external_url": "http://localhost:8080",
+    "token_expire_minutes": 480,
+    "drive": {
+      "enabled": true,
+      "name": "GuacDrive",
+      "base_path": "/drive",
+      "results_root": "Output",
+      "create_path": true,
+      "disable_download": true,
+      "disable_upload": true
+    }
+  },
+  "auth": {
+    "jwt_secret": "f7a3d9e2c1b5084a6e3f1d8b2a5c7e09",
+    "token_expire_minutes": 480
+  },
+  "monitor": {
+    "heartbeat_interval_seconds": 30,
+    "session_timeout_seconds": 120,
+    "cleanup_interval_seconds": 60
+  },
+  "file_transfer": {
+    "enabled": true,
+    "default_quota_gb": 10,
+    "max_file_size_gb": 50,
+    "chunk_size_mb": 10,
+    "usage_cache_seconds": 60,
+    "cleanup_stale_uploads_hours": 24
+  },
+  "script_profiles": {
+    "ansys_mapdl": {
+      "adapter_key": "ansys_mapdl",
+      "display_name": "ANSYS MAPDL",
+      "description": "适用于 PyMAPDL 驱动的 Python 脚本任务，要求 Worker 上已安装对应 Python 环境和 ANSYS。",
+      "executor_key": "python_api",
+      "python_executable": "",
+      "python_executable_env": "PORTAL_SCRIPT_PROFILE_ANSYS_MAPDL_PYTHON",
+      "python_env": {
+        "ANSYS_WORKDIR": "C:\\portal_worker_agent\\scratch\\ansys_mapdl"
+      }
+    },
+    "abaqus_cli": {
+      "adapter_key": "abaqus_cli",
+      "display_name": "Abaqus CLI",
+      "description": "适用于命令行批处理型求解任务，通常由 bat/cmd 或 Python 脚本调用。",
+      "executor_key": "command_statusfile",
+      "python_executable": "",
+      "python_env": {}
+    }
+  }
 }

@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 
 const repoRoot = process.cwd();
 const composePath = path.join(repoRoot, 'deploy', 'docker-compose.yml');
+const debugComposePath = path.join(repoRoot, 'deploy', 'docker-compose.debug.yml');
 
 function renderConfig(envText) {
   const envDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-env-'));
@@ -25,6 +26,29 @@ function renderConfig(envText) {
   });
   if (result.status !== 0) {
     throw new Error(result.stderr || result.stdout || 'docker compose config failed');
+  }
+  return result.stdout;
+}
+
+function renderDebugConfig(envText) {
+  const envDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-debug-env-'));
+  const envPath = path.join(envDir, '.env');
+  fs.writeFileSync(envPath, envText, 'utf8');
+  const result = spawnSync('docker', [
+    'compose',
+    '--env-file',
+    envPath,
+    '-f',
+    composePath,
+    '-f',
+    debugComposePath,
+    'config',
+  ], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || 'docker compose debug config failed');
   }
   return result.stdout;
 }
@@ -124,6 +148,52 @@ test('compose still supports an explicit MySQL host port when requested', () => 
   ].join('\n'));
 
   assert.match(rendered, /published: "33160"/);
+});
+
+test('compose supports binding portal port to a specific host IP', () => {
+  const rendered = renderConfig([
+    'TZ=Asia/Shanghai',
+    'PORTAL_PORT=8880',
+    'PORTAL_BIND_IP=192.168.56.25',
+    'PORTAL_INSTANCE_ID=portal-feature-d',
+    'MYSQL_ROOT_PASSWORD=abcd',
+    'MYSQL_PASSWORD=efgh',
+    'JSON_SECRET_KEY=00112233445566778899aabbccddeeff',
+  ].join('\n'));
+
+  assert.match(rendered, /host_ip: 192\.168\.56\.25/);
+  assert.match(rendered, /published: "8880"/);
+  assert.match(rendered, /target: 80/);
+});
+
+test('guacd uses LOG_LEVEL and avoids deprecated GUACD_LOG_LEVEL env', () => {
+  const rendered = renderConfig([
+    'TZ=Asia/Shanghai',
+    'PORTAL_PORT=8880',
+    'PORTAL_INSTANCE_ID=portal-feature-loglevel',
+    'MYSQL_ROOT_PASSWORD=abcd',
+    'MYSQL_PASSWORD=efgh',
+    'JSON_SECRET_KEY=00112233445566778899aabbccddeeff',
+  ].join('\n'));
+
+  assert.match(rendered, /LOG_LEVEL: info/);
+  assert.doesNotMatch(rendered, /GUACD_LOG_LEVEL:/);
+});
+
+test('debug compose does not override external nginx binding', () => {
+  const rendered = renderDebugConfig([
+    'TZ=Asia/Shanghai',
+    'PORTAL_PORT=8880',
+    'PORTAL_BIND_IP=192.168.56.25',
+    'PORTAL_INSTANCE_ID=portal-debug-a',
+    'MYSQL_ROOT_PASSWORD=abcd',
+    'MYSQL_PASSWORD=efgh',
+    'JSON_SECRET_KEY=00112233445566778899aabbccddeeff',
+  ].join('\n'));
+
+  assert.match(rendered, /host_ip: 192\.168\.56\.25/);
+  assert.match(rendered, /published: "8880"/);
+  assert.doesNotMatch(rendered, /published: "18880"/);
 });
 
 test('portal e2e script avoids fixed container identities', () => {

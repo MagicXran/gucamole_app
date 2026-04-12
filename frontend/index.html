@@ -25,12 +25,29 @@
 
     <nav class="portal-tabs" id="portal-tabs">
         <button class="portal-tabs__btn portal-tabs__btn--active" data-tab="apps">应用</button>
+        <button class="portal-tabs__btn" data-tab="jobs">作业</button>
         <button class="portal-tabs__btn" data-tab="files">我的空间</button>
     </nav>
 
     <main class="container">
         <div id="apps-panel">
             <div id="queue-status" class="queue-status" style="display:none;"></div>
+            <div class="apps-toolbar" id="apps-toolbar">
+                <div class="apps-toolbar__summary" id="apps-toolbar-summary"></div>
+                <div class="apps-toolbar__controls">
+                    <label class="apps-toolbar__control">
+                        <input type="checkbox" id="apps-filter-schedulable">
+                        只看脚本可调度
+                    </label>
+                    <label class="apps-toolbar__control">
+                        排序方式
+                        <select id="apps-sort">
+                            <option value="recommended">推荐排序</option>
+                            <option value="name">按名称</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
             <div id="app-grid" class="app-grid">
                 <!-- 卡片由 JS 动态渲染 -->
             </div>
@@ -78,9 +95,24 @@
                 <tbody></tbody>
             </table>
         </div>
+
+        <div id="jobs-panel" style="display:none;">
+            <div class="jobs-toolbar">
+                <div>
+                    <h2 class="jobs-title">作业</h2>
+                    <p class="jobs-subtitle">脚本任务统一在这里查看，支持刷新状态、日志和结果。</p>
+                </div>
+                <button class="btn btn--outline" onclick="refreshTasks()">刷新</button>
+            </div>
+            <table class="jobs-table" id="jobs-table">
+                <thead><tr><th>任务号</th><th>入口脚本</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
     </main>
 
     <div class="files-dropzone" id="files-dropzone">拖放文件到此处上传</div>
+    <div id="portal-modal-container"></div>
 
     <!-- 启动中遮罩 -->
     <div id="launch-overlay" class="overlay" style="display:none;">
@@ -97,6 +129,7 @@
     <script type="module" src="js/portal-queue-ui.js"></script>
     <script type="module" src="js/portal-file-browser.js"></script>
     <script src="js/portal-launch.js"></script>
+    <script src="js/portal-tasks.js"></script>
     <script src="js/portal-files.js"></script>
     <script src="js/portal-uploads.js"></script>
 </body>

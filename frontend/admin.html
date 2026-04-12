@@ -189,6 +189,7 @@
         .badge { padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.75rem; }
         .badge--active { background: #e8f5e9; color: #2e7d32; }
         .badge--inactive { background: #fce4ec; color: #c62828; }
+        .badge--warning { background: #fff4e5; color: #b26a00; }
         .badge--admin { background: #e3f2fd; color: #1565c0; }
 
         /* Toast */
@@ -270,6 +271,121 @@
             margin-bottom: 0.3rem;
             font-weight: 500;
         }
+        .info-callout {
+            background: linear-gradient(135deg, #f5f9ff 0%, #eef5ff 100%);
+            border: 1px solid #d7e6ff;
+            border-radius: 12px;
+            padding: 1rem 1.1rem;
+            margin-bottom: 1rem;
+            color: #2f466e;
+        }
+        .info-callout__title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #1d3557;
+            margin-bottom: 0.45rem;
+        }
+        .info-callout__list {
+            margin: 0;
+            padding-left: 1.1rem;
+            font-size: 0.84rem;
+            line-height: 1.6;
+        }
+        .guide-strip {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.9rem;
+            margin-bottom: 1rem;
+        }
+        .guide-card {
+            background: #fff;
+            border: 1px solid #e6ebf2;
+            border-radius: 12px;
+            padding: 1rem;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+        }
+        .guide-card__step {
+            font-size: 0.75rem;
+            color: #1a73e8;
+            font-weight: 600;
+            margin-bottom: 0.35rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .guide-card__title {
+            font-size: 0.96rem;
+            font-weight: 600;
+            color: #22324d;
+            margin-bottom: 0.35rem;
+        }
+        .guide-card__desc {
+            font-size: 0.84rem;
+            color: #5b6577;
+            line-height: 1.55;
+        }
+        .subsection-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 1.1rem 0 0.75rem;
+        }
+        .subsection-title h3 {
+            margin: 0;
+            font-size: 1rem;
+            color: #31425f;
+        }
+        .subsection-title span {
+            font-size: 0.82rem;
+            color: #73819a;
+        }
+        .field-hint {
+            margin-top: 0.3rem;
+            font-size: 0.78rem;
+            color: #74829a;
+            line-height: 1.5;
+        }
+        .inline-summary {
+            margin-top: 0.35rem;
+            font-size: 0.78rem;
+            color: #6c778b;
+            line-height: 1.5;
+        }
+        .status-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+        .status-stack__meta {
+            font-size: 0.76rem;
+            color: #7a8597;
+            line-height: 1.45;
+        }
+        .path-stack {
+            font-size: 0.78rem;
+            color: #485468;
+            line-height: 1.5;
+        }
+        .path-stack code {
+            display: inline-block;
+            padding: 0.08rem 0.22rem;
+            border-radius: 4px;
+            background: #f4f6f8;
+            margin-top: 0.15rem;
+        }
+        .preview-box {
+            background: #f8fafc;
+            border: 1px dashed #cbd5e1;
+            border-radius: 10px;
+            padding: 0.75rem 0.85rem;
+            font-size: 0.82rem;
+            color: #475569;
+            line-height: 1.6;
+            margin-top: 0.6rem;
+        }
+        @media (max-width: 900px) {
+            .guide-strip { grid-template-columns: 1fr; }
+            .form-row { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
@@ -292,6 +408,7 @@
         <div class="tab-bar" id="tab-bar">
             <button class="tab-bar__item tab-bar__item--active" data-tab="monitor">实时监控</button>
             <button class="tab-bar__item" data-tab="pools">资源池</button>
+            <button class="tab-bar__item" data-tab="workers">Worker</button>
             <button class="tab-bar__item" data-tab="apps">应用管理</button>
             <button class="tab-bar__item" data-tab="users">用户管理</button>
             <button class="tab-bar__item" data-tab="acl">权限管理</button>
@@ -351,17 +468,70 @@
             </table>
         </div>
 
+        <!-- Worker 管理 Tab -->
+        <div class="tab-panel" id="panel-workers">
+            <div class="toolbar">
+                <h2 style="font-size:1.1rem;color:#333;">Worker 管理</h2>
+                <div style="display:flex;gap:0.5rem;">
+                    <button class="btn btn--outline" onclick="showWorkerGroupModal()">新建节点组</button>
+                    <button class="btn btn--primary" onclick="showWorkerNodeModal()">预建节点</button>
+                </div>
+            </div>
+            <div class="info-callout">
+                <div class="info-callout__title">Worker 配置向导</div>
+                <ul class="info-callout__list">
+                    <li><strong>节点组</strong> 是“同一类运行环境”的抽象，比如同一个软件、同一套许可证、同一类机器。</li>
+                    <li><strong>Worker 节点</strong> 是一台具体 Windows 主机，必须填对主机名、共享工作区和 scratch 路径。</li>
+                    <li><strong>脚本应用绑定</strong> 在“应用管理”里完成：启用脚本模式后，把软件预设、执行器和 Worker 组绑在一起。</li>
+                </ul>
+            </div>
+            <div class="guide-strip" id="worker-guide"></div>
+            <div class="subsection-title">
+                <h3>节点组</h3>
+                <span>先定义一类机器，再往里挂具体节点</span>
+            </div>
+            <table class="admin-table" id="worker-groups-table" style="margin-bottom:1.5rem;">
+                <thead>
+                    <tr>
+                        <th>ID</th><th>组键</th><th>名称</th><th>节点规模</th><th>说明</th><th>状态</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <div class="subsection-title">
+                <h3>Worker 节点</h3>
+                <span>每一行都是一台真实机器，重点看路径、注册状态和软件就绪情况</span>
+            </div>
+            <table class="admin-table" id="worker-nodes-table">
+                <thead>
+                    <tr>
+                        <th>ID</th><th>名称 / 主机名</th><th>所属组</th><th>注册 / 心跳</th><th>路径配置</th><th>软件能力</th><th>操作</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
         <!-- 应用管理 Tab -->
         <div class="tab-panel" id="panel-apps">
             <div class="toolbar">
                 <h2 style="font-size:1.1rem;color:#333;">应用列表</h2>
                 <button class="btn btn--primary" onclick="showAppModal()">新建应用</button>
             </div>
+            <div class="info-callout">
+                <div class="info-callout__title">脚本模式配置原则</div>
+                <ul class="info-callout__list">
+                    <li>普通 RemoteApp 只管 RDP 参数；<strong>启用脚本模式</strong> 后才需要再选软件预设、执行器和 Worker 组。</li>
+                    <li>软件预设解决“跑什么环境”，Worker 组解决“去哪台机器跑”，执行器解决“怎么拉起脚本”。</li>
+                    <li>如果客户看不懂某个字段，说明这个字段该加解释，而不是让客户猜。</li>
+                </ul>
+            </div>
             <table class="admin-table" id="apps-table">
                 <thead>
                     <tr>
                         <th>ID</th><th>名称</th><th>主机</th><th>端口</th>
-                        <th>RemoteApp</th><th>状态</th><th>操作</th>
+                        <th>RemoteApp</th><th>脚本</th><th>状态</th><th>操作</th>
                     </tr>
                 </thead>
                 <tbody></tbody>
@@ -453,6 +623,12 @@
     <script src="js/shared-auth.js"></script>
     <script src="js/shared-dom.js"></script>
     <script src="js/shared-icons.js"></script>
+    <script src="js/admin-worker-ui.js"></script>
+    <script src="js/admin-app-modal-ui.js"></script>
+    <script src="js/admin-user-ui.js"></script>
+    <script src="js/admin-acl-ui.js"></script>
+    <script src="js/admin-audit-ui.js"></script>
+    <script src="js/admin-monitor-ui.js"></script>
     <script src="js/admin.js"></script>
 </body>
 </html>

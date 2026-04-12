@@ -117,6 +117,8 @@ class GuacamoleCrypto:
         drive_name: str = "GuacDrive",
         drive_path: str = "",
         create_drive_path: bool = True,
+        disable_download: bool = False,
+        disable_upload: bool = False,
         # RDP 高级参数
         color_depth: int = None,
         disable_gfx: bool = True,
@@ -142,6 +144,7 @@ class GuacamoleCrypto:
             ignore_cert: 是否忽略证书
             remote_app/remote_app_dir/remote_app_args: RemoteApp 配置
             enable_drive/drive_name/drive_path/create_drive_path: 虚拟磁盘
+            disable_download/disable_upload: 禁用 Guacamole 浏览器传输通道
             color_depth: 色深 8/16/24, None=自动
             disable_gfx: 禁用 GFX Pipeline (GUACAMOLE-2123)
             resize_method: display-update / reconnect
@@ -216,6 +219,10 @@ class GuacamoleCrypto:
             params["drive-name"] = drive_name
             params["drive-path"] = drive_path
             params["create-drive-path"] = "true" if create_drive_path else "false"
+            if disable_download:
+                params["disable-download"] = "true"
+            if disable_upload:
+                params["disable-upload"] = "true"
 
         return {
             name: {

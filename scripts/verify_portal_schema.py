@@ -8,20 +8,43 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from backend.database import CONFIG
-
 REQUIRED_TABLES = [
     "resource_pool",
     "launch_queue",
     "active_session",
     "portal_user",
     "remote_app",
+    "catalog_app",
+    "app_binding",
+    "remote_app_script_profile",
+    "worker_group",
+    "worker_node",
+    "worker_enrollment",
+    "worker_auth_token",
+    "platform_task",
+    "platform_task_log",
+    "platform_task_artifact",
 ]
 
 REQUIRED_COLUMNS = {
-    "remote_app": {"pool_id", "member_max_concurrent"},
+    "remote_app": {"pool_id", "member_max_concurrent", "disable_download", "disable_upload"},
+    "launch_queue": {"request_mode", "platform_task_id"},
     "active_session": {"pool_id", "queue_id", "last_activity_at", "reclaim_reason"},
     "portal_user": {"quota_bytes"},
+    "app_binding": {"binding_kind", "worker_group_id", "runtime_config_json"},
+    "remote_app_script_profile": {"executor_key", "scratch_root"},
+    "worker_group": {"group_key", "max_claim_batch"},
+    "worker_node": {"agent_id", "expected_hostname", "workspace_share", "runtime_state_json"},
+    "worker_enrollment": {"token_hash", "status", "expires_at"},
+    "worker_auth_token": {"token_hash", "status", "issued_at"},
+    "platform_task": {"task_id", "task_kind", "executor_key", "status", "params_json"},
+    "platform_task_log": {"task_id", "seq_no", "message"},
+    "platform_task_artifact": {"task_id", "artifact_kind", "display_name"},
+}
+
+REQUIRED_NULL_DEFAULT_COLUMNS = {
+    ("remote_app", "disable_download"),
+    ("remote_app", "disable_upload"),
 }
 
 
@@ -37,12 +60,22 @@ def verify_schema(cursor) -> list[str]:
 
     cursor.execute(
         """
-        SELECT TABLE_NAME, COLUMN_NAME
+        SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE, COLUMN_DEFAULT
         FROM information_schema.COLUMNS
         WHERE TABLE_SCHEMA = DATABASE()
         """
     )
-    existing_columns = {(row[0], row[1]) for row in cursor.fetchall()}
+    existing_columns = set()
+    column_attrs = {}
+    for row in cursor.fetchall():
+        table_name = row[0]
+        column_name = row[1]
+        existing_columns.add((table_name, column_name))
+        if len(row) >= 4:
+            column_attrs[(table_name, column_name)] = {
+                "is_nullable": str(row[2]).upper() == "YES",
+                "column_default": row[3],
+            }
 
     problems = []
     for table_name in REQUIRED_TABLES:
@@ -54,10 +87,21 @@ def verify_schema(cursor) -> list[str]:
             if (table_name, column_name) not in existing_columns:
                 problems.append(f"missing column: {table_name}.{column_name}")
 
+    for table_name, column_name in sorted(REQUIRED_NULL_DEFAULT_COLUMNS):
+        attrs = column_attrs.get((table_name, column_name))
+        if not attrs:
+            continue
+        if not attrs["is_nullable"]:
+            problems.append(f"column should be nullable: {table_name}.{column_name}")
+        if attrs["column_default"] is not None:
+            problems.append(f"column default should be NULL: {table_name}.{column_name}")
+
     return problems
 
 
 def _connect_live():
+    from backend.database import CONFIG
+
     db_cfg = CONFIG["database"]
     return mysql.connector.connect(
         host=db_cfg["host"],

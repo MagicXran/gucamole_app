@@ -19,14 +19,24 @@ class FakeCursor:
         if self._mode == "tables":
             return [(name,) for name in self.tables]
         if self._mode == "columns":
-            return [(table_name, column_name) for table_name, column_name in self.columns]
+            return list(self.columns)
         raise AssertionError("fetchall called before execute")
 
 
 def test_verify_schema_reports_no_issues_when_required_objects_exist():
+    columns = []
+    for table_name, cols in REQUIRED_COLUMNS.items():
+        for col in cols:
+            if (table_name, col) in {
+                ("remote_app", "disable_download"),
+                ("remote_app", "disable_upload"),
+            }:
+                columns.append((table_name, col, "YES", None))
+            else:
+                columns.append((table_name, col))
     cursor = FakeCursor(
         tables=REQUIRED_TABLES,
-        columns=[item for table_name, cols in REQUIRED_COLUMNS.items() for item in [(table_name, col) for col in cols]],
+        columns=columns,
     )
 
     problems = verify_schema(cursor)
@@ -47,6 +57,37 @@ def test_verify_schema_reports_missing_tables_and_columns():
 
     assert "missing table: resource_pool" in problems
     assert "missing table: launch_queue" in problems
+    assert "missing table: worker_group" in problems
+    assert "missing table: worker_node" in problems
+    assert "missing table: remote_app_script_profile" in problems
+    assert "missing table: app_binding" in problems
+    assert "missing column: remote_app.disable_download" in problems
+    assert "missing column: remote_app.disable_upload" in problems
     assert "missing column: remote_app.member_max_concurrent" in problems
     assert "missing column: active_session.pool_id" in problems
     assert "missing column: active_session.reclaim_reason" in problems
+    assert "missing column: launch_queue.request_mode" in problems
+    assert "missing column: launch_queue.platform_task_id" in problems
+
+
+def test_verify_schema_reports_nullable_default_violations():
+    columns = []
+    for table_name, cols in REQUIRED_COLUMNS.items():
+        for col in cols:
+            if (table_name, col) == ("remote_app", "disable_download"):
+                columns.append((table_name, col, "NO", 0))
+            elif (table_name, col) == ("remote_app", "disable_upload"):
+                columns.append((table_name, col, "YES", 0))
+            else:
+                columns.append((table_name, col))
+
+    cursor = FakeCursor(
+        tables=REQUIRED_TABLES,
+        columns=columns,
+    )
+
+    problems = verify_schema(cursor)
+
+    assert "column should be nullable: remote_app.disable_download" in problems
+    assert "column default should be NULL: remote_app.disable_download" in problems
+    assert "column default should be NULL: remote_app.disable_upload" in problems

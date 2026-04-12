@@ -30,6 +30,46 @@ class FakeDB:
         return []
 
 
+class FakeAdminMonitorDB:
+    def execute_query(self, query: str, params=None, fetch_one: bool = False):
+        if "SELECT id, name, icon FROM remote_app" in query:
+            return [{"id": 3, "name": "远程桌面", "icon": "desktop"}]
+        if "GROUP BY app_id" in query:
+            rows = [{"app_id": 3, "cnt": 2 if "reclaim_pending" in query else 1}]
+            return rows
+        if "COUNT(DISTINCT user_id)" in query:
+            row = {"cnt": 2 if "reclaim_pending" in query else 1}
+            return row if fetch_one else [row]
+        if "SELECT s.session_id" in query:
+            active_row = {
+                "session_id": "session-active",
+                "user_id": 7,
+                "username": "tester",
+                "display_name": "Tester",
+                "app_name": "远程桌面",
+                "started_at": "2026-04-11 16:00:00",
+                "last_heartbeat": "2026-04-11 16:00:05",
+                "status": "active",
+                "duration_seconds": 5,
+            }
+            reclaim_row = {
+                "session_id": "session-reclaim-pending",
+                "user_id": 8,
+                "username": "tester2",
+                "display_name": "Tester2",
+                "app_name": "远程桌面",
+                "started_at": "2026-04-11 16:00:00",
+                "last_heartbeat": "2026-04-11 16:00:05",
+                "status": "reclaim_pending",
+                "duration_seconds": 5,
+            }
+            rows = [active_row, reclaim_row] if "reclaim_pending" in query else [active_row]
+            return rows
+        if fetch_one:
+            return None
+        return []
+
+
 def _build_app() -> FastAPI:
     app = FastAPI()
     app.include_router(monitor.router)
@@ -42,11 +82,24 @@ def _build_app() -> FastAPI:
     return app
 
 
-def _request(app: FastAPI, method: str, path: str, payload: dict) -> httpx.Response:
+def _build_admin_monitor_app() -> FastAPI:
+    app = FastAPI()
+    app.include_router(monitor.admin_monitor_router)
+    app.dependency_overrides[monitor.require_admin] = lambda: UserInfo(
+        user_id=1,
+        username="admin",
+        display_name="管理员",
+        is_admin=True,
+    )
+    return app
+
+
+def _request(app: FastAPI, method: str, path: str, payload: dict | None = None) -> httpx.Response:
     async def _run() -> httpx.Response:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-            return await client.request(method, path, json=payload)
+            kwargs = {"json": payload} if payload is not None else {}
+            return await client.request(method, path, **kwargs)
 
     return asyncio.run(_run())
 
@@ -169,3 +222,28 @@ def test_heartbeat_and_activity_keep_404_when_session_missing(monkeypatch):
     assert heartbeat_resp.json() == {"detail": "会话不存在或已结束"}
     assert activity_resp.status_code == 404
     assert activity_resp.json() == {"detail": "会话不存在或已结束"}
+
+
+def test_admin_monitor_overview_excludes_reclaim_pending_sessions(monkeypatch):
+    monkeypatch.setattr(monitor, "db", FakeAdminMonitorDB())
+    app = _build_admin_monitor_app()
+
+    response = _request(app, "GET", "/api/admin/monitor/overview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_online"] == 1
+    assert payload["total_sessions"] == 1
+    assert payload["apps"][0]["active_count"] == 1
+
+
+def test_admin_monitor_sessions_excludes_reclaim_pending_sessions(monkeypatch):
+    monkeypatch.setattr(monitor, "db", FakeAdminMonitorDB())
+    app = _build_admin_monitor_app()
+
+    response = _request(app, "GET", "/api/admin/monitor/sessions")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [row["session_id"] for row in payload["sessions"]] == ["session-active"]
+    assert payload["sessions"][0]["status"] == "active"

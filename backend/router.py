@@ -41,6 +41,21 @@ guac_service = GuacamoleService(
 pool_service = ResourcePoolService(db=db)
 
 
+def _resolve_transfer_policy(override_value, global_value: bool) -> bool:
+    """解析 tri-state 传输策略：NULL=继承, 1=禁用, 0=允许。"""
+    if override_value is None:
+        return bool(global_value)
+    if isinstance(override_value, str):
+        value = override_value.strip().lower()
+        if value in ("", "null", "none"):
+            return bool(global_value)
+        if value in ("1", "true"):
+            return True
+        if value in ("0", "false"):
+            return False
+    return bool(override_value)
+
+
 def _build_all_connections(user_id: int) -> dict:
     """查询该用户所有可用应用，构建完整的 connections dict。
 
@@ -55,7 +70,8 @@ def _build_all_connections(user_id: int) -> dict:
                a.enable_wallpaper, a.enable_font_smoothing,
                a.disable_copy, a.disable_paste,
                a.enable_audio, a.enable_audio_input,
-               a.enable_printing, a.timezone, a.keyboard_layout
+               a.enable_printing, a.disable_download, a.disable_upload,
+               a.timezone, a.keyboard_layout
         FROM remote_app a
         JOIN remote_app_acl acl ON a.id = acl.app_id
         WHERE acl.user_id = %(user_id)s AND a.is_active = 1
@@ -68,11 +84,15 @@ def _build_all_connections(user_id: int) -> dict:
     drive_name = drive_cfg.get("name", "GuacDrive")
     drive_base = drive_cfg.get("base_path", "/drive")
     drive_create = drive_cfg.get("create_path", True)
+    drive_disable_download = bool(drive_cfg.get("disable_download", False))
+    drive_disable_upload = bool(drive_cfg.get("disable_upload", False))
 
     connections = {}
     for app in apps:
         # Per-user 隔离: /drive/portal_u{user_id}
         user_drive_path = f"{drive_base}/portal_u{user_id}" if drive_enabled else ""
+        app_disable_download = _resolve_transfer_policy(app.get("disable_download"), drive_disable_download)
+        app_disable_upload = _resolve_transfer_policy(app.get("disable_upload"), drive_disable_upload)
 
         conn = GuacamoleCrypto.build_rdp_connection(
             name=f"app_{app['id']}",
@@ -90,6 +110,8 @@ def _build_all_connections(user_id: int) -> dict:
             drive_name=drive_name,
             drive_path=user_drive_path,
             create_drive_path=drive_create,
+            disable_download=app_disable_download,
+            disable_upload=app_disable_upload,
             # RDP 高级参数
             color_depth=app.get("color_depth"),
             disable_gfx=bool(app.get("disable_gfx", 1)),

@@ -35,3 +35,66 @@ test('isViewerResultFile recognizes vtu as previewable', () => {
   assert.equal(mod.isViewerResultFile('nested/mesh.vtu'), true);
   assert.equal(mod.isViewerResultFile('nested/notes.txt'), false);
 });
+
+test('annotatePendingTransfers marks only recent new files as pending', () => {
+  const items = [
+    { name: 'old.txt', is_dir: false, size: 10, mtime: 100 },
+    { name: 'fresh.bin', is_dir: false, size: 200, mtime: 118 },
+    { name: 'Output', is_dir: true, size: 0, mtime: 118 },
+  ];
+
+  const annotated = mod.annotatePendingTransfers(items, [], {
+    nowSeconds: 120,
+    recentWindowSeconds: 15,
+  });
+
+  assert.equal(annotated[0].is_pending, false);
+  assert.equal(annotated[1].is_pending, true);
+  assert.equal(annotated[2].is_pending, false);
+});
+
+test('annotatePendingTransfers clears pending flag after unchanged second poll', () => {
+  const previous = [
+    { name: 'fresh.bin', is_dir: false, size: 200, mtime: 118 },
+  ];
+  const current = [
+    { name: 'fresh.bin', is_dir: false, size: 200, mtime: 118 },
+  ];
+
+  const annotated = mod.annotatePendingTransfers(current, previous, {
+    nowSeconds: 122,
+    recentWindowSeconds: 15,
+  });
+
+  assert.equal(annotated[0].is_pending, false);
+});
+
+test('resolveRefreshDelay returns fast interval when pending items exist', () => {
+  const delay = mod.resolveRefreshDelay({
+    hasPendingItems: true,
+    nowMs: 1000,
+    burstUntilMs: 0,
+  });
+
+  assert.equal(delay, 2000);
+});
+
+test('resolveRefreshDelay returns fast interval within burst window', () => {
+  const delay = mod.resolveRefreshDelay({
+    hasPendingItems: false,
+    nowMs: 5000,
+    burstUntilMs: 6000,
+  });
+
+  assert.equal(delay, 2000);
+});
+
+test('resolveRefreshDelay returns stable interval after burst window', () => {
+  const delay = mod.resolveRefreshDelay({
+    hasPendingItems: false,
+    nowMs: 7000,
+    burstUntilMs: 6000,
+  });
+
+  assert.equal(delay, 10000);
+});

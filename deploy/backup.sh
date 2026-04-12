@@ -22,7 +22,7 @@ UPLOAD_BACKUP_IMAGE="alpine"
 
 read_env_value() {
     local key="$1"
-    grep -E "^${key}=" "$ENV_FILE" | cut -d'=' -f2- || true
+    grep -E "^${key}=" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r' || true
 }
 
 kv() {
@@ -246,8 +246,10 @@ do_export() {
     echo "▶ [1/2] 导出 MySQL 数据库..."
     require_service_container_id "guac-sql" >/dev/null
 
-    compose_cmd exec -T guac-sql \
-        mysqldump -uroot -p"${MYSQL_ROOT_PASSWORD}" \
+    compose_cmd exec -T \
+        -e MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" \
+        guac-sql \
+        mysqldump -uroot \
         --default-character-set=utf8mb4 \
         --hex-blob \
         --single-transaction \
@@ -332,8 +334,10 @@ do_import() {
         echo "▶ [1/2] 恢复 MySQL 数据库..."
         require_service_container_id "guac-sql" >/dev/null
 
-        compose_cmd exec -T guac-sql \
-            mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" \
+        compose_cmd exec -T \
+            -e MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" \
+            guac-sql \
+            mysql -uroot \
             --default-character-set=utf8mb4 \
             < "${backup_dir}/portal_dump.sql"
 

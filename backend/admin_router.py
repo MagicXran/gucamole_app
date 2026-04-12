@@ -2,6 +2,7 @@
 管理后台 API 路由 - 应用/用户/ACL/审计日志管理
 """
 
+import json
 import logging
 from typing import Optional
 
@@ -13,6 +14,7 @@ from backend.auth import require_admin
 from backend.audit import log_action
 from backend.router import guac_service
 from backend.resource_pool_service import ResourcePoolService
+from backend.script_profiles import get_script_profile, list_script_profiles, resolve_script_runtime_settings
 from backend.models import (
     UserInfo,
     AppCreateRequest, AppUpdateRequest, AppAdminResponse,
@@ -26,16 +28,318 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 pool_service = ResourcePoolService(db=db)
 
 
-def _ensure_pool_exists(pool_id: int | None):
+def _ensure_pool_exists(pool_id: int | None, conn=None):
     if pool_id is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "应用必须绑定到资源池")
     pool = db.execute_query(
         "SELECT id FROM resource_pool WHERE id = %(id)s AND is_active = 1",
         {"id": pool_id},
         fetch_one=True,
+        conn=conn,
     )
     if not pool:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "资源池不存在或已禁用")
+
+
+def _validate_script_config(
+    script_enabled: bool | None,
+    executor_key: str | None,
+    worker_group_id: int | None,
+    script_profile_key: str | None = None,
+):
+    if not script_enabled:
+        return
+    if not executor_key:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "启用脚本模式时必须指定执行器")
+    if not worker_group_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "启用脚本模式时必须指定 Worker 节点组")
+    if script_profile_key and not get_script_profile(script_profile_key):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "脚本软件预设不存在")
+
+
+def _build_script_runtime_config(
+    *,
+    script_profile_key: str | None,
+    executor_key: str | None,
+    python_executable: str | None,
+    python_env: dict[str, str] | None,
+):
+    return resolve_script_runtime_settings(
+        script_profile_key=script_profile_key,
+        script_executor_key=executor_key,
+        python_executable=python_executable,
+        python_env=python_env,
+    )
+
+
+def _parse_script_runtime_config(runtime_config_json):
+    if not runtime_config_json:
+        return {}
+    if isinstance(runtime_config_json, str):
+        try:
+            runtime_config_json = json.loads(runtime_config_json)
+        except json.JSONDecodeError:
+            return {}
+    if not isinstance(runtime_config_json, dict):
+        return {}
+    return runtime_config_json
+
+
+def _upsert_catalog_bindings(app_row: dict, *, script_enabled: bool | None, script_profile_key: str | None, script_executor_key: str | None, script_worker_group_id: int | None, script_scratch_root: str | None, script_python_executable: str | None = None, script_python_env: dict[str, str] | None = None, conn=None):
+    app_key = f"remote-app-{app_row['id']}"
+    catalog = db.execute_query(
+        "SELECT id FROM catalog_app WHERE app_key = %(app_key)s",
+        {"app_key": app_key},
+        fetch_one=True,
+        conn=conn,
+    )
+    if catalog:
+        db.execute_update(
+            """
+            UPDATE catalog_app
+            SET name = %(name)s,
+                icon = %(icon)s,
+                is_active = %(is_active)s
+            WHERE id = %(catalog_id)s
+            """,
+            {
+                "catalog_id": catalog["id"],
+                "name": app_row["name"],
+                "icon": app_row.get("icon") or "desktop",
+                "is_active": 1 if app_row.get("is_active", 1) else 0,
+            },
+            conn=conn,
+        )
+        catalog_id = int(catalog["id"])
+    else:
+        db.execute_update(
+            """
+            INSERT INTO catalog_app (app_key, name, app_kind, icon, review_status, is_active)
+            VALUES (%(app_key)s, %(name)s, 'simulation_runtime', %(icon)s, 'internal', %(is_active)s)
+            """,
+            {
+                "app_key": app_key,
+                "name": app_row["name"],
+                "icon": app_row.get("icon") or "desktop",
+                "is_active": 1 if app_row.get("is_active", 1) else 0,
+            },
+            conn=conn,
+        )
+        catalog_id = int(
+            db.execute_query(
+                "SELECT id FROM catalog_app WHERE app_key = %(app_key)s",
+                {"app_key": app_key},
+                fetch_one=True,
+                conn=conn,
+            )["id"]
+        )
+
+    gui_binding = db.execute_query(
+        "SELECT id FROM app_binding WHERE remote_app_id = %(remote_app_id)s AND binding_kind = 'gui_remoteapp' LIMIT 1",
+        {"remote_app_id": app_row["id"]},
+        fetch_one=True,
+        conn=conn,
+    )
+    gui_payload = {
+        "app_id": catalog_id,
+        "name": f"{app_row['name']} GUI",
+        "remote_app_id": app_row["id"],
+        "resource_pool_id": app_row.get("pool_id"),
+        "requires_resource_pool": 1 if app_row.get("pool_id") else 0,
+        "is_enabled": 1 if app_row.get("is_active", 1) else 0,
+    }
+    if gui_binding:
+        db.execute_update(
+            """
+            UPDATE app_binding
+            SET app_id = %(app_id)s,
+                name = %(name)s,
+                resource_pool_id = %(resource_pool_id)s,
+                requires_resource_pool = %(requires_resource_pool)s,
+                is_enabled = %(is_enabled)s
+            WHERE id = %(binding_id)s
+            """,
+            {**gui_payload, "binding_id": gui_binding["id"]},
+            conn=conn,
+        )
+    else:
+        db.execute_update(
+            """
+            INSERT INTO app_binding (
+                app_id, binding_kind, name, remote_app_id, resource_pool_id,
+                worker_group_id, requires_resource_pool, is_enabled
+            )
+            VALUES (
+                %(app_id)s, 'gui_remoteapp', %(name)s, %(remote_app_id)s, %(resource_pool_id)s,
+                NULL, %(requires_resource_pool)s, %(is_enabled)s
+            )
+            """,
+            gui_payload,
+            conn=conn,
+        )
+
+    if (
+        script_enabled is None
+        and script_profile_key is None
+        and script_executor_key is None
+        and script_worker_group_id is None
+        and script_scratch_root is None
+        and script_python_executable is None
+        and script_python_env is None
+    ):
+        return
+
+    if script_enabled:
+        profile = db.execute_query(
+            "SELECT id FROM remote_app_script_profile WHERE remote_app_id = %(remote_app_id)s",
+            {"remote_app_id": app_row["id"]},
+            fetch_one=True,
+            conn=conn,
+        )
+        profile_payload = {
+            "remote_app_id": app_row["id"],
+            "is_enabled": 1,
+            "executor_key": script_executor_key,
+            "scratch_root": script_scratch_root or None,
+        }
+        if profile:
+            db.execute_update(
+                """
+                UPDATE remote_app_script_profile
+                SET is_enabled = %(is_enabled)s,
+                    executor_key = %(executor_key)s,
+                    scratch_root = %(scratch_root)s
+                WHERE id = %(profile_id)s
+                """,
+                {**profile_payload, "profile_id": profile["id"]},
+                conn=conn,
+            )
+        else:
+            db.execute_update(
+                """
+                INSERT INTO remote_app_script_profile (
+                    remote_app_id, is_enabled, executor_key, scratch_root
+                )
+                VALUES (
+                    %(remote_app_id)s, %(is_enabled)s, %(executor_key)s, %(scratch_root)s
+                )
+                """,
+                profile_payload,
+                conn=conn,
+            )
+        script_binding = db.execute_query(
+            "SELECT id FROM app_binding WHERE remote_app_id = %(remote_app_id)s AND binding_kind = 'worker_script' LIMIT 1",
+            {"remote_app_id": app_row["id"]},
+            fetch_one=True,
+            conn=conn,
+        )
+        runtime_settings = _build_script_runtime_config(
+            script_profile_key=script_profile_key,
+            executor_key=script_executor_key,
+            python_executable=script_python_executable,
+            python_env=script_python_env,
+        )
+        script_binding_payload = {
+            "app_id": catalog_id,
+            "name": f"{app_row['name']} Script",
+            "remote_app_id": app_row["id"],
+            "resource_pool_id": app_row.get("pool_id"),
+            "worker_group_id": script_worker_group_id,
+            "requires_resource_pool": 1 if app_row.get("pool_id") else 0,
+            "is_enabled": 1,
+            "runtime_config_json": runtime_settings["runtime_config"],
+        }
+        if script_binding:
+            db.execute_update(
+                """
+                UPDATE app_binding
+                SET app_id = %(app_id)s,
+                    name = %(name)s,
+                    resource_pool_id = %(resource_pool_id)s,
+                    worker_group_id = %(worker_group_id)s,
+                    requires_resource_pool = %(requires_resource_pool)s,
+                    is_enabled = %(is_enabled)s,
+                    runtime_config_json = %(runtime_config_json)s
+                WHERE id = %(binding_id)s
+                """,
+                {
+                    **script_binding_payload,
+                    "binding_id": script_binding["id"],
+                    "runtime_config_json": json.dumps(script_binding_payload["runtime_config_json"], ensure_ascii=False) if script_binding_payload["runtime_config_json"] is not None else None,
+                },
+                conn=conn,
+            )
+        else:
+            db.execute_update(
+                """
+                INSERT INTO app_binding (
+                    app_id, binding_kind, name, remote_app_id, resource_pool_id,
+                    worker_group_id, requires_resource_pool, is_enabled, runtime_config_json
+                )
+                VALUES (
+                    %(app_id)s, 'worker_script', %(name)s, %(remote_app_id)s, %(resource_pool_id)s,
+                    %(worker_group_id)s, %(requires_resource_pool)s, %(is_enabled)s, %(runtime_config_json)s
+                )
+                """,
+                {
+                    **script_binding_payload,
+                    "runtime_config_json": json.dumps(script_binding_payload["runtime_config_json"], ensure_ascii=False) if script_binding_payload["runtime_config_json"] is not None else None,
+                },
+                conn=conn,
+            )
+    else:
+        db.execute_update(
+            """
+            UPDATE remote_app_script_profile
+            SET is_enabled = 0
+            WHERE remote_app_id = %(remote_app_id)s
+            """,
+            {"remote_app_id": app_row["id"]},
+            conn=conn,
+        )
+        db.execute_update(
+            """
+            UPDATE app_binding
+            SET is_enabled = 0
+            WHERE remote_app_id = %(remote_app_id)s
+              AND binding_kind = 'worker_script'
+            """,
+            {"remote_app_id": app_row["id"]},
+            conn=conn,
+        )
+
+
+def _get_app_admin_row(app_id: int, conn=None):
+    row = db.execute_query(
+        """
+        SELECT
+            a.*,
+            COALESCE(sp.is_enabled, 0) AS script_enabled,
+            sp.executor_key AS script_executor_key,
+            sp.scratch_root AS script_scratch_root,
+            sb.worker_group_id AS script_worker_group_id,
+            sb.runtime_config_json AS script_runtime_config_json
+        FROM remote_app a
+        LEFT JOIN remote_app_script_profile sp
+          ON sp.remote_app_id = a.id
+        LEFT JOIN app_binding sb
+          ON sb.remote_app_id = a.id
+         AND sb.binding_kind = 'worker_script'
+        WHERE a.id = %(id)s
+        LIMIT 1
+        """,
+        {"id": app_id},
+        fetch_one=True,
+        conn=conn,
+    )
+    if row:
+        runtime_config = _parse_script_runtime_config(row.get("script_runtime_config_json"))
+        row["script_profile_key"] = runtime_config.get("script_profile_key")
+        profile = get_script_profile(row["script_profile_key"]) if row.get("script_profile_key") else None
+        row["script_profile_name"] = profile.get("display_name") if profile else None
+        row["script_python_executable"] = runtime_config.get("python_executable")
+        row["script_python_env"] = runtime_config.get("python_env")
+    return row
 
 
 # ============================================
@@ -45,7 +349,37 @@ def _ensure_pool_exists(pool_id: int | None):
 @router.get("/apps", response_model=list[AppAdminResponse])
 def list_apps(admin: UserInfo = Depends(require_admin)):
     """列出所有应用（含 inactive）"""
-    return db.execute_query("SELECT * FROM remote_app ORDER BY id")
+    rows = db.execute_query(
+        """
+        SELECT
+            a.*,
+            COALESCE(sp.is_enabled, 0) AS script_enabled,
+            sp.executor_key AS script_executor_key,
+            sp.scratch_root AS script_scratch_root,
+            sb.worker_group_id AS script_worker_group_id,
+            sb.runtime_config_json AS script_runtime_config_json
+        FROM remote_app a
+        LEFT JOIN remote_app_script_profile sp
+          ON sp.remote_app_id = a.id
+        LEFT JOIN app_binding sb
+          ON sb.remote_app_id = a.id
+         AND sb.binding_kind = 'worker_script'
+        ORDER BY a.id
+        """
+    )
+    for row in rows:
+        runtime_config = _parse_script_runtime_config(row.get("script_runtime_config_json"))
+        row["script_profile_key"] = runtime_config.get("script_profile_key")
+        profile = get_script_profile(row["script_profile_key"]) if row.get("script_profile_key") else None
+        row["script_profile_name"] = profile.get("display_name") if profile else None
+        row["script_python_executable"] = runtime_config.get("python_executable")
+        row["script_python_env"] = runtime_config.get("python_env")
+    return rows
+
+
+@router.get("/script-profiles")
+def list_script_profiles_api(admin: UserInfo = Depends(require_admin)):
+    return {"items": list_script_profiles()}
 
 
 @router.post("/apps", response_model=AppAdminResponse, status_code=201)
@@ -56,60 +390,88 @@ def create_app(
 ):
     """创建应用"""
     _ensure_pool_exists(req.pool_id)
+    try:
+        runtime_settings = _build_script_runtime_config(
+            script_profile_key=req.script_profile_key,
+            executor_key=req.script_executor_key,
+            python_executable=req.script_python_executable,
+            python_env=req.script_python_env,
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    _validate_script_config(req.script_enabled, runtime_settings["executor_key"], req.script_worker_group_id, req.script_profile_key)
 
-    db.execute_update(
-        """
-        INSERT INTO remote_app
-            (name, icon, protocol, hostname, port,
-             rdp_username, rdp_password, domain, security, ignore_cert,
-             remote_app, remote_app_dir, remote_app_args,
-             color_depth, disable_gfx, resize_method,
-             enable_wallpaper, enable_font_smoothing,
-             disable_copy, disable_paste,
-             enable_audio, enable_audio_input, enable_printing,
-             timezone, keyboard_layout,
-             pool_id, member_max_concurrent)
-        VALUES
-            (%(name)s, %(icon)s, %(protocol)s, %(hostname)s, %(port)s,
-             %(rdp_username)s, %(rdp_password)s, %(domain)s, %(security)s, %(ignore_cert)s,
-             %(remote_app)s, %(remote_app_dir)s, %(remote_app_args)s,
-             %(color_depth)s, %(disable_gfx)s, %(resize_method)s,
-             %(enable_wallpaper)s, %(enable_font_smoothing)s,
-             %(disable_copy)s, %(disable_paste)s,
-             %(enable_audio)s, %(enable_audio_input)s, %(enable_printing)s,
-             %(timezone)s, %(keyboard_layout)s,
-             %(pool_id)s, %(member_max_concurrent)s)
-        """,
-        {
-            "name": req.name, "icon": req.icon, "protocol": req.protocol,
-            "hostname": req.hostname, "port": req.port,
-            "rdp_username": req.rdp_username or None,
-            "rdp_password": req.rdp_password or None,
-            "domain": req.domain, "security": req.security,
-            "ignore_cert": 1 if req.ignore_cert else 0,
-            "remote_app": req.remote_app or None,
-            "remote_app_dir": req.remote_app_dir or None,
-            "remote_app_args": req.remote_app_args or None,
-            "color_depth": req.color_depth,
-            "disable_gfx": 1 if req.disable_gfx else 0,
-            "resize_method": req.resize_method,
-            "enable_wallpaper": 1 if req.enable_wallpaper else 0,
-            "enable_font_smoothing": 1 if req.enable_font_smoothing else 0,
-            "disable_copy": 1 if req.disable_copy else 0,
-            "disable_paste": 1 if req.disable_paste else 0,
-            "enable_audio": 1 if req.enable_audio else 0,
-            "enable_audio_input": 1 if req.enable_audio_input else 0,
-            "enable_printing": 1 if req.enable_printing else 0,
-            "timezone": req.timezone or None,
-            "keyboard_layout": req.keyboard_layout or None,
-            "pool_id": req.pool_id,
-            "member_max_concurrent": req.member_max_concurrent,
-        },
-    )
-    app = db.execute_query(
-        "SELECT * FROM remote_app WHERE name = %(name)s ORDER BY id DESC LIMIT 1",
-        {"name": req.name}, fetch_one=True,
-    )
+    with db.transaction() as conn:
+        db.execute_update(
+            """
+            INSERT INTO remote_app
+                (name, icon, protocol, hostname, port,
+                 rdp_username, rdp_password, domain, security, ignore_cert,
+                 remote_app, remote_app_dir, remote_app_args,
+                 color_depth, disable_gfx, resize_method,
+                 enable_wallpaper, enable_font_smoothing,
+                 disable_copy, disable_paste,
+                 enable_audio, enable_audio_input, enable_printing,
+                 disable_download, disable_upload,
+                 timezone, keyboard_layout,
+                 pool_id, member_max_concurrent)
+            VALUES
+                (%(name)s, %(icon)s, %(protocol)s, %(hostname)s, %(port)s,
+                 %(rdp_username)s, %(rdp_password)s, %(domain)s, %(security)s, %(ignore_cert)s,
+                 %(remote_app)s, %(remote_app_dir)s, %(remote_app_args)s,
+                 %(color_depth)s, %(disable_gfx)s, %(resize_method)s,
+                 %(enable_wallpaper)s, %(enable_font_smoothing)s,
+                 %(disable_copy)s, %(disable_paste)s,
+                 %(enable_audio)s, %(enable_audio_input)s, %(enable_printing)s,
+                 %(disable_download)s, %(disable_upload)s,
+                 %(timezone)s, %(keyboard_layout)s,
+                 %(pool_id)s, %(member_max_concurrent)s)
+            """,
+            {
+                "name": req.name, "icon": req.icon, "protocol": req.protocol,
+                "hostname": req.hostname, "port": req.port,
+                "rdp_username": req.rdp_username or None,
+                "rdp_password": req.rdp_password or None,
+                "domain": req.domain, "security": req.security,
+                "ignore_cert": 1 if req.ignore_cert else 0,
+                "remote_app": req.remote_app or None,
+                "remote_app_dir": req.remote_app_dir or None,
+                "remote_app_args": req.remote_app_args or None,
+                "color_depth": req.color_depth,
+                "disable_gfx": 1 if req.disable_gfx else 0,
+                "resize_method": req.resize_method,
+                "enable_wallpaper": 1 if req.enable_wallpaper else 0,
+                "enable_font_smoothing": 1 if req.enable_font_smoothing else 0,
+                "disable_copy": 1 if req.disable_copy else 0,
+                "disable_paste": 1 if req.disable_paste else 0,
+                "enable_audio": 1 if req.enable_audio else 0,
+                "enable_audio_input": 1 if req.enable_audio_input else 0,
+                "enable_printing": 1 if req.enable_printing else 0,
+                "disable_download": req.disable_download,
+                "disable_upload": req.disable_upload,
+                "timezone": req.timezone or None,
+                "keyboard_layout": req.keyboard_layout or None,
+                "pool_id": req.pool_id,
+                "member_max_concurrent": req.member_max_concurrent,
+            },
+            conn=conn,
+        )
+        app = db.execute_query(
+            "SELECT * FROM remote_app WHERE name = %(name)s ORDER BY id DESC LIMIT 1",
+            {"name": req.name}, fetch_one=True, conn=conn,
+        )
+        _upsert_catalog_bindings(
+            app,
+            script_enabled=req.script_enabled,
+            script_profile_key=req.script_profile_key,
+            script_executor_key=runtime_settings["executor_key"],
+            script_worker_group_id=req.script_worker_group_id,
+            script_scratch_root=req.script_scratch_root,
+            script_python_executable=runtime_settings["python_executable"],
+            script_python_env=runtime_settings["python_env"],
+            conn=conn,
+        )
+        app = _get_app_admin_row(int(app["id"]), conn=conn)
     guac_service.invalidate_all_sessions()
     client_ip = request.client.host if request.client else "unknown"
     log_action(
@@ -133,11 +495,50 @@ def update_app(
     if not existing:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "应用不存在")
 
-    updates = req.model_dump(exclude_none=True)
+    updates = req.model_dump(exclude_unset=True)
     if not updates:
-        return existing
+        return _get_app_admin_row(app_id)
     if "pool_id" in updates:
         _ensure_pool_exists(updates["pool_id"])
+    script_updates = {
+        key: updates.pop(key)
+        for key in ("script_enabled", "script_profile_key", "script_executor_key", "script_worker_group_id", "script_scratch_root")
+        if key in updates
+    }
+    for key in ("script_python_executable", "script_python_env"):
+        if key in updates:
+            script_updates[key] = updates.pop(key)
+
+    merged_script = None
+    if script_updates:
+        current_script = _get_app_admin_row(app_id) or {}
+        merged_script = {
+            "script_enabled": script_updates.get("script_enabled", current_script.get("script_enabled")),
+            "script_profile_key": script_updates.get("script_profile_key", current_script.get("script_profile_key")),
+            "script_executor_key": script_updates.get("script_executor_key", current_script.get("script_executor_key")),
+            "script_worker_group_id": script_updates.get("script_worker_group_id", current_script.get("script_worker_group_id")),
+            "script_scratch_root": script_updates.get("script_scratch_root", current_script.get("script_scratch_root")),
+            "script_python_executable": script_updates.get("script_python_executable", current_script.get("script_python_executable")),
+            "script_python_env": script_updates.get("script_python_env", current_script.get("script_python_env")),
+        }
+        try:
+            runtime_settings = _build_script_runtime_config(
+                script_profile_key=merged_script.get("script_profile_key"),
+                executor_key=merged_script.get("script_executor_key"),
+                python_executable=merged_script.get("script_python_executable"),
+                python_env=merged_script.get("script_python_env"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+        merged_script["script_executor_key"] = runtime_settings["executor_key"]
+        merged_script["script_python_executable"] = runtime_settings["python_executable"]
+        merged_script["script_python_env"] = runtime_settings["python_env"]
+        _validate_script_config(
+            merged_script.get("script_enabled"),
+            merged_script.get("script_executor_key"),
+            merged_script.get("script_worker_group_id"),
+            merged_script.get("script_profile_key"),
+        )
 
     # 构建动态 SET 子句
     _BOOL_COLUMNS = {
@@ -153,9 +554,26 @@ def update_app(
         set_parts.append(f"{key} = %({key})s")
         params[key] = value
 
-    db.execute_update(
-        f"UPDATE remote_app SET {', '.join(set_parts)} WHERE id = %(id)s", params,
-    )
+    with db.transaction() as conn:
+        if set_parts:
+            db.execute_update(
+                f"UPDATE remote_app SET {', '.join(set_parts)} WHERE id = %(id)s", params,
+                conn=conn,
+            )
+        app_row = db.execute_query(
+            "SELECT * FROM remote_app WHERE id = %(id)s", {"id": app_id}, fetch_one=True, conn=conn,
+        )
+        _upsert_catalog_bindings(
+            app_row,
+            script_enabled=merged_script.get("script_enabled") if merged_script else None,
+            script_profile_key=merged_script.get("script_profile_key") if merged_script else None,
+            script_executor_key=merged_script.get("script_executor_key") if merged_script else None,
+            script_worker_group_id=merged_script.get("script_worker_group_id") if merged_script else None,
+            script_scratch_root=merged_script.get("script_scratch_root") if merged_script else None,
+            script_python_executable=merged_script.get("script_python_executable") if merged_script else None,
+            script_python_env=merged_script.get("script_python_env") if merged_script else None,
+            conn=conn,
+        )
     guac_service.invalidate_all_sessions()
     pool_service.cleanup_invalid_queue_entries(requested_app_id=app_id)
     client_ip = request.client.host if request.client else "unknown"
@@ -163,9 +581,7 @@ def update_app(
         admin.user_id, admin.username, "admin_update_app",
         "app", app_id, existing["name"], ip_address=client_ip,
     )
-    return db.execute_query(
-        "SELECT * FROM remote_app WHERE id = %(id)s", {"id": app_id}, fetch_one=True,
-    )
+    return _get_app_admin_row(app_id)
 
 
 @router.delete("/apps/{app_id}")
@@ -181,9 +597,24 @@ def delete_app(
     if not existing:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "应用不存在")
 
-    db.execute_update(
-        "UPDATE remote_app SET is_active = 0 WHERE id = %(id)s", {"id": app_id},
-    )
+    with db.transaction() as conn:
+        db.execute_update(
+            "UPDATE remote_app SET is_active = 0 WHERE id = %(id)s", {"id": app_id}, conn=conn,
+        )
+        app_row = db.execute_query(
+            "SELECT * FROM remote_app WHERE id = %(id)s", {"id": app_id}, fetch_one=True, conn=conn,
+        )
+        _upsert_catalog_bindings(
+            app_row,
+            script_enabled=False,
+            script_profile_key=None,
+            script_executor_key=None,
+            script_worker_group_id=None,
+            script_scratch_root=None,
+            script_python_executable=None,
+            script_python_env=None,
+            conn=conn,
+        )
     guac_service.invalidate_all_sessions()
     pool_service.cleanup_invalid_queue_entries(requested_app_id=app_id)
     client_ip = request.client.host if request.client else "unknown"

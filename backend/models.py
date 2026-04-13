@@ -77,10 +77,19 @@ class AppCreateRequest(BaseModel):
     enable_audio: bool = True
     enable_audio_input: bool = False
     enable_printing: bool = False
+    disable_download: Optional[int] = Field(default=None)
+    disable_upload: Optional[int] = Field(default=None)
     timezone: Optional[str] = Field(default=None, max_length=50)
     keyboard_layout: Optional[str] = Field(default=None, max_length=50)
     pool_id: Optional[int] = Field(default=None, ge=1)
     member_max_concurrent: int = Field(default=1, ge=1, le=9999)
+    script_enabled: bool = False
+    script_profile_key: Optional[str] = Field(default=None, max_length=100)
+    script_executor_key: Optional[str] = Field(default=None, max_length=100)
+    script_worker_group_id: Optional[int] = Field(default=None, ge=1)
+    script_scratch_root: Optional[str] = Field(default=None, max_length=500)
+    script_python_executable: Optional[str] = Field(default=None, max_length=500)
+    script_python_env: Optional[dict[str, str]] = None
 
     @field_validator("color_depth")
     @classmethod
@@ -94,6 +103,20 @@ class AppCreateRequest(BaseModel):
     def check_resize_method(cls, v):
         if v not in ("display-update", "reconnect"):
             raise ValueError("resize_method 必须是 display-update 或 reconnect")
+        return v
+
+    @field_validator("disable_download", "disable_upload")
+    @classmethod
+    def check_transfer_policy(cls, v):
+        if v is not None and v not in (0, 1):
+            raise ValueError("传输策略必须是 0, 1 或 null")
+        return v
+
+    @field_validator("script_executor_key")
+    @classmethod
+    def check_script_executor_key(cls, v):
+        if v is not None and v not in ("python_api", "command_statusfile"):
+            raise ValueError("script_executor_key 必须是 python_api 或 command_statusfile")
         return v
 
 
@@ -121,11 +144,20 @@ class AppUpdateRequest(BaseModel):
     enable_audio: Optional[bool] = None
     enable_audio_input: Optional[bool] = None
     enable_printing: Optional[bool] = None
+    disable_download: Optional[int] = Field(default=None)
+    disable_upload: Optional[int] = Field(default=None)
     timezone: Optional[str] = Field(default=None, max_length=50)
     keyboard_layout: Optional[str] = Field(default=None, max_length=50)
     pool_id: Optional[int] = Field(default=None, ge=1)
     member_max_concurrent: Optional[int] = Field(default=None, ge=1, le=9999)
     is_active: Optional[bool] = None
+    script_enabled: Optional[bool] = None
+    script_profile_key: Optional[str] = Field(default=None, max_length=100)
+    script_executor_key: Optional[str] = Field(default=None, max_length=100)
+    script_worker_group_id: Optional[int] = Field(default=None, ge=1)
+    script_scratch_root: Optional[str] = Field(default=None, max_length=500)
+    script_python_executable: Optional[str] = Field(default=None, max_length=500)
+    script_python_env: Optional[dict[str, str]] = None
 
     @field_validator("color_depth")
     @classmethod
@@ -139,6 +171,20 @@ class AppUpdateRequest(BaseModel):
     def check_resize_method(cls, v):
         if v is not None and v not in ("display-update", "reconnect"):
             raise ValueError("resize_method 必须是 display-update 或 reconnect")
+        return v
+
+    @field_validator("disable_download", "disable_upload")
+    @classmethod
+    def check_transfer_policy(cls, v):
+        if v is not None and v not in (0, 1):
+            raise ValueError("传输策略必须是 0, 1 或 null")
+        return v
+
+    @field_validator("script_executor_key")
+    @classmethod
+    def check_script_executor_key(cls, v):
+        if v is not None and v not in ("python_api", "command_statusfile"):
+            raise ValueError("script_executor_key 必须是 python_api 或 command_statusfile")
         return v
 
 
@@ -168,11 +214,21 @@ class AppAdminResponse(BaseModel):
     enable_audio: bool = True
     enable_audio_input: bool = False
     enable_printing: bool = False
+    disable_download: Optional[int] = None
+    disable_upload: Optional[int] = None
     timezone: Optional[str] = None
     keyboard_layout: Optional[str] = None
     pool_id: Optional[int] = None
     member_max_concurrent: int = 1
     is_active: bool = True
+    script_enabled: bool = False
+    script_profile_key: Optional[str] = None
+    script_profile_name: Optional[str] = None
+    script_executor_key: Optional[str] = None
+    script_worker_group_id: Optional[int] = None
+    script_scratch_root: Optional[str] = None
+    script_python_executable: Optional[str] = None
+    script_python_env: Optional[dict[str, str]] = None
 
 
 class UserCreateRequest(BaseModel):
@@ -236,6 +292,20 @@ class ResourcePoolCardResponse(BaseModel):
     name: str
     icon: str = "desktop"
     protocol: str = "rdp"
+    supports_gui: bool = True
+    supports_script: bool = False
+    script_runtime_id: Optional[int] = None
+    script_profile_key: Optional[str] = None
+    script_profile_name: Optional[str] = None
+    script_schedulable: bool = False
+    script_status_code: str = ""
+    script_status_label: str = ""
+    script_status_tone: str = ""
+    script_status_summary: str = ""
+    script_status_reason: str = ""
+    resource_status_code: str = ""
+    resource_status_label: str = ""
+    resource_status_tone: str = ""
     active_count: int = 0
     queued_count: int = 0
     max_concurrent: int = 1

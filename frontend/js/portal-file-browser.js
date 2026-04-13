@@ -1,4 +1,6 @@
 const VIEWER_EXTENSIONS = new Set(['.vtp', '.vtu', '.stl', '.obj']);
+const FAST_REFRESH_DELAY_MS = 2000;
+const STABLE_REFRESH_DELAY_MS = 10000;
 
 function getExtension(name) {
     var idx = name.lastIndexOf('.');
@@ -53,10 +55,56 @@ export function groupItemsByExtension(items) {
     return result;
 }
 
+function itemFingerprint(item) {
+    return [
+        item && item.name || '',
+        item && item.is_dir ? 'd' : 'f',
+        Number(item && item.size || 0),
+        Number(item && item.mtime || 0),
+    ].join('|');
+}
+
+export function annotatePendingTransfers(items, previousItems, options) {
+    options = options || {};
+    var nowSeconds = Number(options.nowSeconds || Math.floor(Date.now() / 1000));
+    var recentWindowSeconds = Number(options.recentWindowSeconds || 15);
+    var previousMap = new Map();
+
+    (previousItems || []).forEach(function(item) {
+        previousMap.set(String(item.name || ''), itemFingerprint(item));
+    });
+
+    return (items || []).map(function(item) {
+        var annotated = Object.assign({}, item);
+        if (annotated.is_dir) {
+            annotated.is_pending = false;
+            return annotated;
+        }
+
+        var fingerprint = itemFingerprint(annotated);
+        var previousFingerprint = previousMap.get(String(annotated.name || ''));
+        var ageSeconds = Math.max(0, nowSeconds - Number(annotated.mtime || 0));
+        annotated.is_pending = previousFingerprint !== fingerprint && ageSeconds <= recentWindowSeconds;
+        return annotated;
+    });
+}
+
+export function resolveRefreshDelay(options) {
+    options = options || {};
+    var nowMs = Number(options.nowMs || Date.now());
+    var burstUntilMs = Number(options.burstUntilMs || 0);
+    var hasPendingItems = !!options.hasPendingItems;
+    if (hasPendingItems) return FAST_REFRESH_DELAY_MS;
+    if (burstUntilMs > nowMs) return FAST_REFRESH_DELAY_MS;
+    return STABLE_REFRESH_DELAY_MS;
+}
+
 if (typeof window !== 'undefined') {
     window.PortalFileBrowser = {
         filterAndSortItems: filterAndSortItems,
         groupItemsByExtension: groupItemsByExtension,
         isViewerResultFile: isViewerResultFile,
+        annotatePendingTransfers: annotatePendingTransfers,
+        resolveRefreshDelay: resolveRefreshDelay,
     };
 }

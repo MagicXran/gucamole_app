@@ -28,11 +28,23 @@ function switchPortalTab(tab) {
     document.getElementById('apps-panel').style.display = tab === 'apps' ? '' : 'none';
     document.getElementById('files-panel').style.display = tab === 'files' ? '' : 'none';
 
-    if (tab === 'files' && !_filesLoaded) {
-        _filesLoaded = true;
-        loadSpaceInfo();
-        loadFiles('');
-        _initTip();
+    if (tab === 'files') {
+        if (typeof markFilesRefreshBurst === 'function') {
+            markFilesRefreshBurst();
+        }
+        if (!_filesLoaded) {
+            _filesLoaded = true;
+            loadSpaceInfo();
+            loadFiles('');
+            _initTip();
+        } else if (typeof refreshCurrentFiles === 'function') {
+            refreshCurrentFiles();
+        }
+        if (typeof startFilesAutoRefresh === 'function') {
+            startFilesAutoRefresh();
+        }
+    } else if (typeof stopFilesAutoRefresh === 'function') {
+        stopFilesAutoRefresh();
     }
 }
 
@@ -109,6 +121,18 @@ async function init() {
     if (filesSearch) filesSearch.addEventListener('input', updateFileBrowserControls);
     if (filesSort) filesSort.addEventListener('change', updateFileBrowserControls);
     if (filesGroup) filesGroup.addEventListener('change', updateFileBrowserControls);
+    document.addEventListener('visibilitychange', function() {
+        if (_currentPortalTab !== 'files') return;
+        if (document.hidden) {
+            if (typeof stopFilesAutoRefresh === 'function') stopFilesAutoRefresh();
+            return;
+        }
+        if (typeof markFilesRefreshBurst === 'function') {
+            markFilesRefreshBurst();
+        }
+        if (typeof startFilesAutoRefresh === 'function') startFilesAutoRefresh();
+        if (typeof refreshCurrentFiles === 'function') refreshCurrentFiles();
+    });
     _initDragDrop();
 
     var uploadsDiv = document.createElement('div');

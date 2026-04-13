@@ -93,6 +93,13 @@ test('backup script accepts canonical root password variable', () => {
   assert.doesNotMatch(result.stdout + result.stderr, /未设置 MYSQL_ROOT_PASSWORD/i);
 });
 
+test('backup script trims CRLF env values before using passwords', () => {
+  const result = runBackupCommand('MYSQL_ROOT_PASSWORD=xran\r\nTZ=Asia/Shanghai\r\n');
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.doesNotMatch(result.stdout + result.stderr, /未设置 MYSQL_ROOT_PASSWORD/i);
+});
+
 test('backup script still fails when no root password is configured', () => {
   const result = runBackupCommand('TZ=Asia/Shanghai\n');
 

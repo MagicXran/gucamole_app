@@ -95,6 +95,9 @@ async function uploadFile(file, targetDir) {
             if (chunkData.complete) {
                 _uploads[id].status = 'done';
                 renderUploads();
+                if (typeof markFilesRefreshBurst === 'function') {
+                    markFilesRefreshBurst();
+                }
                 loadFiles(_currentPath);
                 loadSpaceInfo();
                 setTimeout(function(uid) { delete _uploads[uid]; renderUploads(); }, 3000, id);

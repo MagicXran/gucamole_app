@@ -14,7 +14,7 @@ services:
     user: root  # /drive volume 需要写权限; guacd 仅在内网不对外暴露
     environment:
       TZ: ${TZ}
-      GUACD_LOG_LEVEL: debug
+      LOG_LEVEL: ${LOG_LEVEL:-${GUACD_LOG_LEVEL:-info}}
     volumes:
       - ${GUAC_DRIVE_SOURCE:-guacd_drive}:/drive
 
@@ -92,7 +92,10 @@ services:
     image: nginx:alpine
     restart: unless-stopped
     ports:
-      - "${PORTAL_PORT:-80}:80"
+      - target: 80
+        published: "${PORTAL_PORT:-80}"
+        host_ip: "${PORTAL_BIND_IP:-0.0.0.0}"
+        protocol: tcp
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro

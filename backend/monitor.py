@@ -194,7 +194,7 @@ def monitor_overview(admin: UserInfo = Depends(require_admin)):
         SELECT app_id, COUNT(*) AS cnt
         FROM active_session s
         LEFT JOIN resource_pool p ON p.id = s.pool_id
-        WHERE status IN ('active', 'reclaim_pending')
+        WHERE status = 'active'
           AND TIMESTAMPDIFF(SECOND, s.last_heartbeat, NOW()) <= COALESCE(p.stale_timeout_seconds, %(timeout)s)
         GROUP BY app_id
         """,
@@ -220,7 +220,7 @@ def monitor_overview(admin: UserInfo = Depends(require_admin)):
         SELECT COUNT(DISTINCT user_id) AS cnt
         FROM active_session s
         LEFT JOIN resource_pool p ON p.id = s.pool_id
-        WHERE status IN ('active', 'reclaim_pending')
+        WHERE status = 'active'
           AND TIMESTAMPDIFF(SECOND, s.last_heartbeat, NOW()) <= COALESCE(p.stale_timeout_seconds, %(timeout)s)
         """,
         {"timeout": timeout},
@@ -249,7 +249,7 @@ def monitor_sessions(admin: UserInfo = Depends(require_admin)):
         JOIN portal_user u ON s.user_id = u.id
         JOIN remote_app a ON s.app_id = a.id
         LEFT JOIN resource_pool p ON p.id = s.pool_id
-        WHERE s.status IN ('active', 'reclaim_pending')
+        WHERE s.status = 'active'
           AND TIMESTAMPDIFF(SECOND, s.last_heartbeat, NOW()) <= COALESCE(p.stale_timeout_seconds, %(timeout)s)
         ORDER BY s.started_at DESC
         """,

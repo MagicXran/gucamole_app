@@ -1,243 +1,447 @@
-# Guacamole RemoteApp Portal — Docker 部署指南
+# Guacamole RemoteApp Portal — 生产部署指南
 
-## 包内容
+> 更新日期：2026-04-10  
+> 推荐场景：**Linux 生产服务器**  
+> 详细手册：`docs/2026-04-10-production-server-deployment-manual.md`
 
+## 1. 先说最重要的
+
+- **生产 Linux 服务器不需要 `host_port_bridge.py`。**
+- `deploy/host_port_bridge.py` 只是开发机上为 Windows + Docker Desktop + WSL2 端口暴露问题准备的临时补丁。
+- 真正生产部署应该直接使用 `deploy/docker-compose.yml` 暴露端口，或者让正式反向代理转发到它。
+- **不要用仓库根目录那个旧 `docker-compose.yml`。** 真正入口是 `deploy/docker-compose.yml`。
+
+## 2. 这个系统到底是什么
+
+这不是一个纯 Guacamole demo，而是一个 **RemoteApp 门户系统**。
+
+它负责两条主业务：
+
+1. **RemoteApp / GUI 应用访问**
+   - 用户登录门户
+   - 点击应用卡片
+   - 门户后端创建或复用 Guacamole token
+   - 浏览器跳转进入 Guacamole 会话
+2. **脚本任务派发（可选）**
+   - 用户提交脚本任务
+   - 门户生成输入快照
+   - Worker Windows 节点拉取并执行
+   - 执行结果回传门户并写入 `/drive`
+
+## 3. 架构总览
+
+```mermaid
+flowchart LR
+    A["Browser"] --> B["Nginx"]
+    B --> C["FastAPI Portal"]
+    B --> D["Guacamole Web"]
+    D --> E["guacd"]
+    E --> F["Windows RemoteApp / RDP Host"]
+    C --> G["MySQL 8"]
+    C --> H["/drive Volume"]
+    I["Worker Windows Node (optional)"] --> B
+    I --> H
 ```
+
+### 3.1 组件职责
+
+| 组件 | 作用 |
+|---|---|
+| `nginx` | 对外统一入口，转发 `/api`、`/guacamole/`、静态页 |
+| `portal-backend` | FastAPI 门户后端，负责认证、RemoteApp 启动、任务编排 |
+| `guac-web` | Guacamole Web 前端和 token 接收端 |
+| `guacd` | RDP 协议代理 |
+| `guac-sql` | MySQL，存 Guacamole 核心库和 Portal 业务库 |
+| `/drive` | 用户文件、任务快照、任务输出 |
+| Worker 节点 | 独立 Windows 主机，执行脚本任务 |
+
+## 4. 包内容
+
+```text
 deploy/
-├── .env                         # 密码/密钥/时区（按目标环境修改）
-├── docker-compose.yml           # 容器编排，一键启动
-├── guac-web.Dockerfile          # Guacamole Web 自定义镜像（含品牌扩展）
-├── branding/
-│   └── portal-branding.jar      # 品牌覆盖扩展（去除 Guacamole 标识）
-└── initdb/
-    └── 00-full-dump.sql         # 两个数据库完整快照（schema + 种子数据）
-                                 #   - guacamole_db:       Guacamole 核心库
-                                 #   - guacamole_portal_db: Portal 应用配置库
+├── .env.production.example      # 生产环境 .env 模板
+├── .env                         # 当前环境配置（不要直接照抄开发值上生产）
+├── docker-compose.yml           # 生产部署入口
+├── docker-compose.debug.yml     # 开发调试覆盖，不用于生产
+├── portal.Dockerfile            # FastAPI 镜像
+├── guac-web.Dockerfile          # Guacamole Web 镜像
+├── nginx/
+│   ├── nginx.conf
+│   └── conf.d/portal.conf       # 反向代理配置
+├── initdb/
+│   ├── 00-full-dump.sql         # 全量初始化快照
+│   └── 01-portal-init.sql       # Portal schema / 增量初始化
+├── backup.sh                    # 备份与恢复脚本
+└── host_port_bridge.py          # 仅开发机补丁，生产不用
 ```
 
-## 项目名与服务
+## 5. 部署前必须搞明白的三类地址
 
-Compose 项目名默认是 `nercar-portal`，但实际由 `.env` 里的 `PORTAL_INSTANCE_ID` 决定。
-同机并行跑多套实例时，先改这个值，再按需改 `MYSQL_HOST_PORT`，否则你自己会把自己端口撞死。
+最常见的低级错误就是把下面三种地址混为一谈：
 
-| Service 名 | 镜像 | 用途 | 端口 |
-|--------|------|------|------|
-| **guacd** | guacamole/guacd | RDP/VNC/SSH 协议代理（C 语言守护进程） | 4822（内部） |
-| **guac-sql** | mysql:8 | 数据库（Guacamole 核心 + Portal 应用配置） | 默认 `33060→3306`，可用 `MYSQL_HOST_PORT` 覆盖 |
-| **guac-web** | 自定义构建 | Guacamole Web 前端 + REST API（Tomcat） | 8080（容器内） |
-| **portal-backend** | 自定义构建 | FastAPI 门户后端 | 8000（容器内） |
-| **nginx** | nginx:alpine | 外部入口代理 | `${PORTAL_PORT:-80}→80` |
+1. **Portal 外部访问地址**
+   - 例如 `portal.example.com:8880`
+   - 这是用户浏览器访问的地址
+2. **容器内部服务地址**
+   - 例如 `http://guac-web:8080/guacamole`
+   - 这是容器之间互相访问的地址
+3. **Windows RemoteApp 主机地址**
+   - 存在数据库 `remote_app.hostname`
+   - 例如 `10.10.20.15`
+   - 这是 Guacamole 最终连的 Windows 主机
 
----
+一句话：
 
-## 部署步骤
+- `PORTAL_HOST` 不是 RDP 主机地址
+- `remote_app.hostname` 才是 RDP 主机地址
 
-### 前提条件
+## 6. 推荐的生产部署模式
 
-- Docker Engine 20.10+
-- Docker Compose v2（`docker compose` 命令可用）
-- 目标机器可访问互联网（首次需拉取镜像）
+### 模式 A：Portal 自己直接对外提供服务
 
-### 第一步：拷贝部署包
+适合：
 
-将整个 `deploy/` 目录拷贝到目标机器，进入目录：
+- 内网
+- VPN
+- 没有额外 HTTPS 网关
 
-```bash
-cd deploy/
-```
-
-### 第二步：修改配置
-
-编辑 `.env` 文件，按目标环境调整：
+推荐配置：
 
 ```ini
-# Compose 实例标识（同机多套实例时必须改）
-PORTAL_INSTANCE_ID=nercar-portal
+PORTAL_BIND_IP=0.0.0.0
+PORTAL_PORT=8880
+PORTAL_HOST=portal.example.com
+```
 
-# MySQL 密码（生产环境请改为强密码）
-MYSQL_ROOT_PASSWORD=xran
+### 模式 B：前面还有正式反向代理 / HTTPS 网关
+
+适合：
+
+- 公网
+- 需要 443 / TLS
+- 有统一 Nginx / Caddy / LB / WAF
+
+推荐配置：
+
+```ini
+PORTAL_BIND_IP=127.0.0.1
+PORTAL_PORT=18880
+PORTAL_HOST=portal.example.com
+```
+
+然后由外层正式代理反向转发到 `127.0.0.1:18880`。
+
+### 不推荐模式
+
+- Windows Server + Docker Desktop + bridge 硬上生产
+- 继续沿用开发机 `192.168.56.x` 这类 VMware 网卡地址
+
+## 7. 生产部署前准备
+
+### 7.1 服务器要求
+
+- Linux
+- Docker Engine
+- Docker Compose v2
+- 可以访问目标 Windows RemoteApp 主机 `3389`
+- 足够的磁盘给 MySQL 和 `/drive`
+
+### 7.2 数据目录准备
+
+```bash
+sudo mkdir -p /srv/nercar-portal/mysql
+sudo mkdir -p /srv/nercar-portal/drive
+```
+
+> MySQL 数据目录必须放在 Linux 本地文件系统上，别放到奇怪的共享盘。
+
+## 8. 生产 `.env` 配置
+
+最稳的做法：
+
+1. 复制模板
+2. 再改真实值
+
+```bash
+cd deploy
+cp .env.production.example .env
+```
+
+推荐直接从 `deploy/.env.production.example` 开始，而不是继续拿开发机 `.env` 改。
+
+### 8.1 最小可用生产示例
+
+```ini
+PORTAL_INSTANCE_ID=nercar-portal-prod
+
+MYSQL_ROOT_PASSWORD=REPLACE_WITH_STRONG_ROOT_PASSWORD
 MYSQL_USER=guacamole_user
-MYSQL_PASSWORD=xran
+MYSQL_PASSWORD=REPLACE_WITH_STRONG_GUAC_DB_PASSWORD
 MYSQL_DATABASE=guacamole_db
 
-# 开发态默认暴露到宿主机 33060；并行实例时显式改掉它
-# MYSQL_HOST_PORT=33060
+JSON_SECRET_KEY=REPLACE_WITH_32_HEX_CHARS
 
-# 生产环境如需直接挂宿主机目录，配置这两个
-# MYSQL_DATA_SOURCE=/srv/nercar-portal/mysql
-# GUAC_DRIVE_SOURCE=/srv/nercar-portal/drive
+PORTAL_HOST=portal.example.com
+PORTAL_BIND_IP=0.0.0.0
+PORTAL_PORT=8880
+PORTAL_JWT_SECRET=REPLACE_WITH_LONG_RANDOM_JWT_SECRET
 
-# Guacamole JSON Auth 密钥（128-bit hex）
-# ⚠ 必须与 FastAPI 后端 config/config.json 中的 json_secret_key 一致
-JSON_SECRET_KEY=4c0b569e4c96df157eee1b65dd0e4d41
+MYSQL_DATA_SOURCE=/srv/nercar-portal/mysql
+GUAC_DRIVE_SOURCE=/srv/nercar-portal/drive
 
-# 时区
 TZ=Asia/Shanghai
 ```
 
-历史环境如果还在用旧字段名 `GUAC_DB_ROOT_PASSWORD`、`GUAC_DB_PASSWORD`、`GUACAMOLE_JSON_SECRET_KEY`，当前 compose 仍兼容；但别再继续沿用，规范名才是正道。
+### 8.2 字段解释
 
-### 第三步：修改 RDP 连接信息（如目标服务器地址变了）
+| 变量 | 含义 | 生产建议 |
+|---|---|---|
+| `PORTAL_INSTANCE_ID` | compose 项目名 / volume 前缀 | 每套实例唯一 |
+| `MYSQL_ROOT_PASSWORD` | Portal 后端连 portal DB 的 root 密码 | 必改强密码 |
+| `MYSQL_PASSWORD` | Guacamole 自己连 `guacamole_db` 的业务用户密码 | 必改强密码 |
+| `JSON_SECRET_KEY` | Portal 和 Guacamole 共用的 JSON auth 密钥 | 必改 |
+| `PORTAL_HOST` | 用户访问门户的域名 / IP | 写真实域名或真实 IP |
+| `PORTAL_BIND_IP` | 宿主机绑定地址 | 直接对外时用 `0.0.0.0` |
+| `PORTAL_PORT` | 宿主机发布端口 | 常见 `8880` / `80` / `18880` |
+| `PORTAL_JWT_SECRET` | JWT 签名密钥 | 必改 |
+| `MYSQL_DATA_SOURCE` | MySQL 数据目录 | 强烈建议显式设置 |
+| `GUAC_DRIVE_SOURCE` | `/drive` 数据目录 | 强烈建议显式设置 |
 
-dump 文件中包含了 RDP 连接的凭据。如果目标 Windows 服务器的 IP/账号/密码变了，
-编辑 `initdb/00-full-dump.sql`，找到 `INSERT INTO remote_app` 这一行，
-修改其中的 hostname、rdp_username、rdp_password：
+## 9. 哪些配置会被环境变量覆盖
 
-```sql
--- 找到类似这样的行（约第 736 行）：
-INSERT INTO `remote_app` VALUES
-  (1,'记事本','edit','rdp','192.168.1.8',3389,'xran','Nercar501', ...),
-                              ^^^^^^^^^^^^      ^^^^   ^^^^^^^^
-                              目标IP            用户名  密码
-```
+`config/config.json` 里的数据库和 Guacamole 地址在 Docker 里会被环境变量覆盖。
 
-也可以先部署，后面通过 FastAPI 后端 API 修改。
+也就是说，生产部署优先改：
 
-### 第四步：启动容器
+- `.env`
+- `deploy/docker-compose.yml`
+
+而不是优先乱改：
+
+- `config/config.json`
+
+`config/config.json` 主要保留这些角色：
+
+1. 默认值仓库
+2. 脚本 profile 配置
+3. drive / monitor / quota 等静态配置
+
+## 10. 业务数据也必须改
+
+这项目最阴的坑不是 `.env`，而是数据库业务数据没改。
+
+### 10.1 `remote_app` 表必须核对
+
+你必须确认：
+
+- `hostname`
+- `port`
+- `remote_app`
+- `remote_app_dir`
+- `remote_app_args`
+
+尤其是 `hostname`。
+
+如果生产上的 Windows 主机不是开发环境那台，Portal 能启动也没用，点应用照样死。
+
+### 10.2 ACL 和资源池也要核对
+
+这些表也别装看不见：
+
+- `remote_app_acl`
+- `resource_pool`
+- `resource_pool_member`
+
+否则会出现：
+
+- 门户能登录但看不到应用
+- 看得到应用但排队异常
+
+### 10.3 如果启用脚本任务，还要核对 Worker 相关表
+
+- `app_binding`
+- `worker_group`
+- `worker_node`
+- `worker_enrollment`
+- `worker_auth_token`
+
+## 11. 启动步骤
+
+### 11.1 进入部署目录
 
 ```bash
-docker compose up -d
+cd deploy
 ```
 
-首次启动时：
-0. 如目标机器上已存在同项目名 volume：先确认 `PORTAL_INSTANCE_ID`，再按实际 volume 名删除，例如 `docker volume rm nercar-portal_mysql_data`
-1. Docker 拉取 `guacamole/guacd:latest` 和 `mysql:8` 基础镜像
-2. 构建 `guac-web` 与 `portal-backend` 自定义镜像
-3. MySQL 容器初始化时自动执行 `initdb/00-full-dump.sql`，创建两个数据库
-4. `guac-web` 和 `portal-backend` 等待 MySQL 健康检查通过后启动
-
-### 第五步：验证部署
+### 11.2 复制并编辑生产 `.env`
 
 ```bash
-# 1. 查看容器状态（guac-sql 应为 healthy）
+cp .env.production.example .env
+vi .env
+```
+
+### 11.3 启动整套服务
+
+```bash
+docker compose up -d --build
+```
+
+### 11.4 查看状态
+
+```bash
 docker compose ps
-
-# 2. 测试入口是否响应
-curl -s http://localhost:${PORTAL_PORT:-80}/health
-# 应返回 {"status":"ok"}
-
-# 3. 检查数据库是否正确初始化
-docker compose exec -T guac-sql mysql -uroot -p你的密码 --default-character-set=utf8mb4 \
-    -e "SHOW DATABASES"
-# 应看到 guacamole_db 和 guacamole_portal_db
-
-# 4. 检查 Portal 应用数据
-docker compose exec -T guac-sql mysql -uroot -p你的密码 --default-character-set=utf8mb4 \
-    guacamole_portal_db -e "SELECT id, name, hostname FROM remote_app"
-# 应看到记事本、计算器、远程桌面三条记录
 ```
 
----
+正常应该至少看到：
 
-## 后续维护操作
+- `guac-sql` healthy
+- `portal-backend` up
+- `nginx` up
 
-### 重置数据库（清空所有数据重新初始化）
+## 12. 启动后验收
+
+### 12.1 健康检查
 
 ```bash
-docker compose down -v     # -v 删除当前项目名下的 mysql_data / guacd_drive volume
-docker compose up -d       # 重新初始化
+curl -s http://127.0.0.1:${PORTAL_PORT}/health
 ```
 
-### 手动执行 SQL（带正确编码）
+预期：
 
-⚠ **关键**：在 Windows 或 WSL 环境中通过管道执行 SQL 文件时，
-**必须**加 `--default-character-set=utf8mb4`，否则中文字段（COMMENT 等）会乱码。
-
-```bash
-# ✅ 正确写法
-docker compose exec -T guac-sql mysql -uroot -p密码 --default-character-set=utf8mb4 < your-file.sql
-
-# ❌ 错误写法（中文会变成乱码）
-docker compose exec -T guac-sql mysql -uroot -p密码 < your-file.sql
+```json
+{"status":"ok"}
 ```
 
-`mysqldump` 导出时也一样：
+### 12.2 检查数据库
 
 ```bash
-# ✅ 正确写法
-docker compose exec -T guac-sql mysqldump -uroot -p密码 --default-character-set=utf8mb4 \
-    --databases guacamole_db guacamole_portal_db > backup.sql
-
-# ❌ 错误写法
-docker compose exec -T guac-sql mysqldump -uroot -p密码 --databases ... > backup.sql
+docker compose exec -T guac-sql mysql -uroot -p你的密码 --default-character-set=utf8mb4 -e "SHOW DATABASES"
 ```
 
-**乱码原因**：Windows/WSL 的 shell 管道默认使用 latin1/Windows-1252 编码，
-UTF-8 中文字节经过 latin1 解读后被双重编码存入数据库，形成不可逆的 mojibake。
-`--default-character-set=utf8mb4` 强制 MySQL 客户端以 UTF-8 解释输入字节。
+至少应该有：
 
-### 查看容器日志
+- `guacamole_db`
+- `guacamole_portal_db`
+
+### 12.3 检查应用数据
 
 ```bash
-docker compose logs -f guac-web    # Guacamole/Tomcat 日志（service name）
-docker compose logs -f guacd       # 协议代理日志（RDP 连接调试）
-docker compose logs -f guac-sql    # MySQL 日志
-docker compose logs -f portal-backend  # FastAPI 门户日志
-docker compose logs -f nginx       # 反向代理日志
+docker compose exec -T guac-sql mysql -uroot -p你的密码 --default-character-set=utf8mb4 guacamole_portal_db -e "SELECT id, name, hostname, port FROM remote_app"
 ```
 
-### 重建 guac-web / portal-backend 镜像
+重点看：
+
+- `hostname` 是否已经换成真实 Windows 主机
+- 不是开发机 IP
+
+### 12.4 浏览器验收
+
+1. 登录页能打开
+2. 管理员能登录
+3. 用户能看到应用卡片
+4. 点击 RemoteApp 能进入 Guacamole
+
+## 13. Worker 部署（仅脚本任务需要）
+
+Worker 不是容器的一部分，而是独立 Windows 主机。
+
+Portal 只负责：
+
+1. 保存 Worker 节点元数据
+2. 发 enrollment token
+3. 接收心跳和任务回传
+
+如果你启用脚本任务，至少要做这些事：
+
+1. 创建 `Worker Group`
+2. 创建 `Worker Node`
+3. 保证 `expected_hostname` 与实际主机名完全一致
+4. 确认 `scratch_root`、`workspace_share` 正确
+5. 发 enrollment token
+6. 在 Worker 主机上注册
+7. 保证 Worker 进程常驻
+
+## 14. 日常运维
+
+### 14.1 看日志
 
 ```bash
-docker compose build guac-web portal-backend
-docker compose up -d guac-web portal-backend
+docker compose logs -f nginx
+docker compose logs -f portal-backend
+docker compose logs -f guac-web
+docker compose logs -f guacd
+docker compose logs -f guac-sql
 ```
 
-### 备份与恢复
+### 14.2 重启
 
 ```bash
-# 查看当前项目实例的 MySQL / drive 挂载状态
+docker compose restart nginx portal-backend
+docker compose restart guac-web
+```
+
+### 14.3 全量重建
+
+```bash
+docker compose up -d --build
+```
+
+### 14.4 备份
+
+```bash
 ./backup.sh status
-
-# 导出数据库 + drive
 ./backup.sh export
-
-# 从备份目录恢复
-./backup.sh import ./backups/20260321_215500
 ```
 
----
+> 导入导出 MySQL 时一定带 `--default-character-set=utf8mb4`，不然中文迟早乱码。
 
-## 配合 FastAPI 后端
+## 15. 常见坑
 
-完整 compose 现在已经包含 `portal-backend` + `nginx`，默认推荐直接用整套容器跑。
+### 15.1 不要继续用 bridge
 
-如果你坚持在宿主机单独跑 FastAPI 后端（`backend/app.py`），也可以，但要保证下面几项和 compose 对齐：
+生产 Linux 不需要它。  
+如果你发现自己又想把 `host_port_bridge.py` 搬上服务器，说明你的入口设计已经歪了。
 
-```bash
-cd /path/to/gucamole_app
-python backend/app.py
-```
+### 15.2 不要把 `PORTAL_HOST` 留成开发 IP
 
-后端的 `config/config.json` 中以下字段需要与 Docker 配置对应：
+`192.168.56.x` 这种值一看就是开发机残留。
 
-| config.json 字段 | 对应 .env / compose 配置 |
-|------------------|--------------------------|
-| `database.host` | `127.0.0.1`（宿主机访问容器端口） |
-| `database.port` | compose 中 guac-sql 的映射端口（默认 `33060`，或你设置的 `MYSQL_HOST_PORT`） |
-| `database.user` | `root`（后端用 root 连接 portal_db） |
-| `database.password` | `.env` 中的 `MYSQL_ROOT_PASSWORD` |
-| `guacamole.json_secret_key` | `.env` 中的 `JSON_SECRET_KEY`（必须一致） |
-| `guacamole.internal_url` | `http://localhost:8080/guacamole` |
-| `guacamole.external_url` | `http://localhost:${PORTAL_PORT}/guacamole` |
+### 15.3 不要把 MySQL 暴露到公网
 
-如果你改了 `MYSQL_HOST_PORT`，宿主机后端也得同步改 `config/config.json` 或设置 `PORTAL_DB_PORT`，别自己把端口配散了。
+当前 compose 只绑定本机，这是对的。
 
----
+### 15.4 不要忘记改 `remote_app.hostname`
 
-## 常见问题
+这比没改密码还常见，而且更阴险。
 
-**Q: guac-web 启动报数据库连接错误？**
-A: guac-web 依赖 guac-sql 的 healthcheck。如果 MySQL 初始化较慢（首次导入大量数据），
-等待 30-60 秒后 guac-web 会自动重连。用 `docker compose ps` 确认 guac-sql 状态为 healthy。
+### 15.5 不要误用旧 compose
 
-**Q: 浏览器访问 8080 跳转到 Guacamole 登录页？**
-A: 正常。用户应访问 `nginx` 暴露的门户入口（默认 80 端口），不是直接怼 8080。
-后端通过 JSON Auth 加密机制获取 token，自动跳转到 Guacamole 连接页面。
+真正入口只有：
 
-**Q: 同机起第二套实例为什么还冲突？**
-A: 你大概率只改了 `PORTAL_INSTANCE_ID`，没改 `MYSQL_HOST_PORT`。项目名隔离了容器/volume，不会帮你自动避开宿主机端口。
+- `deploy/docker-compose.yml`
 
-**Q: 迁移后 RDP 连不上？**
-A: 检查 `initdb/00-full-dump.sql` 中 `remote_app` 表的 hostname 是否改为新环境的 Windows 服务器 IP，
-以及目标服务器的 RDP 服务和 RemoteApp 是否已配置。
+## 16. 推荐上线顺序
+
+1. 准备 Linux 服务器
+2. 创建数据目录
+3. 复制 `deploy/.env.production.example` 为 `deploy/.env`
+4. 填真实配置
+5. 启动 `docker compose up -d --build`
+6. 验证 `/health`
+7. 校验数据库和 `remote_app` 业务数据
+8. 登录门户测试 RemoteApp
+9. 如果启用脚本任务，再单独上线 Worker
+
+## 17. 结论
+
+这项目的生产部署主线其实不复杂：
+
+- **Portal 容器栈** 负责入口、认证、RemoteApp 启动、任务编排
+- **Windows 主机** 负责真正运行 RemoteApp
+- **Worker 节点** 负责可选的脚本任务执行
+
+记住三句话就够了：
+
+1. **生产服务器不需要 bridge。**
+2. **生产部署优先改 `deploy/.env`，推荐从 `deploy/.env.production.example` 开始。**
+3. **别忘了改数据库里的 `remote_app.hostname` 和 Worker 元数据。**

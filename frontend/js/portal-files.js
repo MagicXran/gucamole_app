@@ -5,10 +5,23 @@ var _filesState = {
     sortKey: 'name',
     groupByExt: false,
 };
+var _filesRefreshTimer = 0;
+var _spaceRefreshTimer = 0;
+var _filesAutoRefreshRunning = false;
+var _filesRefreshBurstUntil = 0;
+var FILES_REFRESH_FAST_MS = 2000;
+var FILES_REFRESH_STABLE_MS = 10000;
+var FILES_REFRESH_BURST_WINDOW_MS = 12000;
+var SPACE_REFRESH_INTERVAL_MS = 60000;
 
-async function loadSpaceInfo() {
+async function loadSpaceInfo(forceRefresh) {
     try {
-        var resp = await fetch('/api/files/space', { headers: authHeaders() });
+        var url = '/api/files/space';
+        if (forceRefresh) url += '?refresh=1';
+        var resp = await fetch(url, {
+            headers: authHeaders(),
+            cache: 'no-store',
+        });
         if (resp.status === 401) { logout(); return; }
         if (!resp.ok) return;
         var data = await resp.json();
@@ -24,12 +37,62 @@ async function loadSpaceInfo() {
     } catch (e) {}
 }
 
-async function loadFiles(path) {
+function hasPendingTransferItems(items) {
+    return (items || []).some(function(item) {
+        return !item.is_dir && !!item.is_pending;
+    });
+}
+
+function resolveFilesRefreshDelay(hasPendingItems) {
+    var browser = window.PortalFileBrowser;
+    if (browser && typeof browser.resolveRefreshDelay === 'function') {
+        return browser.resolveRefreshDelay({
+            hasPendingItems: !!hasPendingItems,
+            nowMs: Date.now(),
+            burstUntilMs: _filesRefreshBurstUntil,
+        });
+    }
+    if (hasPendingItems || _filesRefreshBurstUntil > Date.now()) {
+        return FILES_REFRESH_FAST_MS;
+    }
+    return FILES_REFRESH_STABLE_MS;
+}
+
+function scheduleNextFilesRefresh(delayMs) {
+    if (!_filesAutoRefreshRunning) return;
+    if (_currentPortalTab !== 'files' || document.hidden) return;
+    if (_filesRefreshTimer) {
+        clearTimeout(_filesRefreshTimer);
+        _filesRefreshTimer = 0;
+    }
+    var delay = typeof delayMs === 'number'
+        ? delayMs
+        : resolveFilesRefreshDelay(hasPendingTransferItems(_filesState.items));
+    _filesRefreshTimer = setTimeout(function() {
+        _filesRefreshTimer = 0;
+        if (!_filesAutoRefreshRunning) return;
+        if (_currentPortalTab !== 'files' || document.hidden) return;
+        loadFiles(_currentPath || '', { skipSpaceRefresh: false });
+    }, Math.max(0, Number(delay) || 0));
+}
+
+function markFilesRefreshBurst() {
+    _filesRefreshBurstUntil = Date.now() + FILES_REFRESH_BURST_WINDOW_MS;
+    if (_filesAutoRefreshRunning && _currentPortalTab === 'files' && !document.hidden) {
+        scheduleNextFilesRefresh(FILES_REFRESH_FAST_MS);
+    }
+}
+
+async function loadFiles(path, options) {
+    options = options || {};
     _currentPath = path;
     renderBreadcrumb(path);
 
     try {
-        var resp = await fetch('/api/files/list?path=' + encodeURIComponent(path), { headers: authHeaders() });
+        var resp = await fetch('/api/files/list?path=' + encodeURIComponent(path), {
+            headers: authHeaders(),
+            cache: 'no-store',
+        });
         if (resp.status === 401) { logout(); return; }
         if (!resp.ok) {
             var err = await resp.json().catch(function() { return {}; });
@@ -37,10 +100,39 @@ async function loadFiles(path) {
             return;
         }
         var data = await resp.json();
-        _filesState.items = data.items || [];
+        var nextItems = data.items || [];
+        var browser = window.PortalFileBrowser;
+        if (browser && typeof browser.annotatePendingTransfers === 'function') {
+            nextItems = browser.annotatePendingTransfers(nextItems, _filesState.items, {
+                nowSeconds: Math.floor(Date.now() / 1000),
+                recentWindowSeconds: 15,
+            });
+        }
+        var nextSignature = JSON.stringify(nextItems.map(function(item) {
+            return [item.name, !!item.is_dir, Number(item.size || 0), Number(item.mtime || 0)];
+        }));
+        var prevSignature = JSON.stringify((_filesState.items || []).map(function(item) {
+            return [item.name, !!item.is_dir, Number(item.size || 0), Number(item.mtime || 0)];
+        }));
+        var signatureChanged = nextSignature !== prevSignature;
+        var hasPendingItems = hasPendingTransferItems(nextItems);
+        _filesState.items = nextItems;
         renderFileTable();
+        if (signatureChanged) {
+            markFilesRefreshBurst();
+        }
+        if (hasPendingItems) {
+            markFilesRefreshBurst();
+        }
+        if (!options.skipSpaceRefresh && signatureChanged) {
+            loadSpaceInfo(true);
+        }
     } catch (e) {
         showError('加载文件列表失败: ' + (e.message || ''));
+    } finally {
+        if (_filesAutoRefreshRunning && _currentPortalTab === 'files' && !document.hidden) {
+            scheduleNextFilesRefresh();
+        }
     }
 }
 
@@ -126,6 +218,17 @@ function renderFileTable() {
             var fname = document.createElement('span');
             fname.textContent = item.name;
             nameTd.appendChild(fname);
+            if (item.is_pending) {
+                var pendingBadge = document.createElement('span');
+                pendingBadge.textContent = '写入中';
+                pendingBadge.style.marginLeft = '0.45rem';
+                pendingBadge.style.padding = '0.1rem 0.35rem';
+                pendingBadge.style.borderRadius = '999px';
+                pendingBadge.style.fontSize = '0.72rem';
+                pendingBadge.style.color = '#8a5a00';
+                pendingBadge.style.background = '#fff3cd';
+                nameTd.appendChild(pendingBadge);
+            }
         }
         tr.appendChild(nameTd);
 
@@ -144,7 +247,7 @@ function renderFileTable() {
         var actionTd = document.createElement('td');
         var filePath = (_currentPath ? _currentPath + '/' : '') + item.name;
 
-        if (!item.is_dir) {
+        if (!item.is_dir && !item.is_pending) {
             if (browser ? browser.isViewerResultFile(filePath) : isViewerResultFile(filePath)) {
                 var viewBtn = document.createElement('button');
                 viewBtn.className = 'btn btn--outline';
@@ -177,6 +280,12 @@ function renderFileTable() {
                 dlBtn.style.marginLeft = '0.3rem';
             }
             actionTd.appendChild(dlBtn);
+        } else if (item.is_pending) {
+            var pendingText = document.createElement('span');
+            pendingText.textContent = '等待稳定后可下载';
+            pendingText.style.fontSize = '0.78rem';
+            pendingText.style.color = '#8a6d3b';
+            actionTd.appendChild(pendingText);
         }
 
         var delBtn = document.createElement('button');
@@ -241,6 +350,7 @@ async function deleteItem(path, name) {
             showError(err.detail || '删除失败');
             return;
         }
+        markFilesRefreshBurst();
         loadFiles(_currentPath);
         loadSpaceInfo();
     } catch (e) {
@@ -266,8 +376,36 @@ async function createFolder() {
             showError(err.detail || '创建失败');
             return;
         }
+        markFilesRefreshBurst();
         loadFiles(_currentPath);
     } catch (e) {
         showError('创建失败: ' + (e.message || ''));
+    }
+}
+
+function refreshCurrentFiles() {
+    loadFiles(_currentPath || '', { skipSpaceRefresh: false });
+}
+
+function startFilesAutoRefresh() {
+    if (_filesAutoRefreshRunning) return;
+    _filesAutoRefreshRunning = true;
+    scheduleNextFilesRefresh(FILES_REFRESH_FAST_MS);
+    if (_spaceRefreshTimer) return;
+    _spaceRefreshTimer = setInterval(function() {
+        if (_currentPortalTab !== 'files' || document.hidden) return;
+        loadSpaceInfo(true);
+    }, SPACE_REFRESH_INTERVAL_MS);
+}
+
+function stopFilesAutoRefresh() {
+    _filesAutoRefreshRunning = false;
+    if (_filesRefreshTimer) {
+        clearTimeout(_filesRefreshTimer);
+        _filesRefreshTimer = 0;
+    }
+    if (_spaceRefreshTimer) {
+        clearInterval(_spaceRefreshTimer);
+        _spaceRefreshTimer = 0;
     }
 }

@@ -3,8 +3,11 @@ from pathlib import Path
 import io
 import zipfile
 
+import pytest
+from pydantic import ValidationError
+
 from backend.worker_agent import WorkerAgent
-from backend.worker_service import WorkerService
+from backend.worker_service import WorkerService, WorkerTaskStatusRequest
 
 
 class _FakeCredentialStore:
@@ -84,6 +87,11 @@ class _SnapshotFailingPortalClient(_FakePortalClient):
         raise FileNotFoundError("snapshot missing on portal")
 
 
+def test_worker_task_status_request_rejects_invalid_status():
+    with pytest.raises(ValidationError):
+        WorkerTaskStatusRequest(status="potato")
+
+
 def test_worker_agent_reports_stage_failure_with_log_items_list():
     portal = _SnapshotFailingPortalClient()
     agent = WorkerAgent(
@@ -131,6 +139,28 @@ class _RunnerThatWritesResult:
                         "artifact_kind": "workspace_output",
                         "display_name": "result.txt",
                         "relative_path": "result.txt",
+                        "size_bytes": 5,
+                    }
+                ],
+            },
+        )
+
+
+class _RunnerThatWritesNestedResultWithBackslashArtifact:
+    def run(self, task, portal_client):
+        scratch_dir = Path(task["scratch_path"])
+        output_path = scratch_dir / "nested" / "result.txt"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("done\n", encoding="utf-8")
+        portal_client.complete_task(
+            task["task_id"],
+            {
+                "result_summary": {"returncode": 0},
+                "artifacts": [
+                    {
+                        "artifact_kind": "workspace_output",
+                        "display_name": "nested\\result.txt",
+                        "relative_path": "nested\\result.txt",
                         "size_bytes": 5,
                     }
                 ],
@@ -267,3 +297,167 @@ def test_worker_service_builds_snapshot_archive_and_stores_output_archive(tmp_pa
 
     assert result == {"output_root": "Output/task_demo", "file_count": 1}
     assert (tmp_path / "portal_u3" / "Output" / "task_demo" / "nested" / "result.txt").read_text(encoding="utf-8") == "done\n"
+
+
+def test_worker_service_respects_custom_results_root(tmp_path, monkeypatch):
+    task = {
+        "id": 9,
+        "task_id": "task_demo",
+        "user_id": 3,
+        "worker_node_id": 12,
+        "status": "assigned",
+        "input_snapshot_path": "system/tasks/task_demo/input",
+    }
+    source_root = tmp_path / "portal_u3" / "system" / "tasks" / "task_demo" / "input"
+    source_root.mkdir(parents=True)
+    (source_root / "main.py").write_text("print('ok')\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "backend.worker_service.load_config",
+        lambda: {"guacamole": {"drive": {"results_root": "Results"}}},
+    )
+
+    service = WorkerService(
+        repo=_TransferRepo(task),
+        now_provider=lambda: datetime(2026, 4, 9, 0, 0, 0),
+        drive_root=tmp_path,
+    )
+
+    output_buffer = io.BytesIO()
+    with zipfile.ZipFile(output_buffer, "w") as zf:
+        zf.writestr("nested/result.txt", "done\n")
+
+    result = service.store_task_output_archive("token", "task_demo", output_buffer.getvalue())
+
+    assert result == {"output_root": "Results/task_demo", "file_count": 1}
+    assert (tmp_path / "portal_u3" / "Results" / "task_demo" / "nested" / "result.txt").read_text(encoding="utf-8") == "done\n"
+
+
+def test_worker_agent_respects_custom_results_root(tmp_path, monkeypatch):
+    portal = _FakePortalClient()
+    scratch_root = tmp_path / "scratch"
+    monkeypatch.setattr(
+        "backend.worker_agent.load_config",
+        lambda: {"guacamole": {"drive": {"results_root": "Results"}}},
+    )
+    agent = WorkerAgent(
+        portal_client=portal,
+        credential_store=_FakeCredentialStore(),
+        registration_payload={
+            "hostname": "worker-host",
+            "machine_fingerprint": "fp-worker-host",
+            "agent_version": "1.0.0",
+            "os_type": "windows",
+            "os_version": "Windows",
+            "ip_addresses": ["127.0.0.1"],
+            "scratch_root": str(scratch_root),
+            "workspace_share": str(tmp_path / "startup"),
+            "max_concurrent_tasks": 1,
+            "supported_executor_keys": ["python_api"],
+            "capabilities": {},
+        },
+        runner=_RunnerThatWritesResult(),
+    )
+
+    agent.run_once()
+
+    payload = portal.complete_calls[0][2]
+    assert payload["artifacts"][0]["relative_path"] == "Results/task_demo/result.txt"
+
+
+def test_worker_agent_normalizes_backslash_artifact_paths(tmp_path, monkeypatch):
+    portal = _FakePortalClient()
+    scratch_root = tmp_path / "scratch"
+    monkeypatch.setattr(
+        "backend.worker_agent.load_config",
+        lambda: {"guacamole": {"drive": {"results_root": "Results"}}},
+    )
+    agent = WorkerAgent(
+        portal_client=portal,
+        credential_store=_FakeCredentialStore(),
+        registration_payload={
+            "hostname": "worker-host",
+            "machine_fingerprint": "fp-worker-host",
+            "agent_version": "1.0.0",
+            "os_type": "windows",
+            "os_version": "Windows",
+            "ip_addresses": ["127.0.0.1"],
+            "scratch_root": str(scratch_root),
+            "workspace_share": str(tmp_path / "startup"),
+            "max_concurrent_tasks": 1,
+            "supported_executor_keys": ["python_api"],
+            "capabilities": {},
+        },
+        runner=_RunnerThatWritesNestedResultWithBackslashArtifact(),
+    )
+
+    agent.run_once()
+
+    payload = portal.complete_calls[0][2]
+    assert payload["artifacts"][0]["relative_path"] == "Results/task_demo/nested/result.txt"
+
+
+def test_worker_agent_falls_back_to_output_for_invalid_results_root(tmp_path, monkeypatch):
+    portal = _FakePortalClient()
+    scratch_root = tmp_path / "scratch"
+    monkeypatch.setattr(
+        "backend.worker_agent.load_config",
+        lambda: {"guacamole": {"drive": {"results_root": "../escape"}}},
+    )
+    agent = WorkerAgent(
+        portal_client=portal,
+        credential_store=_FakeCredentialStore(),
+        registration_payload={
+            "hostname": "worker-host",
+            "machine_fingerprint": "fp-worker-host",
+            "agent_version": "1.0.0",
+            "os_type": "windows",
+            "os_version": "Windows",
+            "ip_addresses": ["127.0.0.1"],
+            "scratch_root": str(scratch_root),
+            "workspace_share": str(tmp_path / "startup"),
+            "max_concurrent_tasks": 1,
+            "supported_executor_keys": ["python_api"],
+            "capabilities": {},
+        },
+        runner=_RunnerThatWritesResult(),
+    )
+
+    agent.run_once()
+
+    payload = portal.complete_calls[0][2]
+    assert payload["artifacts"][0]["relative_path"] == "Output/task_demo/result.txt"
+
+
+def test_worker_agent_falls_back_to_output_when_load_config_fails(tmp_path, monkeypatch):
+    portal = _FakePortalClient()
+    scratch_root = tmp_path / "scratch"
+
+    def _raise_missing_config():
+        raise FileNotFoundError("config/config.json is missing")
+
+    monkeypatch.setattr("backend.worker_agent.load_config", _raise_missing_config)
+
+    agent = WorkerAgent(
+        portal_client=portal,
+        credential_store=_FakeCredentialStore(),
+        registration_payload={
+            "hostname": "worker-host",
+            "machine_fingerprint": "fp-worker-host",
+            "agent_version": "1.0.0",
+            "os_type": "windows",
+            "os_version": "Windows",
+            "ip_addresses": ["127.0.0.1"],
+            "scratch_root": str(scratch_root),
+            "workspace_share": str(tmp_path / "startup"),
+            "max_concurrent_tasks": 1,
+            "supported_executor_keys": ["python_api"],
+            "capabilities": {},
+        },
+        runner=_RunnerThatWritesResult(),
+    )
+
+    agent.run_once()
+
+    payload = portal.complete_calls[0][2]
+    assert payload["artifacts"][0]["relative_path"] == "Output/task_demo/result.txt"

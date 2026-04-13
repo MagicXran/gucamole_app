@@ -1,4 +1,4 @@
-﻿"""
+"""
 个人空间文件管理 API — 上传/下载/删除/配额
 """
 
@@ -23,7 +23,15 @@ from fastapi import (
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from backend.database import db, CONFIG
+from backend.config_loader import load_config
+from backend.drive_quota import (
+    DRIVE_BASE,
+    _format_bytes,
+    _get_quota,
+    _get_usage_sync,
+    _invalidate_usage_cache,
+    _user_dir,
+)
 from backend.auth import get_current_user, JWT_SECRET, JWT_ALGORITHM
 from backend.models import UserInfo
 from backend.audit import log_action
@@ -33,13 +41,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/files", tags=["files"])
 
 # ---- 配置 ----
-_ft_cfg = CONFIG.get("file_transfer", {})
-_drive_cfg = CONFIG.get("guacamole", {}).get("drive", {})
-DRIVE_BASE = Path(CONFIG["guacamole"]["drive"]["base_path"])  # /drive
-DEFAULT_QUOTA_BYTES = int(_ft_cfg.get("default_quota_gb", 10)) * 1073741824
+_CONFIG = load_config()
+_ft_cfg = _CONFIG.get("file_transfer", {})
+_drive_cfg = _CONFIG.get("guacamole", {}).get("drive", {})
 MAX_FILE_SIZE = int(_ft_cfg.get("max_file_size_gb", 50)) * 1073741824
 CHUNK_SIZE_MB = _ft_cfg.get("chunk_size_mb", 10)
-USAGE_CACHE_SECONDS = _ft_cfg.get("usage_cache_seconds", 60)
 CLEANUP_STALE_HOURS = _ft_cfg.get("cleanup_stale_uploads_hours", 24)
 UPLOAD_TEMP_DIR = ".uploads"
 HIDDEN_ROOT_DIR_NAMES = frozenset(
@@ -49,7 +55,6 @@ HIDDEN_ROOT_DIR_NAMES = frozenset(
 )
 
 _executor = ThreadPoolExecutor(max_workers=4)
-_usage_cache: dict[int, tuple[int, float]] = {}  # user_id -> (bytes, ts)
 
 
 # ---- 请求模型 ----
@@ -65,10 +70,6 @@ class MkdirRequest(BaseModel):
 # ============================================
 # 工具函数
 # ============================================
-
-def _user_dir(user_id: int) -> Path:
-    return DRIVE_BASE / f"portal_u{user_id}"
-
 
 def _safe_resolve(user_id: int, relative_path: str) -> Path:
     """路径防穿越: resolve() + 前缀校验"""
@@ -111,54 +112,6 @@ def _validate_filename(name: str):
     if len(name.encode("utf-8")) > 255:
         raise HTTPException(400, "文件名过长")
 
-
-def _calc_dir_size(path: Path) -> int:
-    total = 0
-    try:
-        for entry in path.rglob("*"):
-            if entry.is_file():
-                try:
-                    total += entry.stat().st_size
-                except OSError:
-                    pass
-    except OSError:
-        pass
-    return total
-
-
-def _get_usage_sync(user_id: int, force_refresh: bool = False) -> int:
-    now = time.time()
-    cached = _usage_cache.get(user_id)
-    if not force_refresh and cached and now - cached[1] < USAGE_CACHE_SECONDS:
-        return cached[0]
-    udir = _user_dir(user_id)
-    size = _calc_dir_size(udir) if udir.exists() else 0
-    _usage_cache[user_id] = (size, now)
-    return size
-
-
-def _invalidate_usage_cache(user_id: int):
-    _usage_cache.pop(user_id, None)
-
-
-def _get_quota(user_id: int) -> int:
-    row = db.execute_query(
-        "SELECT quota_bytes FROM portal_user WHERE id = %(uid)s",
-        {"uid": user_id}, fetch_one=True,
-    )
-    if row and row.get("quota_bytes") is not None:
-        return int(row["quota_bytes"])
-    return DEFAULT_QUOTA_BYTES
-
-
-def _format_bytes(size: int) -> str:
-    if size < 1024:
-        return f"{size} B"
-    if size < 1048576:
-        return f"{size / 1024:.1f} KB"
-    if size < 1073741824:
-        return f"{size / 1048576:.1f} MB"
-    return f"{size / 1073741824:.2f} GB"
 
 
 def _create_download_token(user_id: int, path: str, username: str = "") -> str:

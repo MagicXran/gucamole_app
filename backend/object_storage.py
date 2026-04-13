@@ -49,20 +49,25 @@ class MinioArchiveService:
 
         with tempfile.NamedTemporaryFile(prefix=f"{task_id}-", suffix=".zip", delete=False) as tmp_file:
             archive_path = Path(tmp_file.name)
-        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for file_path in sorted(source_dir.rglob("*")):
-                if not file_path.is_file():
-                    continue
-                archive.write(file_path, file_path.relative_to(source_dir).as_posix())
+        try:
+            with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for file_path in sorted(source_dir.rglob("*")):
+                    if not file_path.is_file():
+                        continue
+                    archive.write(file_path, file_path.relative_to(source_dir).as_posix())
 
-        object_key = f"tasks/{task_id}/{archive_path.name}"
-        client.fput_object(self.bucket, object_key, str(archive_path))
-        return [
-            {
-                "artifact_kind": "minio_archive",
-                "display_name": archive_path.name,
-                "minio_bucket": self.bucket,
-                "minio_object_key": object_key,
-                "size_bytes": archive_path.stat().st_size,
-            }
-        ]
+            object_key = f"tasks/{task_id}/{archive_path.name}"
+            archive_size = archive_path.stat().st_size
+            client.fput_object(self.bucket, object_key, str(archive_path))
+            return [
+                {
+                    "artifact_kind": "minio_archive",
+                    "display_name": archive_path.name,
+                    "minio_bucket": self.bucket,
+                    "minio_object_key": object_key,
+                    "size_bytes": archive_size,
+                }
+            ]
+        finally:
+            if archive_path.exists():
+                archive_path.unlink()

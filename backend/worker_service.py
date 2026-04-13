@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from hashlib import sha256
 from pathlib import Path, PurePosixPath
 from secrets import token_urlsafe
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, Field
 
@@ -55,7 +55,7 @@ class WorkerHeartbeatRequest(BaseModel):
 
 
 class WorkerTaskStatusRequest(BaseModel):
-    status: str = Field(..., min_length=1, max_length=30)
+    status: Literal["preparing", "running", "uploading"]
     scratch_path: str | None = Field(default=None, max_length=1000)
     external_task_id: str | None = Field(default=None, max_length=200)
 
@@ -100,8 +100,15 @@ class WorkerService:
         self._now_provider = self.now_provider or datetime.now
         self._token_factory = self.token_factory or (lambda: token_urlsafe(32))
         config = load_config()
-        default_drive_root = config.get("guacamole", {}).get("drive", {}).get("base_path", "/drive")
+        drive_config = config.get("guacamole", {}).get("drive", {})
+        default_drive_root = drive_config.get("base_path", "/drive")
+        configured_results_root = str(drive_config.get("results_root", "Output") or "Output").strip()
+        normalized_results_root = PurePosixPath(configured_results_root.replace("\\", "/"))
+        if not normalized_results_root.parts or normalized_results_root.is_absolute() or ".." in normalized_results_root.parts:
+            normalized_results_root = PurePosixPath("Output")
         self._drive_root = Path(self.drive_root or default_drive_root)
+        self._results_root = Path(*normalized_results_root.parts)
+        self._results_root_str = normalized_results_root.as_posix()
 
     def _now(self) -> datetime:
         return self._now_provider()
@@ -148,7 +155,7 @@ class WorkerService:
 
     def _resolve_task_output_dir(self, task: Any) -> Path:
         user_root = self._user_root(int(self._value(task, "user_id")))
-        output_dir = (user_root / "Output" / str(self._value(task, "task_id"))).resolve()
+        output_dir = (user_root / self._results_root / str(self._value(task, "task_id"))).resolve()
         try:
             output_dir.relative_to(user_root)
         except ValueError as exc:
@@ -383,7 +390,7 @@ class WorkerService:
             raise WorkerServiceError(400, "invalid_task_archive", "task output archive is not a valid zip file") from exc
 
         return {
-            "output_root": f"Output/{task_id}",
+            "output_root": f"{self._results_root_str}/{task_id}",
             "file_count": file_count,
         }
 

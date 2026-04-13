@@ -11,8 +11,7 @@ from secrets import token_urlsafe
 from typing import Any, Callable
 
 from backend.config_loader import load_config
-from backend.file_router import _format_bytes, _get_quota, _get_usage_sync
-from backend.script_dispatch import evaluate_script_dispatch_target
+from backend.drive_quota import _format_bytes, _get_quota, _get_usage_sync
 from backend.script_dispatch import evaluate_script_dispatch_target
 
 
@@ -61,6 +60,15 @@ class TaskService:
             snapshot_dir.relative_to(working_dir)
         except ValueError:
             return None
+        results_root = None
+        results_root_name = self._results_root_name.replace("\\", "/").strip("/")
+        if results_root_name:
+            results_root_candidate = (working_dir / Path(*results_root_name.split("/"))).resolve()
+            try:
+                results_root_candidate.relative_to(working_dir)
+                results_root = results_root_candidate
+            except ValueError:
+                results_root = None
 
         def _ignore(dir_path: str, names: list[str]):
             current_dir = Path(dir_path)
@@ -70,12 +78,18 @@ class TaskService:
                 try:
                     candidate.relative_to(snapshot_dir)
                     ignored.append(name)
-                except ValueError:
                     continue
+                except ValueError:
+                    pass
+                if results_root is not None:
+                    try:
+                        candidate.relative_to(results_root)
+                        ignored.append(name)
+                        continue
+                    except ValueError:
+                        pass
             if current_dir == working_dir and "system" in names:
                 ignored.append("system")
-            if current_dir == working_dir and self._results_root_name in names:
-                ignored.append(self._results_root_name)
             return ignored
 
         return _ignore

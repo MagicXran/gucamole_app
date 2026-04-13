@@ -635,7 +635,7 @@ def list_users(admin: UserInfo = Depends(require_admin)):
     rows = db.execute_query(
         "SELECT id, username, display_name, is_admin, is_active, quota_bytes FROM portal_user ORDER BY id"
     )
-    from backend.file_router import _get_usage_sync, _format_bytes, DEFAULT_QUOTA_BYTES
+    from backend.drive_quota import _get_usage_sync, _format_bytes, DEFAULT_QUOTA_BYTES
     for row in rows:
         used = _get_usage_sync(row["id"])
         row["used_bytes"] = used

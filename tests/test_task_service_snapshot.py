@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.drive_quota import _format_bytes
 from backend.task_service import TaskService
 
 
@@ -65,3 +66,41 @@ def test_submit_script_task_excludes_output_directory_from_snapshot(tmp_path, mo
     assert (snapshot_root / "worker_smoke.py").exists()
     assert (snapshot_root / "input-data.txt").exists()
     assert not (snapshot_root / "Output").exists()
+
+
+def test_submit_script_task_excludes_only_nested_results_root_subtree(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    user_root = tmp_path / "portal_u1"
+    user_root.mkdir()
+    entry_file = user_root / "worker_smoke.py"
+    entry_file.write_text("print('ok')\n", encoding="utf-8")
+    (user_root / "Results").mkdir()
+    (user_root / "Results" / "keep.txt").write_text("keep\n", encoding="utf-8")
+    (user_root / "Results" / "Sub").mkdir(parents=True)
+    (user_root / "Results" / "Sub" / "old-result.txt").write_text("old\n", encoding="utf-8")
+    (user_root / "Results" / "Sub" / "nested").mkdir()
+    (user_root / "Results" / "Sub" / "nested" / "deep.txt").write_text("deep\n", encoding="utf-8")
+
+    monkeypatch.setattr("backend.task_service._get_usage_sync", lambda user_id: 0)
+    monkeypatch.setattr("backend.task_service._get_quota", lambda user_id: 10 * 1024 * 1024)
+
+    service = TaskService(
+        repo=_TaskRepo(),
+        drive_root=tmp_path,
+        task_id_factory=lambda: "task_nested_results",
+        results_root_name="Results/Sub",
+    )
+
+    service.submit_script_task(
+        user_id=1,
+        requested_runtime_id=4,
+        entry_path="worker_smoke.py",
+    )
+
+    snapshot_root = user_root / "system" / "tasks" / "task_nested_results" / "input"
+    assert (snapshot_root / "worker_smoke.py").exists()
+    assert (snapshot_root / "Results" / "keep.txt").exists()
+    assert not (snapshot_root / "Results" / "Sub").exists()
+
+
+def test_format_bytes_uses_megabytes_for_megabyte_values():
+    assert _format_bytes(1048576) == "1.0 MB"

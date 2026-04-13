@@ -14,11 +14,12 @@ import tempfile
 import traceback
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import httpx
 
+from backend.config_loader import load_config
 from backend.software_inventory import probe_registered_software
 from backend.worker_runtime import LocalTaskRunner
 
@@ -159,6 +160,22 @@ class WorkerAgent:
         self.runner = self.runner or LocalTaskRunner()
         self._credentials = self.credential_store.load() or {}
         self._last_error_summary = ""
+        try:
+            loaded_config = load_config()
+        except Exception:
+            loaded_config = {}
+        config = loaded_config if isinstance(loaded_config, dict) else {}
+        guacamole_config = config.get("guacamole", {})
+        if not isinstance(guacamole_config, dict):
+            guacamole_config = {}
+        drive_config = guacamole_config.get("drive", {})
+        if not isinstance(drive_config, dict):
+            drive_config = {}
+        configured_results_root = str(drive_config.get("results_root", "Output") or "Output").strip()
+        normalized_results_root = PurePosixPath(configured_results_root.replace("\\", "/"))
+        if not normalized_results_root.parts or normalized_results_root.is_absolute() or ".." in normalized_results_root.parts:
+            normalized_results_root = PurePosixPath("Output")
+        self._results_root = normalized_results_root.as_posix()
 
     @property
     def access_token(self) -> str | None:
@@ -261,9 +278,10 @@ class WorkerAgent:
         for artifact in payload.get("artifacts") or []:
             item = dict(artifact)
             if item.get("artifact_kind") == "workspace_output" and item.get("relative_path"):
-                if item["relative_path"] not in changed_rel_paths:
+                normalized_relative_path = PurePosixPath(str(item["relative_path"]).replace("\\", "/")).as_posix()
+                if normalized_relative_path not in changed_rel_paths:
                     continue
-                item["relative_path"] = f"Output/{task['task_id']}/{item['relative_path']}".replace('\\', '/')
+                item["relative_path"] = f"{self._results_root}/{task['task_id']}/{normalized_relative_path}"
             artifacts.append(item)
         payload["artifacts"] = artifacts
         return payload

@@ -1,0 +1,9 @@
+.git
+.worktrees
+.superpowers
+node_modules
+portal_ui/node_modules
+portal_ui/dist
+frontend/portal
+output
+deploy/backups

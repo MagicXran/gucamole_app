@@ -4,15 +4,15 @@ Worker enrollment, authentication, heartbeat, and task-claim orchestration.
 
 from __future__ import annotations
 
-import io
 import shutil
+import tempfile
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from hashlib import sha256
 from pathlib import Path, PurePosixPath
 from secrets import token_urlsafe
-from typing import Any, Callable
+from typing import Any, BinaryIO, Callable
 
 from pydantic import BaseModel, Field
 
@@ -21,6 +21,8 @@ from backend.config_loader import load_config
 
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 15
 DEFAULT_PULL_INTERVAL_SECONDS = 5
+WORKER_MUTABLE_TASK_STATUSES = {"assigned", "preparing", "running", "uploading"}
+WORKER_TRANSIENT_STATUS_UPDATES = {"preparing", "running", "uploading"}
 
 
 class WorkerServiceError(RuntimeError):
@@ -119,8 +121,14 @@ class WorkerService:
     @staticmethod
     def _ensure_task_mutable(task: Any) -> None:
         status = str(WorkerService._value(task, "status", "") or "")
-        if status not in {"assigned", "preparing", "running", "uploading"}:
+        if status not in WORKER_MUTABLE_TASK_STATUSES:
             raise WorkerServiceError(409, "task_not_mutable", "worker task already finished")
+
+    @staticmethod
+    def _ensure_status_update_allowed(status: str) -> None:
+        normalized_status = str(status or "").strip().lower()
+        if normalized_status not in WORKER_TRANSIENT_STATUS_UPDATES:
+            raise WorkerServiceError(400, "invalid_task_status", "worker status updates only accept transient statuses")
 
     @staticmethod
     def _safe_relative_path(value: str | None) -> Path:
@@ -289,9 +297,20 @@ class WorkerService:
             raise WorkerServiceError(404, "task_not_found", "worker task does not exist")
         return node, task
 
-    def report_task_status(self, access_token: str, task_id: str, req: WorkerTaskStatusRequest) -> dict[str, Any]:
+    def _get_mutable_owned_task(self, access_token: str, task_id: str) -> tuple[Any, Any]:
         node, task = self._get_owned_task(access_token, task_id)
+        if bool(self._value(task, "cancel_requested", 0)):
+            task = self.repo.cancel_task_if_requested(
+                task_id,
+                int(self._value(node, "id")),
+                self._now(),
+            ) or task
         self._ensure_task_mutable(task)
+        return node, task
+
+    def report_task_status(self, access_token: str, task_id: str, req: WorkerTaskStatusRequest) -> dict[str, Any]:
+        node, task = self._get_mutable_owned_task(access_token, task_id)
+        self._ensure_status_update_allowed(req.status)
         updated = self.repo.update_task_status_for_worker(
             task_id,
             int(self._value(node, "id")),
@@ -314,8 +333,7 @@ class WorkerService:
         return {"accepted": int(accepted)}
 
     def complete_task(self, access_token: str, task_id: str, req: WorkerTaskCompleteRequest) -> dict[str, Any]:
-        node, task = self._get_owned_task(access_token, task_id)
-        self._ensure_task_mutable(task)
+        node, task = self._get_mutable_owned_task(access_token, task_id)
         completed = self.repo.complete_task_for_worker(
             task_id,
             int(self._value(node, "id")),
@@ -330,8 +348,7 @@ class WorkerService:
         return completed
 
     def fail_task(self, access_token: str, task_id: str, req: WorkerTaskFailRequest) -> dict[str, Any]:
-        node, task = self._get_owned_task(access_token, task_id)
-        self._ensure_task_mutable(task)
+        node, task = self._get_mutable_owned_task(access_token, task_id)
         failed = self.repo.fail_task_for_worker(
             task_id,
             int(self._value(node, "id")),
@@ -342,30 +359,50 @@ class WorkerService:
             raise WorkerServiceError(404, "task_not_found", "worker task does not exist")
         return failed
 
-    def download_task_snapshot(self, access_token: str, task_id: str) -> bytes:
+    @staticmethod
+    def _spill_archive_source(
+        archive_source: bytes | bytearray | BinaryIO | str | Path,
+    ) -> tuple[BinaryIO | str | Path, Path | None]:
+        if isinstance(archive_source, (str, Path)):
+            return archive_source, None
+        if isinstance(archive_source, (bytes, bytearray)):
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_file:
+                temp_file.write(archive_source)
+                return temp_file.name, Path(temp_file.name)
+        if hasattr(archive_source, "seek"):
+            archive_source.seek(0)
+        return archive_source, None
+
+    def download_task_snapshot(self, access_token: str, task_id: str) -> Path:
         _node, task = self._get_owned_task(access_token, task_id)
         self._ensure_task_mutable(task)
         snapshot_dir = self._resolve_task_snapshot_dir(task)
 
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_file:
+            archive_path = Path(temp_file.name)
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(snapshot_dir.rglob("*")):
                 if not path.is_file():
                     continue
                 archive.write(path, arcname=path.relative_to(snapshot_dir).as_posix())
-        return buffer.getvalue()
+        return archive_path
 
-    def store_task_output_archive(self, access_token: str, task_id: str, archive_bytes: bytes) -> dict[str, Any]:
-        _node, task = self._get_owned_task(access_token, task_id)
-        self._ensure_task_mutable(task)
+    def store_task_output_archive(
+        self,
+        access_token: str,
+        task_id: str,
+        archive_source: bytes | bytearray | BinaryIO | str | Path,
+    ) -> dict[str, Any]:
+        _node, task = self._get_mutable_owned_task(access_token, task_id)
         output_dir = self._resolve_task_output_dir(task)
         if output_dir.exists():
             shutil.rmtree(output_dir, ignore_errors=True)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         file_count = 0
+        zip_source, cleanup_path = self._spill_archive_source(archive_source)
         try:
-            with zipfile.ZipFile(io.BytesIO(archive_bytes), "r") as archive:
+            with zipfile.ZipFile(zip_source, "r") as archive:
                 for member in archive.infolist():
                     if member.is_dir():
                         continue
@@ -381,6 +418,9 @@ class WorkerService:
                     file_count += 1
         except zipfile.BadZipFile as exc:
             raise WorkerServiceError(400, "invalid_task_archive", "task output archive is not a valid zip file") from exc
+        finally:
+            if cleanup_path is not None:
+                cleanup_path.unlink(missing_ok=True)
 
         return {
             "output_root": f"Output/{task_id}",

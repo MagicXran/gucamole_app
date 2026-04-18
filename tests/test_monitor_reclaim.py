@@ -1,10 +1,39 @@
 import asyncio
+import importlib
+import sys
+import types
 
 import httpx
+import pytest
 from fastapi import FastAPI
 
-import backend.monitor as monitor
 from backend.models import UserInfo
+
+
+class ImportSafeDb:
+    def execute_update(self, *args, **kwargs):
+        return 0
+
+    def execute_query(self, *args, **kwargs):
+        return None if kwargs.get("fetch_one") else []
+
+
+@pytest.fixture
+def monitor(monkeypatch):
+    fake_database = types.ModuleType("backend.database")
+    fake_database.db = ImportSafeDb()
+    fake_database.CONFIG = {
+        "monitor": {},
+        "api": {"prefix": "/api/remote-apps"},
+        "auth": {
+            "jwt_secret": "test-secret-key-with-32-bytes-min!!",
+            "token_expire_minutes": 480,
+        },
+    }
+    monkeypatch.setitem(sys.modules, "backend.database", fake_database)
+    monkeypatch.delitem(sys.modules, "backend.auth", raising=False)
+    monkeypatch.delitem(sys.modules, "backend.monitor", raising=False)
+    return importlib.import_module("backend.monitor")
 
 
 class FakeDB:
@@ -70,7 +99,7 @@ class FakeAdminMonitorDB:
         return []
 
 
-def _build_app() -> FastAPI:
+def _build_app(monitor) -> FastAPI:
     app = FastAPI()
     app.include_router(monitor.router)
     app.dependency_overrides[monitor.get_current_user] = lambda: UserInfo(
@@ -82,7 +111,7 @@ def _build_app() -> FastAPI:
     return app
 
 
-def _build_admin_monitor_app() -> FastAPI:
+def _build_admin_monitor_app(monitor) -> FastAPI:
     app = FastAPI()
     app.include_router(monitor.admin_monitor_router)
     app.dependency_overrides[monitor.require_admin] = lambda: UserInfo(
@@ -91,6 +120,12 @@ def _build_admin_monitor_app() -> FastAPI:
         display_name="管理员",
         is_admin=True,
     )
+    return app
+
+
+def _build_unauthed_admin_monitor_app(monitor) -> FastAPI:
+    app = FastAPI()
+    app.include_router(monitor.admin_monitor_router)
     return app
 
 
@@ -104,13 +139,13 @@ def _request(app: FastAPI, method: str, path: str, payload: dict | None = None) 
     return asyncio.run(_run())
 
 
-def test_heartbeat_and_activity_return_200_when_session_is_active(monkeypatch):
+def test_heartbeat_and_activity_return_200_when_session_is_active(monitor, monkeypatch):
     monkeypatch.setattr(
         monitor,
         "db",
         FakeDB(active_session_ids={"session-active"}),
     )
-    app = _build_app()
+    app = _build_app(monitor)
 
     heartbeat_resp = _request(
         app,
@@ -131,13 +166,13 @@ def test_heartbeat_and_activity_return_200_when_session_is_active(monkeypatch):
     assert activity_resp.json() == {"ok": True}
 
 
-def test_heartbeat_and_activity_return_409_when_session_is_admin_reclaimed(monkeypatch):
+def test_heartbeat_and_activity_return_409_when_session_is_admin_reclaimed(monitor, monkeypatch):
     monkeypatch.setattr(
         monitor,
         "db",
         FakeDB(reclaimed_sessions={"session-reclaimed": "admin"}),
     )
-    app = _build_app()
+    app = _build_app(monitor)
 
     heartbeat_resp = _request(
         app,
@@ -166,13 +201,13 @@ def test_heartbeat_and_activity_return_409_when_session_is_admin_reclaimed(monke
     }
 
 
-def test_heartbeat_and_activity_return_409_when_session_is_idle_reclaimed(monkeypatch):
+def test_heartbeat_and_activity_return_409_when_session_is_idle_reclaimed(monitor, monkeypatch):
     monkeypatch.setattr(
         monitor,
         "db",
         FakeDB(reclaimed_sessions={"session-idle-reclaimed": "idle"}),
     )
-    app = _build_app()
+    app = _build_app(monitor)
 
     heartbeat_resp = _request(
         app,
@@ -201,9 +236,9 @@ def test_heartbeat_and_activity_return_409_when_session_is_idle_reclaimed(monkey
     }
 
 
-def test_heartbeat_and_activity_keep_404_when_session_missing(monkeypatch):
+def test_heartbeat_and_activity_keep_404_when_session_missing(monitor, monkeypatch):
     monkeypatch.setattr(monitor, "db", FakeDB())
-    app = _build_app()
+    app = _build_app(monitor)
 
     heartbeat_resp = _request(
         app,
@@ -224,9 +259,9 @@ def test_heartbeat_and_activity_keep_404_when_session_missing(monkeypatch):
     assert activity_resp.json() == {"detail": "会话不存在或已结束"}
 
 
-def test_admin_monitor_overview_excludes_reclaim_pending_sessions(monkeypatch):
+def test_admin_monitor_overview_excludes_reclaim_pending_sessions(monitor, monkeypatch):
     monkeypatch.setattr(monitor, "db", FakeAdminMonitorDB())
-    app = _build_admin_monitor_app()
+    app = _build_admin_monitor_app(monitor)
 
     response = _request(app, "GET", "/api/admin/monitor/overview")
 
@@ -237,9 +272,9 @@ def test_admin_monitor_overview_excludes_reclaim_pending_sessions(monkeypatch):
     assert payload["apps"][0]["active_count"] == 1
 
 
-def test_admin_monitor_sessions_excludes_reclaim_pending_sessions(monkeypatch):
+def test_admin_monitor_sessions_excludes_reclaim_pending_sessions(monitor, monkeypatch):
     monkeypatch.setattr(monitor, "db", FakeAdminMonitorDB())
-    app = _build_admin_monitor_app()
+    app = _build_admin_monitor_app(monitor)
 
     response = _request(app, "GET", "/api/admin/monitor/sessions")
 
@@ -247,3 +282,11 @@ def test_admin_monitor_sessions_excludes_reclaim_pending_sessions(monkeypatch):
     payload = response.json()
     assert [row["session_id"] for row in payload["sessions"]] == ["session-active"]
     assert payload["sessions"][0]["status"] == "active"
+
+
+def test_admin_monitor_routes_require_admin_without_override(monitor):
+    app = _build_unauthed_admin_monitor_app(monitor)
+
+    response = _request(app, "GET", "/api/admin/monitor/overview")
+
+    assert response.status_code in {401, 403}

@@ -4,6 +4,10 @@
   "type": "module",
   "scripts": {
     "build:viewer": "node scripts/build-viewer-bundle.mjs",
+    "dev:portal-ui": "npm --prefix portal_ui run dev",
+    "build:portal-ui": "npm --prefix portal_ui run build",
+    "typecheck:portal-ui": "npm --prefix portal_ui run typecheck",
+    "test:portal-ui": "npm --prefix portal_ui run test",
     "test:viewer-build": "node --test tests/test_viewer_bundle_build.mjs",
     "test:dockerfile-build": "node --test tests/test_portal_dockerfile_build.mjs",
     "test:e2e": "node tests/test_portal_e2e.mjs"

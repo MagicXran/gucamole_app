@@ -191,6 +191,7 @@ test('loadUsers renders user rows and action buttons correctly', async () => {
       id: 1,
       username: 'admin',
       display_name: '管理员',
+      department: '平台部',
       is_admin: true,
       used_display: '1 GB',
       quota_display: '10 GB',
@@ -200,6 +201,7 @@ test('loadUsers renders user rows and action buttons correctly', async () => {
       id: 2,
       username: 'guest',
       display_name: '访客',
+      department: '',
       is_admin: false,
       used_display: '0 B',
       quota_display: '5 GB',
@@ -215,15 +217,18 @@ test('loadUsers renders user rows and action buttons correctly', async () => {
   const firstRow = harness.usersTbody.children[0];
   assert.equal(firstRow.children[0].textContent, 1);
   assert.equal(firstRow.children[1].textContent, 'admin');
-  assert.equal(firstRow.children[3].children[0].textContent, '管理员');
-  assert.equal(firstRow.children[4].textContent, '1 GB / 10 GB');
-  assert.equal(firstRow.children[5].children[0].textContent, '正常');
-  assert.equal(firstRow.children[6].children.length, 2);
+  assert.equal(firstRow.children[2].textContent, '管理员');
+  assert.equal(firstRow.children[3].textContent, '平台部');
+  assert.equal(firstRow.children[4].children[0].textContent, '管理员');
+  assert.equal(firstRow.children[5].textContent, '1 GB / 10 GB');
+  assert.equal(firstRow.children[6].children[0].textContent, '正常');
+  assert.equal(firstRow.children[7].children.length, 2);
 
   const secondRow = harness.usersTbody.children[1];
-  assert.equal(secondRow.children[3].textContent, '普通用户');
-  assert.equal(secondRow.children[5].children[0].textContent, '已禁用');
-  assert.equal(secondRow.children[6].children.length, 1);
+  assert.equal(secondRow.children[3].textContent, '-');
+  assert.equal(secondRow.children[4].textContent, '普通用户');
+  assert.equal(secondRow.children[6].children[0].textContent, '已禁用');
+  assert.equal(secondRow.children[7].children.length, 1);
 });
 
 test('showUserModal renders create/edit variants and binds form submit', () => {
@@ -233,18 +238,21 @@ test('showUserModal renders create/edit variants and binds form submit', () => {
   harness.context.AdminUserUi.showUserModal(null);
   assert.match(harness.modalContainer.innerHTML, /新建用户/);
   assert.match(harness.modalContainer.innerHTML, /user-username/);
+  assert.match(harness.modalContainer.innerHTML, /user-department/);
   assert.equal(typeof harness.elements['user-form'].onsubmit, 'function');
 
   harness.context.AdminUserUi.showUserModal({
     id: 8,
     username: 'alice',
     display_name: 'Alice',
+    department: '研发一部',
     is_admin: true,
     is_active: true,
     quota_bytes: 21474836480,
   });
   assert.match(harness.modalContainer.innerHTML, /编辑用户/);
   assert.match(harness.modalContainer.innerHTML, /value="alice" disabled/);
+  assert.match(harness.modalContainer.innerHTML, /value="研发一部"/);
   assert.match(harness.modalContainer.innerHTML, /user-is-active/);
 });
 
@@ -273,6 +281,7 @@ test('saveUser creates user then reloads list', async () => {
   harness.setElement('user-username', ' new_user  ');
   harness.setElement('user-password', 'pw123');
   harness.setElement('user-display', ' 新用户 ');
+  harness.setElement('user-department', ' 研发一部 ');
   harness.setElement('user-is-admin', '', true);
 
   await harness.context.AdminUserUi.saveUser(null);
@@ -285,6 +294,7 @@ test('saveUser creates user then reloads list', async () => {
     username: 'new_user',
     password: 'pw123',
     display_name: '新用户',
+    department: '研发一部',
     is_admin: true,
   });
   assert.equal(harness.apiCalls[1].method, 'GET');
@@ -301,6 +311,7 @@ test('saveUser updates user without forcing password change', async () => {
   harness.setElement('user-quota', '默认(10GB)');
   harness.setElement('user-password', '');
   harness.setElement('user-display', ' Alice  ');
+  harness.setElement('user-department', ' 平台部 ');
   harness.setElement('user-is-admin', '', true);
   harness.setElement('user-is-active', '', false);
 
@@ -313,10 +324,20 @@ test('saveUser updates user without forcing password change', async () => {
   assert.deepEqual(toPlain(harness.apiCalls[0].payload), {
     quota_gb: 0,
     display_name: 'Alice',
+    department: '平台部',
     is_admin: true,
     is_active: false,
   });
   assert.equal(harness.toasts[0].msg, '用户已更新');
+});
+
+test('admin.html users table exposes department column in legacy shell', () => {
+  const html = fs.readFileSync(adminHtmlPath, 'utf8');
+
+  assert.match(
+    html,
+    /<table class="admin-table" id="users-table">[\s\S]*?<th>ID<\/th><th>用户名<\/th><th>显示名<\/th>\s*<th>部门<\/th><th>角色<\/th><th>空间<\/th><th>状态<\/th><th>操作<\/th>/,
+  );
 });
 
 test('deleteUser obeys confirmation and reloads on success', async () => {

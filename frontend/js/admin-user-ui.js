@@ -45,6 +45,10 @@
             dnameTd.textContent = u.display_name;
             tr.appendChild(dnameTd);
 
+            var deptTd = document.createElement('td');
+            deptTd.textContent = u.department ? u.department : '-';
+            tr.appendChild(deptTd);
+
             var roleTd = document.createElement('td');
             if (u.is_admin) {
                 var adminBadge = document.createElement('span');
@@ -102,6 +106,7 @@
                 formGroup('用户名', 'user-username', '', 'text', true)) +
             formGroup(isEdit ? '新密码（留空不改）' : '密码', 'user-password', '', 'password', !isEdit) +
             formGroup('显示名称', 'user-display', isEdit ? u.display_name : '') +
+            formGroup('部门', 'user-department', isEdit ? u.department : '') +
             formGroupSelect('个人空间配额', 'user-quota', ['默认(10GB)', '5 GB', '10 GB', '20 GB', '50 GB', '100 GB', '不限制'],
                 isEdit && u.quota_bytes ? _quotaBytesToLabel(u.quota_bytes) : '默认(10GB)') +
             '<div class="form-group form-group--checkbox">' +
@@ -128,7 +133,9 @@
         var data = {};
 
         var quotaVal = document.getElementById('user-quota').value;
+        var departmentEl = document.getElementById('user-department');
         data.quota_gb = _quotaLabelToGb(quotaVal);
+        data.department = departmentEl ? departmentEl.value.trim() : '';
 
         if (userId) {
             var pw = document.getElementById('user-password').value;

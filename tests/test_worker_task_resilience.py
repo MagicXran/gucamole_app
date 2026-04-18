@@ -1,9 +1,11 @@
 from datetime import datetime
-from pathlib import Path
 import io
+import inspect
+from pathlib import Path
+import tempfile
 import zipfile
 
-from backend.worker_agent import WorkerAgent
+from backend.worker_agent import PortalWorkerClient, WorkerAgent
 from backend.worker_service import WorkerService
 
 
@@ -62,10 +64,12 @@ class _FakePortalClient:
 
     def download_task_snapshot(self, token, task_id):
         self.snapshot_calls.append((token, task_id))
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w") as zf:
+        archive_path = Path(tempfile.gettempdir()) / f"{task_id}-snapshot-test.zip"
+        if archive_path.exists():
+            archive_path.unlink()
+        with zipfile.ZipFile(archive_path, "w") as zf:
             zf.writestr("main.py", "print('ok')\n")
-        return buffer.getvalue()
+        return archive_path
 
     def upload_task_output_archive(self, token, task_id, archive_path):
         self.upload_calls.append((token, task_id, Path(archive_path).name))
@@ -255,15 +259,40 @@ def test_worker_service_builds_snapshot_archive_and_stores_output_archive(tmp_pa
         drive_root=tmp_path,
     )
 
-    archive_bytes = service.download_task_snapshot("token", "task_demo")
-    with zipfile.ZipFile(io.BytesIO(archive_bytes), "r") as zf:
+    archive_path = service.download_task_snapshot("token", "task_demo")
+    assert isinstance(archive_path, Path)
+    assert archive_path.exists()
+    with zipfile.ZipFile(archive_path, "r") as zf:
         assert sorted(zf.namelist()) == ["main.py"]
 
     output_buffer = io.BytesIO()
     with zipfile.ZipFile(output_buffer, "w") as zf:
         zf.writestr("nested/result.txt", "done\n")
+    output_buffer.seek(0)
 
-    result = service.store_task_output_archive("token", "task_demo", output_buffer.getvalue())
+    result = service.store_task_output_archive("token", "task_demo", output_buffer)
 
     assert result == {"output_root": "Output/task_demo", "file_count": 1}
     assert (tmp_path / "portal_u3" / "Output" / "task_demo" / "nested" / "result.txt").read_text(encoding="utf-8") == "done\n"
+
+
+def test_worker_transfer_paths_do_not_buffer_entire_archives_in_memory():
+    worker_router_source = Path(WorkerService.__module__.replace(".", "/")).with_suffix(".py")
+    worker_service_source = Path(__file__).resolve().parents[1] / "backend" / "worker_service.py"
+    worker_router_file = Path(__file__).resolve().parents[1] / "backend" / "worker_router.py"
+
+    upload_source = worker_router_file.read_text(encoding="utf-8")
+    snapshot_source = inspect.getsource(WorkerService.download_task_snapshot)
+    store_source = inspect.getsource(WorkerService.store_task_output_archive)
+
+    assert "await archive.read()" not in upload_source
+    assert "io.BytesIO" not in snapshot_source
+    assert "io.BytesIO" not in store_source
+
+
+def test_worker_agent_streams_snapshot_to_file_before_extracting():
+    client_source = inspect.getsource(PortalWorkerClient.download_task_snapshot)
+    stage_source = inspect.getsource(WorkerAgent._stage_task_to_scratch)
+
+    assert ".content" not in client_source
+    assert "io.BytesIO" not in stage_source

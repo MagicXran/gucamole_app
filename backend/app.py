@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import configure_logging, log_extra
@@ -20,8 +21,15 @@ from backend.database import CONFIG
 from backend.auth import router as auth_router
 from backend.router import router
 from backend.admin_router import router as admin_router
+from backend.admin_analytics_router import router as admin_analytics_router
 from backend.admin_pool_router import router as admin_pool_router
 from backend.admin_worker_router import router as admin_worker_router
+from backend.app_attachment_router import router as app_attachment_router
+from backend.booking_router import router as booking_router
+from backend.case_center_router import router as case_center_router
+from backend.comment_router import router as comment_router
+from backend.session_router import router as session_router
+from backend.sdk_center_router import router as sdk_center_router
 from backend.monitor import (
     router as monitor_router,
     admin_monitor_router,
@@ -130,8 +138,15 @@ def health():
 
 # API 路由
 app.include_router(auth_router)
+app.include_router(session_router)
+app.include_router(sdk_center_router)
+app.include_router(app_attachment_router)
+app.include_router(booking_router)
+app.include_router(case_center_router)
+app.include_router(comment_router)
 app.include_router(router)
 app.include_router(admin_router)
+app.include_router(admin_analytics_router)
 app.include_router(admin_pool_router)
 app.include_router(admin_worker_router)
 app.include_router(monitor_router)
@@ -140,6 +155,23 @@ app.include_router(dataset_router)
 app.include_router(file_router)
 app.include_router(task_router)
 app.include_router(worker_router)
+
+# Vue3 门户（独立挂载，支持 history 模式深链刷新）
+portal_ui_path = Path(__file__).parent.parent / "frontend" / "portal"
+portal_ui_assets_path = portal_ui_path / "assets"
+if portal_ui_path.exists():
+    if portal_ui_assets_path.exists():
+        app.mount(
+            "/portal/assets",
+            StaticFiles(directory=str(portal_ui_assets_path)),
+            name="portal-ui-assets",
+        )
+
+    @app.get("/portal", include_in_schema=False)
+    @app.get("/portal/", include_in_schema=False)
+    @app.get("/portal/{full_path:path}", include_in_schema=False)
+    def portal_ui_index(full_path: str = ""):
+        return FileResponse(str(portal_ui_path / "index.html"))
 
 # 静态文件（前端）
 frontend_path = Path(__file__).parent.parent / "frontend"

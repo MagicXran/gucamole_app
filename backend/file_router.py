@@ -62,6 +62,11 @@ class MkdirRequest(BaseModel):
     path: str
 
 
+class MoveRequest(BaseModel):
+    source_path: str
+    target_path: str
+
+
 # ============================================
 # 工具函数
 # ============================================
@@ -139,6 +144,20 @@ def _get_usage_sync(user_id: int, force_refresh: bool = False) -> int:
 
 def _invalidate_usage_cache(user_id: int):
     _usage_cache.pop(user_id, None)
+
+
+def _ensure_parent_chain_is_directories(user_id: int, target: Path):
+    base = _user_dir(user_id).resolve()
+    current = target.parent
+    while True:
+        if current.exists() and not current.is_dir():
+            raise HTTPException(409, "目标父路径不是目录")
+        if current == base:
+            break
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
 
 
 def _get_quota(user_id: int) -> int:
@@ -555,6 +574,55 @@ def make_directory(
 
     target.mkdir(parents=True, exist_ok=True)
     return {"message": "已创建"}
+
+
+@router.post("/move")
+def move_file(
+    req: MoveRequest,
+    request: Request,
+    user: UserInfo = Depends(get_current_user),
+):
+    """移动文件或目录"""
+    if not req.source_path or req.source_path in (".", "/"):
+        raise HTTPException(400, "不能移动根目录")
+    if not req.target_path or req.target_path in (".", "/"):
+        raise HTTPException(400, "目标路径不能是根目录")
+
+    source = _safe_resolve(user.user_id, req.source_path)
+    target = _safe_resolve(user.user_id, req.target_path)
+    _validate_filename(target.name)
+
+    if not source.exists():
+        raise HTTPException(404, "源文件不存在")
+    if source == target:
+        raise HTTPException(409, "源路径和目标路径相同")
+    if source.is_dir() and str(target).startswith(str(source) + os.sep):
+        raise HTTPException(400, "不能移动目录到自身内部")
+    if target.exists():
+        raise HTTPException(409, "目标已存在")
+    _ensure_parent_chain_is_directories(user.user_id, target)
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.move(str(source), str(target))
+    except PermissionError:
+        raise HTTPException(
+            423, f"'{source.name}' 正在被占用，请关闭远程应用中的文件后重试",
+        )
+    except OSError as e:
+        raise HTTPException(500, f"移动失败: {e}")
+
+    _invalidate_usage_cache(user.user_id)
+    client_ip = request.client.host if request.client else "unknown"
+    log_action(
+        user_id=user.user_id,
+        username=user.username,
+        action="file_move",
+        target_name=req.source_path,
+        detail={"target_path": req.target_path},
+        ip_address=client_ip,
+    )
+    return {"message": "已移动"}
 
 
 # ============================================

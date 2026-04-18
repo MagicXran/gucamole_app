@@ -34,6 +34,9 @@ class MySQLTaskRepository:
             JOIN remote_app_acl acl
               ON acl.app_id = a.id
              AND acl.user_id = %(user_id)s
+            JOIN resource_pool p
+              ON p.id = a.pool_id
+             AND p.is_active = 1
             JOIN remote_app_script_profile sp
               ON sp.remote_app_id = a.id
              AND sp.is_enabled = 1

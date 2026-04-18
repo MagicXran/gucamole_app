@@ -41,6 +41,39 @@ def _ensure_pool_exists(pool_id: int | None, conn=None):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "资源池不存在或已禁用")
 
 
+def _ensure_pool_kind_consistency(pool_id: int | None, app_kind: str | None, *, app_id: int | None = None, conn=None):
+    if pool_id is None or not app_kind:
+        return
+    rows = db.execute_query(
+        """
+        SELECT DISTINCT COALESCE(app_kind, 'commercial_software') AS app_kind
+        FROM remote_app
+        WHERE pool_id = %(pool_id)s
+          AND (%(app_id)s IS NULL OR id <> %(app_id)s)
+          AND is_active = 1
+        """,
+        {"pool_id": pool_id, "app_id": app_id},
+        conn=conn,
+    )
+    existing_kinds = {
+        str(row.get("app_kind") or "commercial_software")
+        for row in rows
+    }
+    if existing_kinds and existing_kinds != {app_kind}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "资源池内应用分类必须一致")
+
+
+def _get_last_insert_id(conn) -> int:
+    row = db.execute_query(
+        "SELECT LAST_INSERT_ID() AS id",
+        fetch_one=True,
+        conn=conn,
+    )
+    if not row or row.get("id") is None:
+        raise RuntimeError("插入回读失败")
+    return int(row["id"])
+
+
 def _validate_script_config(
     script_enabled: bool | None,
     executor_key: str | None,
@@ -125,14 +158,7 @@ def _upsert_catalog_bindings(app_row: dict, *, script_enabled: bool | None, scri
             },
             conn=conn,
         )
-        catalog_id = int(
-            db.execute_query(
-                "SELECT id FROM catalog_app WHERE app_key = %(app_key)s",
-                {"app_key": app_key},
-                fetch_one=True,
-                conn=conn,
-            )["id"]
-        )
+        catalog_id = _get_last_insert_id(conn)
 
     gui_binding = db.execute_query(
         "SELECT id FROM app_binding WHERE remote_app_id = %(remote_app_id)s AND binding_kind = 'gui_remoteapp' LIMIT 1",
@@ -390,6 +416,7 @@ def create_app(
 ):
     """创建应用"""
     _ensure_pool_exists(req.pool_id)
+    _ensure_pool_kind_consistency(req.pool_id, req.app_kind)
     try:
         runtime_settings = _build_script_runtime_config(
             script_profile_key=req.script_profile_key,
@@ -405,7 +432,7 @@ def create_app(
         db.execute_update(
             """
             INSERT INTO remote_app
-                (name, icon, protocol, hostname, port,
+                (name, icon, app_kind, protocol, hostname, port,
                  rdp_username, rdp_password, domain, security, ignore_cert,
                  remote_app, remote_app_dir, remote_app_args,
                  color_depth, disable_gfx, resize_method,
@@ -416,7 +443,7 @@ def create_app(
                  timezone, keyboard_layout,
                  pool_id, member_max_concurrent)
             VALUES
-                (%(name)s, %(icon)s, %(protocol)s, %(hostname)s, %(port)s,
+                (%(name)s, %(icon)s, %(app_kind)s, %(protocol)s, %(hostname)s, %(port)s,
                  %(rdp_username)s, %(rdp_password)s, %(domain)s, %(security)s, %(ignore_cert)s,
                  %(remote_app)s, %(remote_app_dir)s, %(remote_app_args)s,
                  %(color_depth)s, %(disable_gfx)s, %(resize_method)s,
@@ -428,7 +455,7 @@ def create_app(
                  %(pool_id)s, %(member_max_concurrent)s)
             """,
             {
-                "name": req.name, "icon": req.icon, "protocol": req.protocol,
+                "name": req.name, "icon": req.icon, "app_kind": req.app_kind, "protocol": req.protocol,
                 "hostname": req.hostname, "port": req.port,
                 "rdp_username": req.rdp_username or None,
                 "rdp_password": req.rdp_password or None,
@@ -456,10 +483,13 @@ def create_app(
             },
             conn=conn,
         )
+        app_id = _get_last_insert_id(conn)
         app = db.execute_query(
-            "SELECT * FROM remote_app WHERE name = %(name)s ORDER BY id DESC LIMIT 1",
-            {"name": req.name}, fetch_one=True, conn=conn,
+            "SELECT * FROM remote_app WHERE id = %(id)s",
+            {"id": app_id}, fetch_one=True, conn=conn,
         )
+        if not app:
+            raise RuntimeError("应用创建失败")
         _upsert_catalog_bindings(
             app,
             script_enabled=req.script_enabled,
@@ -500,6 +530,9 @@ def update_app(
         return _get_app_admin_row(app_id)
     if "pool_id" in updates:
         _ensure_pool_exists(updates["pool_id"])
+    target_pool_id = updates.get("pool_id", existing.get("pool_id"))
+    target_app_kind = updates.get("app_kind", existing.get("app_kind") or "commercial_software")
+    _ensure_pool_kind_consistency(target_pool_id, target_app_kind, app_id=app_id)
     script_updates = {
         key: updates.pop(key)
         for key in ("script_enabled", "script_profile_key", "script_executor_key", "script_worker_group_id", "script_scratch_root")
@@ -633,7 +666,7 @@ def delete_app(
 def list_users(admin: UserInfo = Depends(require_admin)):
     """列出所有用户（含配额信息）"""
     rows = db.execute_query(
-        "SELECT id, username, display_name, is_admin, is_active, quota_bytes FROM portal_user ORDER BY id"
+        "SELECT id, username, display_name, department, is_admin, is_active, quota_bytes FROM portal_user ORDER BY id"
     )
     from backend.file_router import _get_usage_sync, _format_bytes, DEFAULT_QUOTA_BYTES
     for row in rows:
@@ -665,18 +698,19 @@ def create_user(
         quota_bytes = int(req.quota_gb * 1073741824)
     db.execute_update(
         """
-        INSERT INTO portal_user (username, password_hash, display_name, is_admin, quota_bytes)
-        VALUES (%(username)s, %(hash)s, %(display)s, %(admin)s, %(quota)s)
+        INSERT INTO portal_user (username, password_hash, display_name, department, is_admin, quota_bytes)
+        VALUES (%(username)s, %(hash)s, %(display)s, %(department)s, %(admin)s, %(quota)s)
         """,
         {
             "username": req.username, "hash": hashed,
             "display": req.display_name or req.username,
+            "department": req.department,
             "admin": 1 if req.is_admin else 0,
             "quota": quota_bytes,
         },
     )
     user = db.execute_query(
-        "SELECT id, username, display_name, is_admin, is_active FROM portal_user WHERE username = %(u)s",
+        "SELECT id, username, display_name, department, is_admin, is_active FROM portal_user WHERE username = %(u)s",
         {"u": req.username}, fetch_one=True,
     )
     client_ip = request.client.host if request.client else "unknown"
@@ -707,6 +741,9 @@ def update_user(
     if req.display_name is not None:
         set_parts.append("display_name = %(display_name)s")
         params["display_name"] = req.display_name
+    if req.department is not None:
+        set_parts.append("department = %(department)s")
+        params["department"] = req.department
     if req.is_admin is not None:
         set_parts.append("is_admin = %(is_admin)s")
         params["is_admin"] = 1 if req.is_admin else 0
@@ -726,7 +763,7 @@ def update_user(
 
     if not set_parts:
         return db.execute_query(
-            "SELECT id, username, display_name, is_admin, is_active FROM portal_user WHERE id = %(id)s",
+            "SELECT id, username, display_name, department, is_admin, is_active FROM portal_user WHERE id = %(id)s",
             {"id": user_id}, fetch_one=True,
         )
 
@@ -739,7 +776,7 @@ def update_user(
         "user", user_id, existing["username"], ip_address=client_ip,
     )
     return db.execute_query(
-        "SELECT id, username, display_name, is_admin, is_active FROM portal_user WHERE id = %(id)s",
+        "SELECT id, username, display_name, department, is_admin, is_active FROM portal_user WHERE id = %(id)s",
         {"id": user_id}, fetch_one=True,
     )
 
@@ -799,16 +836,29 @@ def update_user_acl(
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "用户不存在")
 
-    # 先清空
-    db.execute_update(
-        "DELETE FROM remote_app_acl WHERE user_id = %(uid)s", {"uid": user_id},
-    )
-    # 再插入
-    for app_id in req.app_ids:
-        db.execute_update(
-            "INSERT IGNORE INTO remote_app_acl (user_id, app_id) VALUES (%(uid)s, %(aid)s)",
-            {"uid": user_id, "aid": app_id},
+    unique_app_ids = list(dict.fromkeys(req.app_ids))
+    if unique_app_ids:
+        app_id_params = {f"app_id_{index}": app_id for index, app_id in enumerate(unique_app_ids)}
+        placeholders = ", ".join(f"%({key})s" for key in app_id_params)
+        rows = db.execute_query(
+            f"SELECT id FROM remote_app WHERE is_active = 1 AND id IN ({placeholders})",
+            app_id_params,
         )
+        valid_app_ids = {int(row["id"]) for row in rows}
+        if len(valid_app_ids) != len(unique_app_ids):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "应用不存在或已禁用")
+
+    with db.transaction() as conn:
+        db.execute_update(
+            "DELETE FROM remote_app_acl WHERE user_id = %(uid)s", {"uid": user_id},
+            conn=conn,
+        )
+        for app_id in unique_app_ids:
+            db.execute_update(
+                "INSERT IGNORE INTO remote_app_acl (user_id, app_id) VALUES (%(uid)s, %(aid)s)",
+                {"uid": user_id, "aid": app_id},
+                conn=conn,
+            )
     guac_service.invalidate_all_sessions()
     pool_service.cleanup_invalid_queue_entries(user_id=user_id)
 

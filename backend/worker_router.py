@@ -4,8 +4,10 @@ Worker-facing API endpoints.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.background import BackgroundTask
 
 from backend.database import db
 from backend.worker_repository import MySQLWorkerRepository
@@ -130,13 +132,12 @@ def download_task_snapshot(
     worker_token: str = Depends(_require_worker_token),
 ):
     try:
-        archive_bytes = worker_service.download_task_snapshot(worker_token, task_id)
-        return Response(
-            content=archive_bytes,
+        archive_path = worker_service.download_task_snapshot(worker_token, task_id)
+        return FileResponse(
+            path=archive_path,
             media_type="application/zip",
-            headers={
-                "Content-Disposition": f'attachment; filename="{task_id}-snapshot.zip"',
-            },
+            filename=f"{task_id}-snapshot.zip",
+            background=BackgroundTask(lambda: archive_path.unlink(missing_ok=True)),
         )
     except WorkerServiceError as exc:
         raise _translate_service_error(exc)
@@ -149,7 +150,8 @@ async def upload_task_output_archive(
     worker_token: str = Depends(_require_worker_token),
 ):
     try:
-        archive_bytes = await archive.read()
-        return worker_service.store_task_output_archive(worker_token, task_id, archive_bytes)
+        return worker_service.store_task_output_archive(worker_token, task_id, archive.file)
     except WorkerServiceError as exc:
         raise _translate_service_error(exc)
+    finally:
+        await archive.close()

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import io
 import json
 import os
 import shutil
@@ -134,8 +133,21 @@ class PortalWorkerClient:
     def fail_task(self, token: str, task_id: str, payload: dict):
         return self._client.post(f"/api/worker/tasks/{task_id}/fail", headers=self._headers(token), json=payload).raise_for_status().json()
 
-    def download_task_snapshot(self, token: str, task_id: str) -> bytes:
-        return self._client.get(f"/api/worker/tasks/{task_id}/snapshot", headers=self._headers(token)).raise_for_status().content
+    def download_task_snapshot(self, token: str, task_id: str) -> Path:
+        handle = tempfile.NamedTemporaryFile(prefix=f"{task_id}-snapshot-", suffix=".zip", delete=False)
+        archive_path = Path(handle.name)
+        handle.close()
+        try:
+            with self._client.stream("GET", f"/api/worker/tasks/{task_id}/snapshot", headers=self._headers(token)) as response:
+                response.raise_for_status()
+                with open(archive_path, "wb") as target:
+                    for chunk in response.iter_bytes():
+                        target.write(chunk)
+            return archive_path
+        except Exception:
+            if archive_path.exists():
+                archive_path.unlink()
+            raise
 
     def upload_task_output_archive(self, token: str, task_id: str, archive_path: Path | str):
         archive_path = Path(archive_path)
@@ -204,9 +216,13 @@ class WorkerAgent:
         if scratch_dir.exists():
             shutil.rmtree(scratch_dir, ignore_errors=True)
         scratch_dir.parent.mkdir(parents=True, exist_ok=True)
-        snapshot_bytes = self.portal_client.download_task_snapshot(token, task["task_id"])
-        with zipfile.ZipFile(io.BytesIO(snapshot_bytes), "r") as archive:
-            archive.extractall(scratch_dir)
+        snapshot_path = Path(self.portal_client.download_task_snapshot(token, task["task_id"]))
+        try:
+            with zipfile.ZipFile(snapshot_path, "r") as archive:
+                archive.extractall(scratch_dir)
+        finally:
+            if snapshot_path.exists():
+                snapshot_path.unlink()
         return scratch_dir
 
     @staticmethod

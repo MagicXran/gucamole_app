@@ -28,6 +28,175 @@
         return null;
     }
 
+    function buildAppKindOptions(value) {
+        var selected = value || 'commercial_software';
+        return '<option value="commercial_software"' + (selected === 'commercial_software' ? ' selected' : '') + '>商业软件</option>' +
+            '<option value="simulation_app"' + (selected === 'simulation_app' ? ' selected' : '') + '>仿真APP</option>' +
+            '<option value="compute_tool"' + (selected === 'compute_tool' ? ' selected' : '') + '>计算工具</option>';
+    }
+
+    function formatAttachmentEditorValue(items) {
+        return (items || []).map(function(item) {
+            var parts = [String(item.title || '').trim()];
+            var summary = String(item.summary || '').trim();
+            if (summary) parts.push(summary);
+            parts.push(String(item.link_url || '').trim());
+            return parts.join(' | ');
+        }).filter(function(line) { return !!line.trim(); }).join('\n');
+    }
+
+    function parseAttachmentEditorValue(value, label) {
+        return String(value || '')
+            .split(/\r?\n/)
+            .map(function(line) { return line.trim(); })
+            .filter(function(line) { return !!line; })
+            .map(function(line, index) {
+                var parts = line.split('|').map(function(part) { return part.trim(); });
+                if (parts.length < 2) {
+                    throw new Error(label + ' 第 ' + (index + 1) + ' 行格式不对，至少要写“标题 | 链接”');
+                }
+                var title = parts[0];
+                var linkUrl = parts[parts.length - 1];
+                var summary = parts.length > 2 ? parts.slice(1, -1).join(' | ') : '';
+                if (!title || !linkUrl) {
+                    throw new Error(label + ' 第 ' + (index + 1) + ' 行缺标题或链接');
+                }
+                return {
+                    title: title,
+                    summary: summary,
+                    link_url: linkUrl,
+                    sort_order: index,
+                };
+            });
+    }
+
+    function setPoolAttachmentStatus(message, tone) {
+        var statusEl = document.getElementById('pool-attachment-status');
+        if (!statusEl) return;
+        statusEl.className = 'field-hint' + (tone ? ' field-hint--' + tone : '');
+        statusEl.textContent = message || '';
+    }
+
+    function applyPoolAttachmentPayload(payload) {
+        var tutorialEl = document.getElementById('pool-attachment-tutorial-docs');
+        var videoEl = document.getElementById('pool-attachment-video-resources');
+        var pluginEl = document.getElementById('pool-attachment-plugin-downloads');
+        if (tutorialEl) tutorialEl.value = formatAttachmentEditorValue(payload && payload.tutorial_docs);
+        if (videoEl) videoEl.value = formatAttachmentEditorValue(payload && payload.video_resources);
+        if (pluginEl) pluginEl.value = formatAttachmentEditorValue(payload && payload.plugin_downloads);
+    }
+
+    function resolvePoolAttachmentTargetPoolId(poolId) {
+        if (poolId) return poolId;
+        var boundPoolEl = document.getElementById('pool-attachment-bound-pool-id');
+        if (boundPoolEl && boundPoolEl.value) {
+            return parseInt(boundPoolEl.value, 10) || null;
+        }
+        var poolEl = document.getElementById('app-pool-id');
+        if (!poolEl || !poolEl.value) return null;
+        return parseInt(poolEl.value, 10) || null;
+    }
+
+    function refreshPoolAttachmentBindingStatus() {
+        var boundPoolEl = document.getElementById('pool-attachment-bound-pool-id');
+        if (!boundPoolEl || !boundPoolEl.value) return;
+        var boundPoolId = parseInt(boundPoolEl.value, 10) || null;
+        var poolEl = document.getElementById('app-pool-id');
+        var selectedPoolId = poolEl && poolEl.value ? (parseInt(poolEl.value, 10) || null) : null;
+        if (boundPoolId && selectedPoolId && boundPoolId !== selectedPoolId) {
+            setPoolAttachmentStatus(
+                '你改了 App 的资源池选择，但共享附件仍绑定原资源池 #' + boundPoolId + '。先保存 App 后再改新池附件，别把别的池写脏。',
+                'warning'
+            );
+            return;
+        }
+        if (boundPoolId) {
+            setPoolAttachmentStatus('当前正在编辑资源池 #' + boundPoolId + ' 的共享附件。', 'info');
+        }
+    }
+
+    async function loadPoolAttachmentEditors(poolId) {
+        var targetPoolId = resolvePoolAttachmentTargetPoolId(poolId);
+        if (!targetPoolId) {
+            setPoolAttachmentStatus('请先选择资源池，再维护共享附件。', 'warning');
+            applyPoolAttachmentPayload({
+                tutorial_docs: [],
+                video_resources: [],
+                plugin_downloads: [],
+            });
+            return null;
+        }
+        setPoolAttachmentStatus('正在加载当前资源池共享附件...', 'info');
+        try {
+            var payload = await api('GET', '/pools/' + targetPoolId + '/attachments');
+            applyPoolAttachmentPayload(payload || {});
+            refreshPoolAttachmentBindingStatus();
+            return payload;
+        } catch (e) {
+            setPoolAttachmentStatus('共享附件加载失败：' + e.message, 'error');
+            showToast('加载资源池共享附件失败: ' + e.message, 'error');
+            throw e;
+        }
+    }
+
+    async function savePoolAttachments(poolId, overridePayload) {
+        var targetPoolId = resolvePoolAttachmentTargetPoolId(poolId);
+        if (!targetPoolId) {
+            showToast('请选择资源池后再保存共享附件', 'error');
+            return null;
+        }
+        try {
+            var payload = overridePayload || {
+                tutorial_docs: parseAttachmentEditorValue(
+                    document.getElementById('pool-attachment-tutorial-docs').value,
+                    '教程文档'
+                ),
+                video_resources: parseAttachmentEditorValue(
+                    document.getElementById('pool-attachment-video-resources').value,
+                    '视频资源'
+                ),
+                plugin_downloads: parseAttachmentEditorValue(
+                    document.getElementById('pool-attachment-plugin-downloads').value,
+                    '插件下载'
+                ),
+            };
+            setPoolAttachmentStatus('正在保存当前资源池共享附件...', 'info');
+            var result = await api('PUT', '/pools/' + targetPoolId + '/attachments', payload);
+            applyPoolAttachmentPayload(result || payload);
+            setPoolAttachmentStatus('资源池共享附件已保存。', 'success');
+            showToast('资源池附件已保存');
+            return result;
+        } catch (e) {
+            setPoolAttachmentStatus('共享附件保存失败：' + e.message, 'error');
+            showToast(e.message, 'error');
+            if (/格式不对|缺标题或链接/.test(String(e && e.message || ''))) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    async function clearPoolAttachments(poolId) {
+        var targetPoolId = resolvePoolAttachmentTargetPoolId(poolId);
+        if (!targetPoolId) {
+            showToast('请选择资源池后再清空共享附件', 'error');
+            return null;
+        }
+        if (typeof confirm === 'function' && !confirm('确定清空当前资源池的教程文档 / 视频资源 / 插件下载？')) {
+            return null;
+        }
+        applyPoolAttachmentPayload({
+            tutorial_docs: [],
+            video_resources: [],
+            plugin_downloads: [],
+        });
+        return savePoolAttachments(targetPoolId, {
+            tutorial_docs: [],
+            video_resources: [],
+            plugin_downloads: [],
+        });
+    }
+
     function buildScriptBindingSummary(state) {
         if (!state.script_enabled) {
             return '当前只作为普通 RemoteApp 使用，不会派发到 Worker 节点执行脚本。';
@@ -205,6 +374,9 @@
             return '<option value="' + pool.id + '"' + selected + '>' + escapeHtml(pool.name) + '</option>';
         }).join('');
         var defaultPoolId = app && app.pool_id ? app.pool_id : _pools[0].id;
+        var appKindSelect = '<div class="form-group"><label>应用分类</label><select id="app-kind">' +
+            buildAppKindOptions(app && app.app_kind ? app.app_kind : 'commercial_software') +
+            '</select></div>';
         var poolSelect = '<div class="form-group"><label>资源池</label><select id="app-pool-id">' +
             _pools.map(function(pool) {
                 var selected = pool.id === defaultPoolId ? ' selected' : '';
@@ -298,6 +470,30 @@
             tzSelect + kbSelect +
             '</div></div>' +
             '</div></details>';
+        var attachmentLineHint = '每行一条：标题 | 摘要 | https://链接。摘要可留空。';
+        var poolAttachmentHtml = isEdit ? (
+            '<details class="advanced-params">' +
+            '<summary>资源池共享附件</summary>' +
+            '<div class="advanced-params__body">' +
+            '<div class="info-callout" style="margin-bottom:0.8rem;">' +
+            '<div class="info-callout__title">这不是单个 App 私货</div>' +
+            '<div class="field-hint">这里维护的是当前资源池共享附件。切池子就切到另一套内容，别脑补成 App 私有附件。</div>' +
+            '</div>' +
+            '<input type="hidden" id="pool-attachment-bound-pool-id" value="' + escapeAttr(defaultPoolId) + '">' +
+            '<div id="pool-attachment-status" class="field-hint">正在准备共享附件编辑器...</div>' +
+            '<div class="form-group"><label for="pool-attachment-tutorial-docs">教程文档</label>' +
+            '<textarea id="pool-attachment-tutorial-docs" rows="4" placeholder="' + escapeAttr(attachmentLineHint) + '"></textarea></div>' +
+            '<div class="form-group"><label for="pool-attachment-video-resources">视频资源</label>' +
+            '<textarea id="pool-attachment-video-resources" rows="4" placeholder="' + escapeAttr(attachmentLineHint) + '"></textarea></div>' +
+            '<div class="form-group"><label for="pool-attachment-plugin-downloads">插件下载</label>' +
+            '<textarea id="pool-attachment-plugin-downloads" rows="4" placeholder="' + escapeAttr(attachmentLineHint) + '"></textarea></div>' +
+            '<div class="field-hint">最简写法：标题 | 链接。需要摘要时再加中间那段。</div>' +
+            '<div class="modal__actions">' +
+            '<button type="button" class="btn btn--outline" id="pool-attachment-clear-btn">清空池附件</button>' +
+            '<button type="button" class="btn btn--primary" id="pool-attachment-save-btn">保存池附件</button>' +
+            '</div>' +
+            '</div></details>'
+        ) : '';
 
         var html = '<div class="modal-overlay" onclick="closeModal(event)">' +
             '<div class="modal" onclick="event.stopPropagation()">' +
@@ -321,17 +517,22 @@
             '</div>' +
             formGroup('RemoteApp', 'app-remote-app', app ? (app.remote_app || '') : '', 'text', false, '如 ||notepad') +
             '<div class="form-row">' +
-            formGroup('工作目录', 'app-remote-dir', app ? (app.remote_app_dir || '') : '') +
-            formGroup('命令参数', 'app-remote-args', app ? (app.remote_app_args || '') : '') +
+            appKindSelect +
+            poolSelect +
+            '</div>' +
+            '<div class="field-hint">应用分类决定它在门户里落到哪个栏目。别乱选，分类和资源池用途打架时后端会直接拒绝。</div>' +
+            '<div class="form-row">' +
+            formGroup('成员并发上限', 'app-member-max', app ? (app.member_max_concurrent || 1) : 1, 'number', true) +
             '</div>' +
             '<div class="form-row">' +
-            poolSelect +
-            formGroup('成员并发上限', 'app-member-max', app ? (app.member_max_concurrent || 1) : 1, 'number', true) +
+            formGroup('工作目录', 'app-remote-dir', app ? (app.remote_app_dir || '') : '') +
+            formGroup('命令参数', 'app-remote-args', app ? (app.remote_app_args || '') : '') +
             '</div>' +
             '<div class="form-group form-group--checkbox">' +
             '<input type="checkbox" id="app-ignore-cert"' + ((!app || app.ignore_cert) ? ' checked' : '') + '>' +
             '<label for="app-ignore-cert">忽略证书错误</label>' +
             '</div>' +
+            poolAttachmentHtml +
             scriptHtml +
             advancedHtml +
             (isEdit ? '<div class="form-group form-group--checkbox">' +
@@ -353,11 +554,33 @@
             profileSelectEl.addEventListener('change', applySelectedScriptProfile);
             updateScriptProfileHint(profileSelectEl.value);
         }
+        var poolSelectEl = document.getElementById('app-pool-id');
+        if (poolSelectEl && isEdit) {
+            poolSelectEl.addEventListener('change', function() {
+                refreshPoolAttachmentBindingStatus();
+            });
+        }
+        var poolAttachmentSaveBtn = document.getElementById('pool-attachment-save-btn');
+        if (poolAttachmentSaveBtn) {
+            poolAttachmentSaveBtn.addEventListener('click', function() {
+                savePoolAttachments();
+            });
+        }
+        var poolAttachmentClearBtn = document.getElementById('pool-attachment-clear-btn');
+        if (poolAttachmentClearBtn) {
+            poolAttachmentClearBtn.addEventListener('click', function() {
+                clearPoolAttachments();
+            });
+        }
         ['app-script-enabled', 'app-script-profile-key', 'app-script-executor', 'app-script-worker-group'].forEach(function(id) {
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', updateScriptBindingSummary);
         });
         updateScriptBindingSummary();
+        if (isEdit) {
+            await loadPoolAttachmentEditors(defaultPoolId);
+            refreshPoolAttachmentBindingStatus();
+        }
     }
 
     function updateScriptBindingSummary() {
@@ -382,6 +605,7 @@
         var data = {
             name: document.getElementById('app-name').value.trim(),
             icon: document.getElementById('app-icon').value.trim() || 'desktop',
+            app_kind: document.getElementById('app-kind').value || 'commercial_software',
             hostname: document.getElementById('app-hostname').value.trim(),
             port: parseInt(document.getElementById('app-port').value) || 3389,
             rdp_username: document.getElementById('app-rdp-user').value.trim(),
@@ -472,5 +696,8 @@
         showAppModal: showAppModal,
         updateScriptBindingSummary: updateScriptBindingSummary,
         saveApp: saveApp,
+        loadPoolAttachmentEditors: loadPoolAttachmentEditors,
+        savePoolAttachments: savePoolAttachments,
+        clearPoolAttachments: clearPoolAttachments,
     };
 })(typeof window !== 'undefined' ? window : globalThis);

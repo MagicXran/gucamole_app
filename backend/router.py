@@ -74,7 +74,8 @@ def _build_all_connections(user_id: int) -> dict:
                a.timezone, a.keyboard_layout
         FROM remote_app a
         JOIN remote_app_acl acl ON a.id = acl.app_id
-        WHERE acl.user_id = %(user_id)s AND a.is_active = 1
+        JOIN resource_pool p ON p.id = a.pool_id
+        WHERE acl.user_id = %(user_id)s AND a.is_active = 1 AND p.is_active = 1
     """
     apps = db.execute_query(query, {"user_id": user_id})
 

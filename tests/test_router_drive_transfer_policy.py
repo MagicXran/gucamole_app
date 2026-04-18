@@ -106,6 +106,7 @@ def test_build_all_connections_inherits_global_transfer_disable_flags():
 
     assert "a.disable_download" in router_module.db.last_query
     assert "a.disable_upload" in router_module.db.last_query
+    assert "p.is_active = 1" in router_module.db.last_query
     assert params["disable-download"] == "true"
     assert params["disable-upload"] == "true"
 
@@ -135,7 +136,7 @@ def test_build_all_connections_enforces_per_app_disable_override():
     assert params["disable-upload"] == "true"
 
 
-def _load_admin_router_module():
+def _load_admin_router_module(*, stub_bindings=True):
     fake_database = types.ModuleType("backend.database")
 
     class FakeTransaction:
@@ -149,21 +150,34 @@ def _load_admin_router_module():
         def __init__(self):
             self.insert_params = None
             self.update_params = None
+            self.query_log = []
+            self.update_log = []
+            self.last_insert_id = None
+            self.catalog_app_lookup_count = 0
+            self.valid_acl_app_ids = {1, 2, 3}
 
         @staticmethod
         def transaction():
             return FakeTransaction()
 
         def execute_query(self, query, params=None, fetch_one=False, conn=None):
+            self.query_log.append(query)
             if "FROM resource_pool" in query:
                 return {"id": 1} if fetch_one else [{"id": 1}]
+            if "SELECT id, username FROM portal_user" in query:
+                return {"id": params["id"], "username": "alice"} if fetch_one else [{"id": params["id"], "username": "alice"}]
+            if "SELECT id FROM remote_app WHERE is_active = 1" in query:
+                app_ids = list(dict.fromkeys(int(value) for value in params.values()))
+                rows = [{"id": app_id} for app_id in app_ids if app_id in self.valid_acl_app_ids]
+                return rows[0] if fetch_one else rows
+            if "SELECT DISTINCT COALESCE(app_kind, 'commercial_software') AS app_kind" in query:
+                if params.get("pool_id") == 2:
+                    return [{"app_kind": "simulation_app"}]
+                return []
+            if "SELECT LAST_INSERT_ID() AS id" in query:
+                return {"id": self.last_insert_id}
             if "SELECT * FROM remote_app WHERE name = %(name)s" in query:
-                return {
-                    "id": 9,
-                    "name": params["name"],
-                    "pool_id": 1,
-                    "is_active": 1,
-                }
+                raise AssertionError("create_app 不该再按 name 回捞最新 remote_app")
             if "SELECT * FROM remote_app WHERE id = %(id)s" in query:
                 return {
                     "id": params["id"],
@@ -171,11 +185,22 @@ def _load_admin_router_module():
                     "pool_id": 1,
                     "is_active": 1,
                 }
+            if "SELECT id FROM catalog_app WHERE app_key = %(app_key)s" in query:
+                self.catalog_app_lookup_count += 1
+                if self.catalog_app_lookup_count > 1:
+                    raise AssertionError("_upsert_catalog_bindings 不该在插入后再按 app_key 回捞 catalog_app")
+                return None
+            if "SELECT id FROM app_binding WHERE remote_app_id = %(remote_app_id)s AND binding_kind = 'gui_remoteapp' LIMIT 1" in query:
+                return None
             return {"id": 1} if fetch_one else []
 
         def execute_update(self, query, params, conn=None):
+            self.update_log.append((query, dict(params), conn))
             if "INSERT INTO remote_app" in query:
                 self.insert_params = dict(params)
+                self.last_insert_id = 9
+            if "INSERT INTO catalog_app" in query:
+                self.last_insert_id = 19
             if "UPDATE remote_app SET" in query:
                 self.update_params = dict(params)
 
@@ -227,7 +252,8 @@ def _load_admin_router_module():
     sys.modules.pop("backend.admin_router", None)
     admin_module = importlib.import_module("backend.admin_router")
 
-    admin_module._upsert_catalog_bindings = lambda *args, **kwargs: None
+    if stub_bindings:
+        admin_module._upsert_catalog_bindings = lambda *args, **kwargs: None
     admin_module._get_app_admin_row = lambda app_id, conn=None: {
         "id": app_id,
         "name": "demo-app",
@@ -288,3 +314,163 @@ def test_admin_update_app_preserves_transfer_policy_values(policy_value):
     assert fake_db.update_params is not None
     assert fake_db.update_params["disable_download"] == policy_value
     assert fake_db.update_params["disable_upload"] == policy_value
+
+
+@pytest.mark.parametrize("app_kind", ["commercial_software", "simulation_app", "compute_tool"])
+def test_admin_create_app_persists_app_kind(app_kind):
+    admin_module, fake_db = _load_admin_router_module()
+
+    req = admin_module.AppCreateRequest(
+        name=f"app-kind-create-{app_kind}",
+        hostname="rdp.example.local",
+        pool_id=1,
+        app_kind=app_kind,
+    )
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    admin = admin_module.UserInfo(
+        user_id=1,
+        username="admin",
+        display_name="管理员",
+        is_admin=True,
+    )
+
+    admin_module.create_app(req=req, request=request, admin=admin)
+
+    assert fake_db.insert_params is not None
+    assert fake_db.insert_params["app_kind"] == app_kind
+
+
+@pytest.mark.parametrize("app_kind", ["commercial_software", "simulation_app", "compute_tool"])
+def test_admin_update_app_persists_app_kind(app_kind):
+    admin_module, fake_db = _load_admin_router_module()
+
+    req = admin_module.AppUpdateRequest(app_kind=app_kind)
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    admin = admin_module.UserInfo(
+        user_id=1,
+        username="admin",
+        display_name="管理员",
+        is_admin=True,
+    )
+
+    admin_module.update_app(app_id=9, req=req, request=request, admin=admin)
+
+    assert fake_db.update_params is not None
+    assert fake_db.update_params["app_kind"] == app_kind
+
+
+def test_admin_create_app_rejects_mixed_kind_within_same_pool():
+    admin_module, _fake_db = _load_admin_router_module()
+
+    req = admin_module.AppCreateRequest(
+        name="mixed-kind",
+        hostname="rdp.example.local",
+        pool_id=2,
+        app_kind="compute_tool",
+    )
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    admin = admin_module.UserInfo(
+        user_id=1,
+        username="admin",
+        display_name="管理员",
+        is_admin=True,
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        admin_module.create_app(req=req, request=request, admin=admin)
+
+    assert "资源池内应用分类必须一致" in str(exc_info.value)
+
+
+def test_admin_create_app_uses_last_insert_id_for_reload():
+    admin_module, fake_db = _load_admin_router_module()
+
+    req = admin_module.AppCreateRequest(
+        name="last-insert-id-app",
+        hostname="rdp.example.local",
+        pool_id=1,
+    )
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    admin = admin_module.UserInfo(
+        user_id=1,
+        username="admin",
+        display_name="管理员",
+        is_admin=True,
+    )
+
+    admin_module.create_app(req=req, request=request, admin=admin)
+
+    assert any("SELECT LAST_INSERT_ID() AS id" in query for query in fake_db.query_log)
+    assert all("SELECT * FROM remote_app WHERE name = %(name)s" not in query for query in fake_db.query_log)
+
+
+def test_upsert_catalog_bindings_uses_last_insert_id_for_new_catalog_app():
+    admin_module, fake_db = _load_admin_router_module(stub_bindings=False)
+
+    admin_module._upsert_catalog_bindings(
+        {
+            "id": 9,
+            "name": "绑定测试",
+            "icon": "desktop",
+            "pool_id": 1,
+            "is_active": 1,
+        },
+        script_enabled=None,
+        script_profile_key=None,
+        script_executor_key=None,
+        script_worker_group_id=None,
+        script_scratch_root=None,
+        conn=object(),
+    )
+
+    assert any("SELECT LAST_INSERT_ID() AS id" in query for query in fake_db.query_log)
+    assert fake_db.catalog_app_lookup_count == 1
+
+
+def test_update_user_acl_rejects_invalid_app_ids_before_clearing_existing_acl():
+    admin_module, fake_db = _load_admin_router_module()
+    fake_db.valid_acl_app_ids = {1}
+
+    req = admin_module.AclUpdateRequest(app_ids=[1, 999])
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    admin = admin_module.UserInfo(
+        user_id=1,
+        username="admin",
+        display_name="管理员",
+        is_admin=True,
+    )
+
+    with pytest.raises(admin_module.HTTPException) as exc_info:
+        admin_module.update_user_acl(user_id=7, req=req, request=request, admin=admin)
+
+    assert exc_info.value.status_code == 400
+    assert "应用不存在或已禁用" in exc_info.value.detail
+    assert all("DELETE FROM remote_app_acl" not in query for query, _params, _conn in fake_db.update_log)
+    assert all("INSERT IGNORE INTO remote_app_acl" not in query for query, _params, _conn in fake_db.update_log)
+
+
+def test_update_user_acl_replaces_acl_inside_single_transaction_after_validation():
+    admin_module, fake_db = _load_admin_router_module()
+
+    req = admin_module.AclUpdateRequest(app_ids=[3, 1, 3])
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    admin = admin_module.UserInfo(
+        user_id=1,
+        username="admin",
+        display_name="管理员",
+        is_admin=True,
+    )
+
+    result = admin_module.update_user_acl(user_id=7, req=req, request=request, admin=admin)
+
+    delete_calls = [(query, params, conn) for query, params, conn in fake_db.update_log if "DELETE FROM remote_app_acl" in query]
+    insert_calls = [(query, params, conn) for query, params, conn in fake_db.update_log if "INSERT IGNORE INTO remote_app_acl" in query]
+
+    assert result == {"user_id": 7, "app_ids": [3, 1, 3]}
+    assert len(delete_calls) == 1
+    assert len(insert_calls) == 2
+    assert delete_calls[0][1] == {"uid": 7}
+    assert delete_calls[0][2] is not None
+    assert {params["aid"] for _query, params, _conn in insert_calls} == {1, 3}
+    assert {params["uid"] for _query, params, _conn in insert_calls} == {7}
+    assert {conn for _query, _params, conn in [*delete_calls, *insert_calls]} == {delete_calls[0][2]}

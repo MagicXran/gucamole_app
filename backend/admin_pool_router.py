@@ -7,8 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from backend.auth import require_admin
 from backend.audit import log_action
 from backend.database import db
+from backend.app_attachment_service import AppAttachmentService
 from backend.monitor import invalidate_user_session_if_safe
 from backend.models import (
+    PoolAttachmentResponse,
+    PoolAttachmentUpdateRequest,
     ResourcePoolAdminResponse,
     ResourcePoolCreateRequest,
     ResourcePoolUpdateRequest,
@@ -18,6 +21,7 @@ from backend.resource_pool_service import ResourcePoolService
 
 router = APIRouter(prefix="/api/admin/pools", tags=["admin-pools"])
 pool_service = ResourcePoolService(db=db)
+attachment_service = AppAttachmentService(db=db)
 
 
 @router.get("", response_model=list[ResourcePoolAdminResponse])
@@ -58,7 +62,35 @@ def update_pool(
         admin.user_id, admin.username, "admin_update_pool",
         "pool", pool_id, pool["name"], ip_address=client_ip,
     )
+    if payload.get("is_active") is False:
+        pool_service.cleanup_invalid_queue_entries(pool_id=pool_id)
+        pool_service.reclaim_pool_sessions(pool_id=pool_id, reason="admin")
+        pool_service.cancel_pool_tasks(pool_id=pool_id, reason="pool_disabled")
+        from backend.router import guac_service
+        guac_service.invalidate_all_sessions()
     return pool
+
+
+@router.get("/{pool_id}/attachments", response_model=PoolAttachmentResponse)
+def get_pool_attachments(pool_id: int, admin: UserInfo = Depends(require_admin)):
+    return attachment_service.list_pool_attachments_for_admin(pool_id=pool_id)
+
+
+@router.put("/{pool_id}/attachments", response_model=PoolAttachmentResponse)
+def replace_pool_attachments(
+    pool_id: int,
+    req: PoolAttachmentUpdateRequest,
+    request: Request,
+    admin: UserInfo = Depends(require_admin),
+):
+    payload = req.model_dump()
+    result = attachment_service.replace_pool_attachments(pool_id=pool_id, payload=payload)
+    client_ip = request.client.host if request.client else "unknown"
+    log_action(
+        admin.user_id, admin.username, "admin_update_pool_attachments",
+        "pool", pool_id, f"pool_{pool_id}", detail=payload, ip_address=client_ip,
+    )
+    return result
 
 
 @router.get("/queues")

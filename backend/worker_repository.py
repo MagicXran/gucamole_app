@@ -458,6 +458,28 @@ class MySQLWorkerRepository:
             fetch_one=True,
         )
 
+    def cancel_task_if_requested(self, task_id: str, worker_node_id: int, event_at: datetime):
+        self._db.execute_update(
+            """
+            UPDATE platform_task
+            SET status = 'cancelled',
+                cancel_requested = 0,
+                ended_at = %(event_at)s,
+                result_summary_json = COALESCE(result_summary_json, %(result_summary_json)s)
+            WHERE task_id = %(task_id)s
+              AND worker_node_id = %(worker_node_id)s
+              AND cancel_requested = 1
+              AND status IN ('assigned', 'preparing', 'running', 'uploading')
+            """,
+            {
+                "task_id": task_id,
+                "worker_node_id": worker_node_id,
+                "event_at": event_at,
+                "result_summary_json": self._encode_json({"error": "cancel_requested"}),
+            },
+        )
+        return self.get_task_for_worker(task_id, worker_node_id)
+
     def update_task_status_for_worker(self, task_id: str, worker_node_id: int, payload: dict, event_at: datetime):
         updated = self._db.execute_update(
             """
@@ -646,6 +668,58 @@ class MySQLWorkerRepository:
         )
 
     def requeue_task_after_worker_loss(self, task_id: str, worker_node_id: int):
+        guard = self._db.execute_query(
+            """
+            SELECT t.id, t.resource_pool_id,
+                   COALESCE(p.is_active, 1) AS pool_active,
+                   (
+                       SELECT q.status
+                       FROM launch_queue q
+                       WHERE q.platform_task_id = t.id
+                       ORDER BY q.id DESC
+                       LIMIT 1
+                   ) AS queue_status
+            FROM platform_task t
+            LEFT JOIN resource_pool p ON p.id = t.resource_pool_id
+            WHERE t.task_id = %(task_id)s
+              AND t.worker_node_id = %(worker_node_id)s
+            LIMIT 1
+            """,
+            {"task_id": task_id, "worker_node_id": worker_node_id},
+            fetch_one=True,
+        )
+        if not guard:
+            return None
+        if int(guard.get("pool_active") or 0) != 1 or str(guard.get("queue_status") or "") == "cancelled":
+            updated = self._db.execute_update(
+                """
+                UPDATE platform_task
+                SET status = 'cancelled',
+                    ended_at = NOW(),
+                    result_summary_json = %(result_summary_json)s
+                WHERE task_id = %(task_id)s
+                  AND worker_node_id = %(worker_node_id)s
+                  AND status IN ('assigned', 'preparing', 'running', 'uploading')
+                """,
+                {
+                    "task_id": task_id,
+                    "worker_node_id": worker_node_id,
+                    "result_summary_json": self._encode_json({"error": "pool_disabled"}),
+                },
+            )
+            if updated <= 0:
+                return None
+            return self._db.execute_query(
+                """
+                SELECT *
+                FROM platform_task
+                WHERE task_id = %(task_id)s
+                LIMIT 1
+                """,
+                {"task_id": task_id},
+                fetch_one=True,
+            )
+
         updated = self._db.execute_update(
             """
             UPDATE platform_task

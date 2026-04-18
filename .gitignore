@@ -39,3 +39,4 @@ deploy/backups/
 # Local frontend toolchain
 node_modules/
 output/
+frontend/portal/

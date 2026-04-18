@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta
+import json
 from typing import Any, Callable
 
 from backend.database import CONFIG
+from backend.script_dispatch import evaluate_script_dispatch_target
 
 
 def build_default_pool_seed_rows(app_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -37,6 +39,14 @@ class ResourcePoolService:
 
     def _now(self) -> datetime:
         return self._now_provider()
+
+    @staticmethod
+    def _decode_json(value):
+        if value in (None, ""):
+            return None
+        if isinstance(value, (dict, list)):
+            return value
+        return json.loads(value)
 
     @contextmanager
     def _pool_lock(self, pool_id: int):
@@ -159,8 +169,10 @@ class ResourcePoolService:
             SELECT 1 AS ok
             FROM remote_app a
             JOIN remote_app_acl acl ON acl.app_id = a.id AND acl.user_id = %(user_id)s
+            JOIN resource_pool p ON p.id = a.pool_id
             WHERE a.pool_id = %(pool_id)s
               AND a.is_active = 1
+              AND p.is_active = 1
             LIMIT 1
             """,
             {"user_id": user_id, "pool_id": pool_id},
@@ -172,6 +184,38 @@ class ResourcePoolService:
         self._cancel_queue_as_invalid(queue_id, reason)
         return self.get_queue_status(queue_id=queue_id, user_id=user_id)
 
+    def _cancel_task_for_queue(self, platform_task_id: int | None, reason: str):
+        if not platform_task_id:
+            return
+        self._db.execute_update(
+            """
+            UPDATE platform_task
+            SET status = 'cancelled',
+                cancel_requested = 0,
+                ended_at = NOW(),
+                result_summary_json = JSON_OBJECT('error', %(reason)s)
+            WHERE id = %(platform_task_id)s
+              AND status IN ('queued', 'submitted')
+            """,
+            {"platform_task_id": platform_task_id, "reason": reason},
+        )
+
+    def _list_worker_dispatch_nodes(self, worker_group_id: int) -> list[dict[str, Any]]:
+        rows = self._db.execute_query(
+            """
+            SELECT status, display_name, supported_executor_keys_json, capabilities_json, runtime_state_json
+            FROM worker_node
+            WHERE group_id = %(worker_group_id)s
+            ORDER BY display_name ASC, id ASC
+            """,
+            {"worker_group_id": worker_group_id},
+        )
+        for row in rows:
+            row["supported_executor_keys_json"] = self._decode_json(row.get("supported_executor_keys_json")) or []
+            row["capabilities_json"] = self._decode_json(row.get("capabilities_json")) or {}
+            row["runtime_state_json"] = self._decode_json(row.get("runtime_state_json")) or {}
+        return rows
+
     def list_user_pools(self, user_id: int) -> list[dict[str, Any]]:
         rows = self._db.execute_query(
             """
@@ -181,6 +225,16 @@ class ResourcePoolService:
                 p.id AS pool_id,
                 p.name,
                 p.icon,
+                CASE
+                    WHEN COUNT(DISTINCT COALESCE(a.app_kind, 'commercial_software')) = 1
+                    THEN MAX(COALESCE(a.app_kind, 'commercial_software'))
+                    ELSE 'commercial_software'
+                END AS app_kind,
+                MAX(COALESCE(sp.is_enabled, 0)) AS supports_script,
+                MIN(CASE WHEN COALESCE(sp.is_enabled, 0) = 1 THEN a.id END) AS script_runtime_id,
+                MIN(CASE WHEN COALESCE(sp.is_enabled, 0) = 1 THEN ab.worker_group_id END) AS worker_group_id,
+                MIN(CASE WHEN COALESCE(sp.is_enabled, 0) = 1 THEN sp.executor_key END) AS executor_key,
+                MIN(CASE WHEN COALESCE(sp.is_enabled, 0) = 1 THEN ab.runtime_config_json END) AS runtime_config_json,
                 MAX(a.protocol) AS protocol,
                 p.max_concurrent,
                 COUNT(DISTINCT CASE WHEN s.status IN ('active', 'reclaim_pending') THEN s.id END) AS active_count,
@@ -192,6 +246,12 @@ class ResourcePoolService:
             JOIN remote_app_acl acl
               ON acl.app_id = a.id
              AND acl.user_id = %(user_id)s
+            LEFT JOIN remote_app_script_profile sp
+              ON sp.remote_app_id = a.id
+            LEFT JOIN app_binding ab
+              ON ab.remote_app_id = a.id
+             AND ab.binding_kind = 'worker_script'
+             AND ab.is_enabled = 1
             LEFT JOIN active_session s
               ON s.pool_id = p.id
              AND s.status IN ('active', 'reclaim_pending')
@@ -210,17 +270,60 @@ class ResourcePoolService:
             active_count = int(row.get("active_count") or 0)
             queued_count = int(row.get("queued_count") or 0)
             max_concurrent = int(row.get("max_concurrent") or 1)
+            available_slots = self._available_slots(pool_id)
             has_member_capacity = self.pick_launchable_member(user_id=user_id, pool_id=pool_id) is not None
+            has_capacity = queued_count == 0 and available_slots > 0 and has_member_capacity
+            supports_script = bool(row.get("supports_script"))
+            script_runtime_id = row.get("script_runtime_id")
+            worker_group_id = int(row.get("worker_group_id") or 0)
+            executor_key = str(row.get("executor_key") or "")
+            runtime_config = self._decode_json(row.get("runtime_config_json")) or {}
+            if supports_script and worker_group_id:
+                target = {
+                    "requested_runtime_id": script_runtime_id,
+                    "worker_group_id": worker_group_id,
+                    "executor_key": executor_key,
+                    "runtime_config_json": runtime_config,
+                }
+                script_status = evaluate_script_dispatch_target(
+                    target=target,
+                    worker_nodes=self._list_worker_dispatch_nodes(worker_group_id),
+                    requested_runtime_id=int(script_runtime_id or 0),
+                )
+            else:
+                script_status = {
+                    "is_schedulable": False,
+                    "script_status_code": "",
+                    "script_status_label": "",
+                    "script_status_tone": "",
+                    "summary": "",
+                    "reasons": [],
+                }
             result.append({
                 "id": int(row["launch_app_id"]),
                 "pool_id": pool_id,
                 "name": str(row["name"]),
                 "icon": str(row.get("icon") or "desktop"),
+                "app_kind": str(row.get("app_kind") or "commercial_software"),
                 "protocol": str(row.get("protocol") or "rdp"),
+                "supports_gui": True,
+                "supports_script": supports_script,
+                "script_runtime_id": script_runtime_id,
+                "script_profile_key": runtime_config.get("script_profile_key"),
+                "script_profile_name": runtime_config.get("software_display_name"),
+                "script_schedulable": bool(script_status.get("is_schedulable")),
+                "script_status_code": str(script_status.get("script_status_code") or ""),
+                "script_status_label": str(script_status.get("script_status_label") or ""),
+                "script_status_tone": str(script_status.get("script_status_tone") or ""),
+                "script_status_summary": str(script_status.get("summary") or ""),
+                "script_status_reason": str((script_status.get("reasons") or [{}])[0].get("message") or "") if script_status.get("reasons") else "",
+                "resource_status_code": "available" if has_capacity else ("queued" if queued_count > 0 else "busy"),
+                "resource_status_label": "可用" if has_capacity else ("排队中" if queued_count > 0 else "忙碌"),
+                "resource_status_tone": "success" if has_capacity else "warning",
                 "active_count": active_count,
                 "queued_count": queued_count,
                 "max_concurrent": max_concurrent,
-                "has_capacity": queued_count == 0 and active_count < max_concurrent and has_member_capacity,
+                "has_capacity": has_capacity,
             })
         return result
 
@@ -264,6 +367,17 @@ class ResourcePoolService:
             {"pool_id": pool_id},
             fetch_one=True,
         ) or {"active_count": 0}
+        task_row = self._db.execute_query(
+            """
+            /* rps:get_pool_running_task_count */
+            SELECT COUNT(*) AS task_count
+            FROM platform_task
+            WHERE resource_pool_id = %(pool_id)s
+              AND status IN ('assigned', 'preparing', 'running', 'uploading')
+            """,
+            {"pool_id": pool_id},
+            fetch_one=True,
+        ) or {"task_count": 0}
         reserved_row = self._db.execute_query(
             """
             /* rps:get_pool_reserved_count */
@@ -276,7 +390,12 @@ class ResourcePoolService:
             {"pool_id": pool_id, "exclude_queue_id": exclude_queue_id},
             fetch_one=True,
         ) or {"ready_count": 0}
-        return int(pool["max_concurrent"]) - int(active_row["active_count"]) - int(reserved_row["ready_count"])
+        return (
+            int(pool["max_concurrent"])
+            - int(active_row["active_count"])
+            - int(task_row["task_count"])
+            - int(reserved_row["ready_count"])
+        )
 
     def _pool_has_capacity(self, pool_id: int, *, exclude_queue_id: int | None = None) -> bool:
         return self._available_slots(pool_id, exclude_queue_id=exclude_queue_id) > 0
@@ -398,6 +517,7 @@ class ResourcePoolService:
               ON p.id = a.pool_id
             WHERE a.id = %(app_id)s
               AND a.is_active = 1
+              AND p.is_active = 1
             LIMIT 1
             """,
             {"user_id": user_id, "app_id": requested_app_id},
@@ -720,6 +840,7 @@ class ResourcePoolService:
                         FROM launch_queue
                         WHERE pool_id = %(pool_id)s
                           AND status = 'queued'
+                          AND COALESCE(request_mode, 'gui') = 'gui'
                         ORDER BY created_at ASC, id ASC
                         LIMIT 1
                         """,
@@ -864,33 +985,43 @@ class ResourcePoolService:
         ]
 
     def create_pool(self, payload: dict[str, Any]) -> dict[str, Any]:
-        self._db.execute_update(
-            """
-            /* rps:create_pool */
-            INSERT INTO resource_pool (
-                name, icon, max_concurrent, auto_dispatch_enabled,
-                dispatch_grace_seconds, stale_timeout_seconds, idle_timeout_seconds, is_active
+        transaction = self._db.transaction() if hasattr(self._db, "transaction") else nullcontext(None)
+        with transaction as conn:
+            self._db.execute_update(
+                """
+                /* rps:create_pool */
+                INSERT INTO resource_pool (
+                    name, icon, max_concurrent, auto_dispatch_enabled,
+                    dispatch_grace_seconds, stale_timeout_seconds, idle_timeout_seconds, is_active
+                )
+                VALUES (
+                    %(name)s, %(icon)s, %(max_concurrent)s, %(auto_dispatch_enabled)s,
+                    %(dispatch_grace_seconds)s, %(stale_timeout_seconds)s, %(idle_timeout_seconds)s, %(is_active)s
+                )
+                """,
+                payload,
+                conn=conn,
             )
-            VALUES (
-                %(name)s, %(icon)s, %(max_concurrent)s, %(auto_dispatch_enabled)s,
-                %(dispatch_grace_seconds)s, %(stale_timeout_seconds)s, %(idle_timeout_seconds)s, %(is_active)s
+            insert_row = self._db.execute_query(
+                "SELECT LAST_INSERT_ID() AS id",
+                fetch_one=True,
+                conn=conn,
             )
-            """,
-            payload,
-        )
-        row = self._db.execute_query(
-            """
-            /* rps:get_latest_pool_by_name */
-            SELECT id, name, icon, max_concurrent, auto_dispatch_enabled,
-                   dispatch_grace_seconds, stale_timeout_seconds, idle_timeout_seconds, is_active
-            FROM resource_pool
-            WHERE name = %(name)s
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            {"name": payload["name"]},
-            fetch_one=True,
-        )
+            if not insert_row or insert_row.get("id") is None:
+                raise RuntimeError("资源池创建失败")
+            row = self._db.execute_query(
+                """
+                /* rps:get_pool_admin */
+                SELECT id, name, icon, max_concurrent, auto_dispatch_enabled,
+                       dispatch_grace_seconds, stale_timeout_seconds, idle_timeout_seconds, is_active
+                FROM resource_pool
+                WHERE id = %(pool_id)s
+                LIMIT 1
+                """,
+                {"pool_id": int(insert_row["id"])},
+                fetch_one=True,
+                conn=conn,
+            )
         if not row:
             raise RuntimeError("资源池创建失败")
         return {
@@ -978,7 +1109,7 @@ class ResourcePoolService:
         rows = self._db.execute_query(
             """
             /* rps:list_live_queues */
-            SELECT id, pool_id, user_id, requested_app_id, assigned_app_id, status
+            SELECT id, pool_id, user_id, requested_app_id, assigned_app_id, status, platform_task_id, request_mode
             FROM launch_queue
             WHERE status IN ('queued', 'ready', 'launching')
               AND (%(user_id)s IS NULL OR user_id = %(user_id)s)
@@ -1008,6 +1139,7 @@ class ResourcePoolService:
                   ON p.id = a.pool_id
                 WHERE a.id = %(app_id)s
                   AND a.is_active = 1
+                  AND p.is_active = 1
                 LIMIT 1
                 """,
                 {"user_id": q_user_id, "app_id": int(row["requested_app_id"])},
@@ -1015,6 +1147,7 @@ class ResourcePoolService:
             )
             if not requested or requested.get("pool_id") is None or int(requested["pool_id"]) != q_pool_id:
                 if self._cancel_queue_as_invalid(qid, "config_changed") > 0:
+                    self._cancel_task_for_queue(row.get("platform_task_id"), "config_changed")
                     cancelled.append(qid)
                 continue
             if row.get("assigned_app_id") and str(row["status"]) in {"ready", "launching"}:
@@ -1033,14 +1166,81 @@ class ResourcePoolService:
                 )
                 if not assigned or int(assigned["pool_id"]) != q_pool_id:
                     if self._cancel_queue_as_invalid(qid, "member_unavailable") > 0:
+                        self._cancel_task_for_queue(row.get("platform_task_id"), "member_unavailable")
                         cancelled.append(qid)
                     continue
             if not self._has_accessible_member(q_user_id, q_pool_id):
                 if self._cancel_queue_as_invalid(qid, "member_unavailable") > 0:
+                    self._cancel_task_for_queue(row.get("platform_task_id"), "member_unavailable")
                     cancelled.append(qid)
         return cancelled
 
+    def reclaim_pool_sessions(self, *, pool_id: int, reason: str = "admin") -> list[str]:
+        rows = self._db.execute_query(
+            """
+            SELECT session_id
+            FROM active_session
+            WHERE pool_id = %(pool_id)s
+              AND status IN ('active', 'reclaim_pending')
+            ORDER BY id ASC
+            """,
+            {"pool_id": pool_id},
+        )
+        session_ids = [str(row["session_id"]) for row in rows]
+        if session_ids:
+            self._db.execute_update(
+                """
+                UPDATE active_session
+                SET status = 'reclaim_pending',
+                    reclaim_reason = %(reason)s,
+                    ended_at = NOW()
+                WHERE pool_id = %(pool_id)s
+                  AND status IN ('active', 'reclaim_pending')
+                """,
+                {"pool_id": pool_id, "reason": reason},
+            )
+        return session_ids
+
+    def cancel_pool_tasks(self, *, pool_id: int, reason: str = "pool_disabled") -> int:
+        cancelled = self._db.execute_update(
+            """
+            UPDATE platform_task
+            SET status = 'cancelled',
+                cancel_requested = 0,
+                ended_at = NOW(),
+                result_summary_json = JSON_OBJECT('error', %(reason)s)
+            WHERE resource_pool_id = %(pool_id)s
+              AND status IN ('queued', 'submitted')
+            """,
+            {"pool_id": pool_id, "reason": reason},
+        )
+        cancelled += self._db.execute_update(
+            """
+            UPDATE platform_task
+            SET cancel_requested = 1,
+                result_summary_json = COALESCE(result_summary_json, JSON_OBJECT('error', %(reason)s))
+            WHERE resource_pool_id = %(pool_id)s
+              AND status IN ('assigned', 'preparing', 'running', 'uploading')
+            """,
+            {"pool_id": pool_id, "reason": reason},
+        )
+        return cancelled
+
     def cancel_queue_admin(self, *, queue_id: int) -> dict[str, Any]:
+        row = self._db.execute_query(
+            """
+            /* rps:get_queue_for_admin_cancel */
+            SELECT id, request_mode, platform_task_id
+            FROM launch_queue
+            WHERE id = %(queue_id)s
+              AND status IN ('queued', 'ready', 'launching')
+            LIMIT 1
+            """,
+            {"queue_id": queue_id},
+            fetch_one=True,
+        )
+        if not row:
+            raise ValueError("排队记录不存在或已结束")
         updated = self._db.execute_update(
             """
             /* rps:cancel_queue_admin */
@@ -1055,6 +1255,8 @@ class ResourcePoolService:
         )
         if updated <= 0:
             raise ValueError("排队记录不存在或已结束")
+        if str(row.get("request_mode") or "gui") == "task":
+            self._cancel_task_for_queue(row.get("platform_task_id"), "admin")
         return {"queue_id": queue_id, "status": "cancelled"}
 
     def reclaim_session(self, *, session_id: str) -> dict[str, Any]:

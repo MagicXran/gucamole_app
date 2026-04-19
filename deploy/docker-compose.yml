@@ -87,6 +87,18 @@ services:
     depends_on:
       guac-sql:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   nginx:
     image: nginx:alpine
@@ -101,8 +113,10 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ${GUAC_DRIVE_SOURCE:-guacd_drive}:/drive:ro
     depends_on:
-      - portal-backend
-      - guac-web
+      portal-backend:
+        condition: service_healthy
+      guac-web:
+        condition: service_started
 
 volumes:
   # ============================================================

@@ -10,7 +10,7 @@ from pathlib import Path
 from secrets import token_urlsafe
 from typing import Any, Callable
 
-from backend.config_loader import load_config
+from backend.config_loader import get_config
 from backend.drive_quota import _format_bytes, _get_quota, _get_usage_sync
 from backend.script_dispatch import evaluate_script_dispatch_target
 
@@ -32,7 +32,7 @@ class TaskService:
 
     def __post_init__(self):
         self.drive_root = Path(self.drive_root)
-        config = load_config()
+        config = get_config()
         drive_cfg = config.get("guacamole", {}).get("drive", {})
         self._results_root_name = str(self.results_root_name or drive_cfg.get("results_root", "Output")).strip() or "Output"
         self._task_id_factory = self.task_id_factory or (lambda: f"task_{token_urlsafe(12)}")

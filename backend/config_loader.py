@@ -7,6 +7,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from threading import Lock
+
+
+_CONFIG_UNSET = object()
+_config_cache = _CONFIG_UNSET
+_config_lock = Lock()
 
 
 def load_config() -> dict:
@@ -65,3 +71,13 @@ def load_config() -> dict:
         str(storage_cfg.get("secure", False)),
     ).lower() in {"1", "true", "yes", "on"}
     return config
+
+
+def get_config() -> dict:
+    global _config_cache
+    if _config_cache is not _CONFIG_UNSET:
+        return _config_cache
+    with _config_lock:
+        if _config_cache is _CONFIG_UNSET:
+            _config_cache = load_config()
+        return _config_cache

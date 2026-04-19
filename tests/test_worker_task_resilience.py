@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from backend.worker_agent import WorkerAgent
+import backend.worker_service as worker_service_module
 from backend.worker_service import WorkerService, WorkerTaskStatusRequest
 
 
@@ -313,7 +314,8 @@ def test_worker_service_respects_custom_results_root(tmp_path, monkeypatch):
     (source_root / "main.py").write_text("print('ok')\n", encoding="utf-8")
 
     monkeypatch.setattr(
-        "backend.worker_service.load_config",
+        worker_service_module,
+        "load_config",
         lambda: {"guacamole": {"drive": {"results_root": "Results"}}},
     )
 

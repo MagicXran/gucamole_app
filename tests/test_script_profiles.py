@@ -1,7 +1,9 @@
+import sys
 from pathlib import Path
 
 
 def test_script_profiles_expose_config_driven_presets():
+    sys.modules.pop("backend.script_profiles", None)
     from backend.script_profiles import list_script_profiles
 
     items = list_script_profiles(
@@ -33,6 +35,7 @@ def test_script_profiles_expose_config_driven_presets():
 
 
 def test_script_runtime_settings_merge_profile_defaults():
+    sys.modules.pop("backend.script_profiles", None)
     from backend.script_profiles import resolve_script_runtime_settings
 
     result = resolve_script_runtime_settings(

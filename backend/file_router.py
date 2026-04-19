@@ -23,16 +23,11 @@ from fastapi import (
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from backend.config_loader import load_config
-from backend.drive_quota import (
-    DRIVE_BASE,
-    _format_bytes,
-    _get_quota,
-    _get_usage_sync,
-    _invalidate_usage_cache,
-    _user_dir,
-)
+from backend.config_loader import get_config
+import backend.drive_quota as drive_quota
+from backend.drive_quota import _format_bytes
 from backend.auth import get_current_user, JWT_SECRET, JWT_ALGORITHM
+from backend.database import db
 from backend.models import UserInfo
 from backend.audit import log_action
 
@@ -41,9 +36,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/files", tags=["files"])
 
 # ---- 配置 ----
-_CONFIG = load_config()
+_CONFIG = get_config()
 _ft_cfg = _CONFIG.get("file_transfer", {})
 _drive_cfg = _CONFIG.get("guacamole", {}).get("drive", {})
+DRIVE_BASE = drive_quota.DRIVE_BASE
+DEFAULT_QUOTA_BYTES = drive_quota.DEFAULT_QUOTA_BYTES
+_usage_cache = drive_quota._usage_cache
 MAX_FILE_SIZE = int(_ft_cfg.get("max_file_size_gb", 50)) * 1073741824
 CHUNK_SIZE_MB = _ft_cfg.get("chunk_size_mb", 10)
 CLEANUP_STALE_HOURS = _ft_cfg.get("cleanup_stale_uploads_hours", 24)
@@ -70,6 +68,39 @@ class MkdirRequest(BaseModel):
 # ============================================
 # 工具函数
 # ============================================
+
+def _sync_drive_quota_config():
+    drive_quota.DRIVE_BASE = DRIVE_BASE
+    drive_quota.DEFAULT_QUOTA_BYTES = DEFAULT_QUOTA_BYTES
+
+
+def _user_dir(user_id: int) -> Path:
+    return DRIVE_BASE / f"portal_u{user_id}"
+
+
+def _calc_dir_size(path: Path) -> int:
+    return drive_quota._calc_dir_size(path)
+
+
+def _get_usage_sync(user_id: int, force_refresh: bool = False) -> int:
+    _sync_drive_quota_config()
+    return drive_quota._get_usage_sync(user_id, force_refresh=force_refresh)
+
+
+def _invalidate_usage_cache(user_id: int):
+    drive_quota._invalidate_usage_cache(user_id)
+
+
+def _get_quota(user_id: int) -> int:
+    row = db.execute_query(
+        "SELECT quota_bytes FROM portal_user WHERE id = %(uid)s",
+        {"uid": user_id},
+        fetch_one=True,
+    )
+    if row and row.get("quota_bytes") is not None:
+        return int(row["quota_bytes"])
+    return DEFAULT_QUOTA_BYTES
+
 
 def _safe_resolve(user_id: int, relative_path: str) -> Path:
     """路径防穿越: resolve() + 前缀校验"""

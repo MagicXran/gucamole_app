@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+import backend.task_service as task_service_module
 from backend.drive_quota import _format_bytes
 from backend.task_service import TaskService
 
@@ -45,8 +46,8 @@ def test_submit_script_task_excludes_output_directory_from_snapshot(tmp_path, mo
     (user_root / "Output").mkdir()
     (user_root / "Output" / "old-result.txt").write_text("old\n", encoding="utf-8")
 
-    monkeypatch.setattr("backend.task_service._get_usage_sync", lambda user_id: 0)
-    monkeypatch.setattr("backend.task_service._get_quota", lambda user_id: 10 * 1024 * 1024)
+    monkeypatch.setattr(task_service_module, "_get_usage_sync", lambda user_id: 0)
+    monkeypatch.setattr(task_service_module, "_get_quota", lambda user_id: 10 * 1024 * 1024)
 
     service = TaskService(
         repo=_TaskRepo(),
@@ -80,8 +81,8 @@ def test_submit_script_task_excludes_only_nested_results_root_subtree(tmp_path, 
     (user_root / "Results" / "Sub" / "nested").mkdir()
     (user_root / "Results" / "Sub" / "nested" / "deep.txt").write_text("deep\n", encoding="utf-8")
 
-    monkeypatch.setattr("backend.task_service._get_usage_sync", lambda user_id: 0)
-    monkeypatch.setattr("backend.task_service._get_quota", lambda user_id: 10 * 1024 * 1024)
+    monkeypatch.setattr(task_service_module, "_get_usage_sync", lambda user_id: 0)
+    monkeypatch.setattr(task_service_module, "_get_quota", lambda user_id: 10 * 1024 * 1024)
 
     service = TaskService(
         repo=_TaskRepo(),

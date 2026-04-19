@@ -202,6 +202,20 @@ CREATE TABLE IF NOT EXISTS catalog_app (
     INDEX idx_catalog_app_kind_active (app_kind, is_active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Worker 节点组
+CREATE TABLE IF NOT EXISTS worker_group (
+    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
+    group_key       VARCHAR(100) NOT NULL,
+    name            VARCHAR(200) NOT NULL,
+    description     VARCHAR(500) DEFAULT NULL,
+    is_active       TINYINT(1)   NOT NULL DEFAULT 1,
+    max_claim_batch INT          NOT NULL DEFAULT 1,
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_worker_group_key (group_key),
+    INDEX idx_worker_group_active (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 应用绑定（GUI RemoteApp / Worker 脚本 等）
 CREATE TABLE IF NOT EXISTS app_binding (
     id                     BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -242,19 +256,6 @@ CREATE TABLE IF NOT EXISTS remote_app_script_profile (
     FOREIGN KEY (remote_app_id) REFERENCES remote_app(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Worker 节点组
-CREATE TABLE IF NOT EXISTS worker_group (
-    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
-    group_key       VARCHAR(100) NOT NULL,
-    name            VARCHAR(200) NOT NULL,
-    description     VARCHAR(500) DEFAULT NULL,
-    is_active       TINYINT(1)   NOT NULL DEFAULT 1,
-    max_claim_batch INT          NOT NULL DEFAULT 1,
-    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_worker_group_key (group_key),
-    INDEX idx_worker_group_active (is_active)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Worker 节点
 CREATE TABLE IF NOT EXISTS worker_node (

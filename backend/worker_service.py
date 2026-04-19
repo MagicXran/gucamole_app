@@ -16,7 +16,7 @@ from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, Field
 
-from backend.config_loader import load_config
+from backend.config_loader import get_config as load_config
 
 
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 15

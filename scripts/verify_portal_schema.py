@@ -46,6 +46,7 @@ REQUIRED_NULL_DEFAULT_COLUMNS = {
     ("remote_app", "disable_download"),
     ("remote_app", "disable_upload"),
 }
+SCHEMA_CONNECT_TIMEOUT_SECONDS = 5
 
 
 def verify_schema(cursor) -> list[str]:
@@ -109,9 +110,58 @@ def _connect_live():
         database=db_cfg["database"],
         user=db_cfg["user"],
         password=db_cfg["password"],
+        connection_timeout=SCHEMA_CONNECT_TIMEOUT_SECONDS,
         charset="utf8mb4",
         use_unicode=True,
     )
+
+
+def check_live_schema(connect_fn=None) -> dict:
+    connect = connect_fn or _connect_live
+    try:
+        conn = connect()
+        try:
+            cursor = conn.cursor()
+            problems = verify_schema(cursor)
+        finally:
+            conn.close()
+    except Exception:
+        return {
+            "ok": False,
+            "status": "degraded",
+            "checks": {
+                "schema": {
+                    "status": "error",
+                    "error_code": "schema_check_failed",
+                    "problems": ["schema check failed"],
+                }
+            },
+        }
+
+    if problems:
+        return {
+            "ok": False,
+            "status": "degraded",
+            "checks": {
+                "schema": {
+                    "status": "fail",
+                    "error_code": "schema_invalid",
+                    "problems": problems,
+                }
+            },
+        }
+
+    return {
+        "ok": True,
+        "status": "ready",
+        "checks": {
+            "schema": {
+                "status": "ok",
+                "error_code": "",
+                "problems": [],
+            }
+        },
+    }
 
 
 def main(argv=None) -> int:
@@ -124,14 +174,10 @@ def main(argv=None) -> int:
     )
     _ = parser.parse_args(argv)
 
-    conn = _connect_live()
-    try:
-        cursor = conn.cursor()
-        problems = verify_schema(cursor)
-    finally:
-        conn.close()
+    result = check_live_schema()
+    problems = result["checks"]["schema"]["problems"]
 
-    if problems:
+    if not result["ok"]:
         for problem in problems:
             print(problem)
         return 1

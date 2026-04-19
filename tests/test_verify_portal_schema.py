@@ -1,4 +1,10 @@
-from scripts.verify_portal_schema import REQUIRED_COLUMNS, REQUIRED_TABLES, verify_schema
+import json
+import sys
+import types
+from pathlib import Path
+
+import scripts.verify_portal_schema as schema_verifier
+from scripts.verify_portal_schema import REQUIRED_COLUMNS, REQUIRED_TABLES, check_live_schema, verify_schema
 
 
 class FakeCursor:
@@ -91,3 +97,54 @@ def test_verify_schema_reports_nullable_default_violations():
     assert "column should be nullable: remote_app.disable_download" in problems
     assert "column default should be NULL: remote_app.disable_download" in problems
     assert "column default should be NULL: remote_app.disable_upload" in problems
+
+
+def test_check_live_schema_redacts_connection_error_details():
+    result = check_live_schema(connect_fn=lambda: (_ for _ in ()).throw(RuntimeError("root password leaked")))
+
+    assert result["ok"] is False
+    assert result["status"] == "degraded"
+    assert result["checks"]["schema"]["status"] == "error"
+    assert result["checks"]["schema"]["error_code"] == "schema_check_failed"
+    assert result["checks"]["schema"]["problems"] == ["schema check failed"]
+    assert "password" not in json.dumps(result, ensure_ascii=False)
+    assert "root" not in json.dumps(result, ensure_ascii=False)
+
+
+def test_connect_live_uses_short_connection_timeout(monkeypatch):
+    fake_database = types.ModuleType("backend.database")
+    fake_database.CONFIG = {
+        "database": {
+            "host": "127.0.0.1",
+            "port": 3306,
+            "database": "portal_db",
+            "user": "portal_user",
+            "password": "portal_password",
+        }
+    }
+    captured = {}
+
+    monkeypatch.setitem(sys.modules, "backend.database", fake_database)
+    monkeypatch.setattr(
+        schema_verifier.mysql.connector,
+        "connect",
+        lambda **kwargs: captured.setdefault("kwargs", kwargs) or object(),
+    )
+
+    schema_verifier._connect_live()
+
+    assert captured["kwargs"]["connection_timeout"] == 5
+
+
+def test_init_sql_creates_worker_group_before_app_binding():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    for sql_path in (
+        repo_root / "database" / "init.sql",
+        repo_root / "deploy" / "initdb" / "01-portal-init.sql",
+    ):
+        sql_text = sql_path.read_text(encoding="utf-8")
+        worker_group_index = sql_text.index("CREATE TABLE IF NOT EXISTS worker_group")
+        app_binding_index = sql_text.index("CREATE TABLE IF NOT EXISTS app_binding")
+
+        assert worker_group_index < app_binding_index, f"{sql_path} 里 app_binding 先于 worker_group，冷启动会炸"

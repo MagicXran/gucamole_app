@@ -5,9 +5,9 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from backend.config_loader import load_config
+from backend.config_loader import get_config
 
-_CONFIG = load_config()
+_CONFIG = get_config()
 _drive_cfg = _CONFIG["guacamole"]["drive"]
 _ft_cfg = _CONFIG.get("file_transfer", {})
 

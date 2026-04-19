@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
+COPY scripts/ ./scripts/
 COPY config/ ./config/
 COPY --from=viewer-builder /app/frontend/js/viewer.bundle.js ./frontend/js/viewer.bundle.js
 

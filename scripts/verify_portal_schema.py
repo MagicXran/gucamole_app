@@ -24,13 +24,23 @@ REQUIRED_TABLES = [
     "platform_task",
     "platform_task_log",
     "platform_task_artifact",
+    "app_attachment",
+    "booking_register",
+    "portal_comment",
+    "sdk_package",
+    "sdk_version",
+    "sdk_asset",
+    "simulation_case",
+    "simulation_case_source",
+    "simulation_case_package",
+    "simulation_case_asset",
 ]
 
 REQUIRED_COLUMNS = {
-    "remote_app": {"pool_id", "member_max_concurrent", "disable_download", "disable_upload"},
+    "remote_app": {"app_kind", "pool_id", "member_max_concurrent", "disable_download", "disable_upload"},
     "launch_queue": {"request_mode", "platform_task_id"},
     "active_session": {"pool_id", "queue_id", "last_activity_at", "reclaim_reason"},
-    "portal_user": {"quota_bytes"},
+    "portal_user": {"quota_bytes", "department"},
     "app_binding": {"binding_kind", "worker_group_id", "runtime_config_json"},
     "remote_app_script_profile": {"executor_key", "scratch_root"},
     "worker_group": {"group_key", "max_claim_batch"},
@@ -40,6 +50,15 @@ REQUIRED_COLUMNS = {
     "platform_task": {"task_id", "task_kind", "executor_key", "status", "params_json"},
     "platform_task_log": {"task_id", "seq_no", "message"},
     "platform_task_artifact": {"task_id", "artifact_kind", "display_name"},
+    "app_attachment": {"pool_id", "attachment_kind", "url", "is_active"},
+    "booking_register": {"user_id", "app_name", "scheduled_for", "purpose", "status"},
+    "portal_comment": {"target_type", "target_id", "user_id", "content"},
+    "sdk_package": {"package_kind", "name", "is_active"},
+    "sdk_version": {"package_id", "version", "is_active"},
+    "sdk_asset": {"version_id", "download_url", "is_active"},
+    "simulation_case": {"case_uid", "title", "visibility", "status", "published_by_user_id"},
+    "simulation_case_package": {"case_id", "package_root", "archive_path", "asset_count"},
+    "simulation_case_asset": {"case_id", "asset_kind", "display_name", "package_relative_path"},
 }
 
 REQUIRED_NULL_DEFAULT_COLUMNS = {

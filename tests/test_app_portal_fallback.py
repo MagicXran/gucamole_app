@@ -61,7 +61,7 @@ def _request(app, method: str, path: str) -> httpx.Response:
     return asyncio.run(_run())
 
 
-def test_root_and_admin_fall_back_to_legacy_frontend_when_portal_build_missing(tmp_path, monkeypatch):
+def test_root_and_admin_redirect_to_portal_when_portal_build_missing(tmp_path, monkeypatch):
     app_module = _load_app_module(monkeypatch)
     fake_backend_dir = tmp_path / "backend"
     fake_frontend_dir = tmp_path / "frontend"
@@ -73,13 +73,13 @@ def test_root_and_admin_fall_back_to_legacy_frontend_when_portal_build_missing(t
     monkeypatch.setattr(app_module, "__file__", str(fake_backend_dir / "app.py"))
 
     response = _request(app_module.app, "GET", "/")
-    assert response.status_code == 200
-    assert "Legacy Portal Index" in response.text
+    assert response.status_code in (302, 307)
+    assert response.headers["location"] == "/portal"
 
     response = _request(app_module.app, "GET", "/index.html")
-    assert response.status_code == 200
-    assert "Legacy Portal Index" in response.text
+    assert response.status_code in (302, 307)
+    assert response.headers["location"] == "/portal"
 
     response = _request(app_module.app, "GET", "/admin.html")
-    assert response.status_code == 200
-    assert "Legacy Admin Page" in response.text
+    assert response.status_code in (302, 307)
+    assert response.headers["location"] == "/portal/admin/apps"

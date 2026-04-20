@@ -405,7 +405,7 @@ def create_app(
         db.execute_update(
             """
             INSERT INTO remote_app
-                (name, icon, protocol, hostname, port,
+                (name, icon, protocol, app_kind, hostname, port,
                  rdp_username, rdp_password, domain, security, ignore_cert,
                  remote_app, remote_app_dir, remote_app_args,
                  color_depth, disable_gfx, resize_method,
@@ -416,7 +416,7 @@ def create_app(
                  timezone, keyboard_layout,
                  pool_id, member_max_concurrent)
             VALUES
-                (%(name)s, %(icon)s, %(protocol)s, %(hostname)s, %(port)s,
+                (%(name)s, %(icon)s, %(protocol)s, %(app_kind)s, %(hostname)s, %(port)s,
                  %(rdp_username)s, %(rdp_password)s, %(domain)s, %(security)s, %(ignore_cert)s,
                  %(remote_app)s, %(remote_app_dir)s, %(remote_app_args)s,
                  %(color_depth)s, %(disable_gfx)s, %(resize_method)s,
@@ -429,6 +429,7 @@ def create_app(
             """,
             {
                 "name": req.name, "icon": req.icon, "protocol": req.protocol,
+                "app_kind": req.app_kind,
                 "hostname": req.hostname, "port": req.port,
                 "rdp_username": req.rdp_username or None,
                 "rdp_password": req.rdp_password or None,
@@ -633,7 +634,7 @@ def delete_app(
 def list_users(admin: UserInfo = Depends(require_admin)):
     """列出所有用户（含配额信息）"""
     rows = db.execute_query(
-        "SELECT id, username, display_name, is_admin, is_active, quota_bytes FROM portal_user ORDER BY id"
+        "SELECT id, username, display_name, department, is_admin, is_active, quota_bytes FROM portal_user ORDER BY id"
     )
     from backend.drive_quota import _get_usage_sync, _format_bytes, DEFAULT_QUOTA_BYTES
     for row in rows:
@@ -665,18 +666,19 @@ def create_user(
         quota_bytes = int(req.quota_gb * 1073741824)
     db.execute_update(
         """
-        INSERT INTO portal_user (username, password_hash, display_name, is_admin, quota_bytes)
-        VALUES (%(username)s, %(hash)s, %(display)s, %(admin)s, %(quota)s)
+        INSERT INTO portal_user (username, password_hash, display_name, department, is_admin, quota_bytes)
+        VALUES (%(username)s, %(hash)s, %(display)s, %(department)s, %(admin)s, %(quota)s)
         """,
         {
             "username": req.username, "hash": hashed,
             "display": req.display_name or req.username,
+            "department": req.department or "",
             "admin": 1 if req.is_admin else 0,
             "quota": quota_bytes,
         },
     )
     user = db.execute_query(
-        "SELECT id, username, display_name, is_admin, is_active FROM portal_user WHERE username = %(u)s",
+        "SELECT id, username, display_name, department, is_admin, is_active FROM portal_user WHERE username = %(u)s",
         {"u": req.username}, fetch_one=True,
     )
     client_ip = request.client.host if request.client else "unknown"
@@ -707,6 +709,9 @@ def update_user(
     if req.display_name is not None:
         set_parts.append("display_name = %(display_name)s")
         params["display_name"] = req.display_name
+    if req.department is not None:
+        set_parts.append("department = %(department)s")
+        params["department"] = req.department
     if req.is_admin is not None:
         set_parts.append("is_admin = %(is_admin)s")
         params["is_admin"] = 1 if req.is_admin else 0
@@ -726,7 +731,7 @@ def update_user(
 
     if not set_parts:
         return db.execute_query(
-            "SELECT id, username, display_name, is_admin, is_active FROM portal_user WHERE id = %(id)s",
+            "SELECT id, username, display_name, department, is_admin, is_active FROM portal_user WHERE id = %(id)s",
             {"id": user_id}, fetch_one=True,
         )
 
@@ -739,7 +744,7 @@ def update_user(
         "user", user_id, existing["username"], ip_address=client_ip,
     )
     return db.execute_query(
-        "SELECT id, username, display_name, is_admin, is_active FROM portal_user WHERE id = %(id)s",
+        "SELECT id, username, display_name, department, is_admin, is_active FROM portal_user WHERE id = %(id)s",
         {"id": user_id}, fetch_one=True,
     )
 

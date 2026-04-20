@@ -1,0 +1,295 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { useSessionStore } from '@/stores/session'
+
+vi.mock('@/modules/admin/services/api/apps', () => ({
+  createAdminApp: vi.fn(),
+  deleteAdminApp: vi.fn(),
+  getAdminPoolAttachments: vi.fn(),
+  listAdminApps: vi.fn(),
+  listAdminPools: vi.fn(),
+  replaceAdminPoolAttachments: vi.fn(),
+  updateAdminApp: vi.fn(),
+}))
+
+const appsApi = await import('@/modules/admin/services/api/apps')
+
+describe('AdminAppsView', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.restoreAllMocks()
+  })
+
+  it('loads apps, edits app_kind, and saves pool attachments through the Vue admin workbench', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.$patch({
+      authenticated: true,
+      user: {
+        user_id: 1,
+        username: 'admin',
+        display_name: '管理员',
+        is_admin: true,
+      },
+    })
+
+    vi.mocked(appsApi.listAdminApps).mockResolvedValue({
+      data: [
+        {
+          id: 9,
+          name: 'Fluent',
+          icon: 'desktop',
+          protocol: 'rdp',
+          hostname: 'rdp.example.local',
+          port: 3389,
+          remote_app: 'fluent.exe',
+          pool_id: 7,
+          member_max_concurrent: 1,
+          app_kind: 'commercial_software',
+          is_active: true,
+        },
+      ],
+      headers: {},
+    } as never)
+    vi.mocked(appsApi.listAdminPools).mockResolvedValue({
+      data: [
+        {
+          id: 7,
+          name: 'Fluent共享池',
+          icon: 'desktop',
+          max_concurrent: 2,
+          auto_dispatch_enabled: true,
+          dispatch_grace_seconds: 120,
+          stale_timeout_seconds: 120,
+          idle_timeout_seconds: null,
+          is_active: true,
+          active_count: 0,
+          queued_count: 0,
+        },
+      ],
+      headers: {},
+    } as never)
+    vi.mocked(appsApi.getAdminPoolAttachments).mockResolvedValue({
+      data: {
+        pool_id: 7,
+        tutorial_docs: [{ title: '用户手册', summary: 'PDF', link_url: 'https://example/doc', sort_order: 0 }],
+        video_resources: [],
+        plugin_downloads: [],
+      },
+      headers: {},
+    } as never)
+    vi.mocked(appsApi.updateAdminApp).mockResolvedValue({
+      data: {
+        id: 9,
+        name: 'Fluent',
+        icon: 'desktop',
+        protocol: 'rdp',
+        hostname: 'rdp.example.local',
+        port: 3389,
+        remote_app: 'fluent.exe',
+        pool_id: 7,
+        member_max_concurrent: 1,
+        app_kind: 'simulation_app',
+        is_active: true,
+      },
+      headers: {},
+    } as never)
+    vi.mocked(appsApi.replaceAdminPoolAttachments).mockResolvedValue({
+      data: {
+        pool_id: 7,
+        tutorial_docs: [{ title: '新版手册', summary: '', link_url: 'https://example/new-doc', sort_order: 0 }],
+        video_resources: [],
+        plugin_downloads: [],
+      },
+      headers: {},
+    } as never)
+
+    const { default: AdminAppsView } = await import('@/modules/admin/views/AdminAppsView.vue')
+    const wrapper = mount(AdminAppsView)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Fluent')
+
+    await wrapper.get('[data-testid="admin-app-edit-9"]').trigger('click')
+    await flushPromises()
+
+    expect(appsApi.getAdminPoolAttachments).toHaveBeenCalledWith(7)
+    expect((wrapper.get('[data-testid="admin-app-kind"]').element as HTMLSelectElement).value).toBe('commercial_software')
+
+    await wrapper.get('[data-testid="admin-app-kind"]').setValue('simulation_app')
+    await wrapper.get('[data-testid="attachment-title-tutorial_docs-0"]').setValue('新版手册')
+    await wrapper.get('[data-testid="attachment-link-tutorial_docs-0"]').setValue('https://example/new-doc')
+    await wrapper.get('[data-testid="admin-app-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(appsApi.updateAdminApp).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({
+        app_kind: 'simulation_app',
+      }),
+    )
+    expect(appsApi.replaceAdminPoolAttachments).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({
+        tutorial_docs: [
+          expect.objectContaining({
+            title: '新版手册',
+            link_url: 'https://example/new-doc',
+          }),
+        ],
+      }),
+    )
+  })
+
+  it('keeps existing pool attachments bound to the original pool when editing app pool selection', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.$patch({
+      authenticated: true,
+      user: {
+        user_id: 1,
+        username: 'admin',
+        display_name: '管理员',
+        is_admin: true,
+      },
+    })
+
+    vi.mocked(appsApi.listAdminApps).mockResolvedValue({
+      data: [
+        {
+          id: 9,
+          name: 'Fluent',
+          icon: 'desktop',
+          protocol: 'rdp',
+          hostname: 'rdp.example.local',
+          port: 3389,
+          remote_app: 'fluent.exe',
+          pool_id: 7,
+          member_max_concurrent: 1,
+          app_kind: 'commercial_software',
+          is_active: true,
+        },
+      ],
+      headers: {},
+    } as never)
+    vi.mocked(appsApi.listAdminPools).mockResolvedValue({
+      data: [
+        {
+          id: 7,
+          name: '原始资源池',
+          icon: 'desktop',
+          max_concurrent: 2,
+          auto_dispatch_enabled: true,
+          dispatch_grace_seconds: 120,
+          stale_timeout_seconds: 120,
+          idle_timeout_seconds: null,
+          is_active: true,
+          active_count: 0,
+          queued_count: 0,
+        },
+        {
+          id: 11,
+          name: '新资源池',
+          icon: 'desktop',
+          max_concurrent: 2,
+          auto_dispatch_enabled: true,
+          dispatch_grace_seconds: 120,
+          stale_timeout_seconds: 120,
+          idle_timeout_seconds: null,
+          is_active: true,
+          active_count: 0,
+          queued_count: 0,
+        },
+      ],
+      headers: {},
+    } as never)
+    vi.mocked(appsApi.getAdminPoolAttachments).mockResolvedValue({
+      data: {
+        pool_id: 7,
+        tutorial_docs: [{ title: '原始手册', summary: '', link_url: 'https://example/original', sort_order: 0 }],
+        video_resources: [],
+        plugin_downloads: [],
+      },
+      headers: {},
+    } as never)
+    vi.mocked(appsApi.updateAdminApp).mockResolvedValue({
+      data: {
+        id: 9,
+        name: 'Fluent',
+        icon: 'desktop',
+        protocol: 'rdp',
+        hostname: 'rdp.example.local',
+        port: 3389,
+        remote_app: 'fluent.exe',
+        pool_id: 11,
+        member_max_concurrent: 1,
+        app_kind: 'commercial_software',
+        is_active: true,
+      },
+      headers: {},
+    } as never)
+    vi.mocked(appsApi.replaceAdminPoolAttachments).mockResolvedValue({
+      data: {
+        pool_id: 7,
+        tutorial_docs: [{ title: '改过的手册', summary: '', link_url: 'https://example/changed', sort_order: 0 }],
+        video_resources: [],
+        plugin_downloads: [],
+      },
+      headers: {},
+    } as never)
+
+    const { default: AdminAppsView } = await import('@/modules/admin/views/AdminAppsView.vue')
+    const wrapper = mount(AdminAppsView)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="admin-app-edit-9"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="admin-app-pool"]').setValue('11')
+    await flushPromises()
+
+    expect(wrapper.text()).toMatch(/仍绑定原资源池|保存 App 后再改/)
+    expect(appsApi.getAdminPoolAttachments).toHaveBeenCalledTimes(1)
+    expect(appsApi.getAdminPoolAttachments).toHaveBeenCalledWith(7)
+
+    await wrapper.get('[data-testid="attachment-title-tutorial_docs-0"]').setValue('改过的手册')
+    await wrapper.get('[data-testid="attachment-link-tutorial_docs-0"]').setValue('https://example/changed')
+    await wrapper.get('[data-testid="admin-app-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(appsApi.updateAdminApp).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({
+        pool_id: 11,
+      }),
+    )
+    expect(appsApi.replaceAdminPoolAttachments).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({
+        tutorial_docs: [expect.objectContaining({ title: '改过的手册' })],
+      }),
+    )
+  })
+
+  it('clips admin actions for non-admin users', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.$patch({
+      authenticated: true,
+      user: {
+        user_id: 9,
+        username: 'zhangsan',
+        display_name: '张三',
+        is_admin: false,
+      },
+    })
+    vi.mocked(appsApi.listAdminApps).mockResolvedValue({ data: [], headers: {} } as never)
+    vi.mocked(appsApi.listAdminPools).mockResolvedValue({ data: [], headers: {} } as never)
+
+    const { default: AdminAppsView } = await import('@/modules/admin/views/AdminAppsView.vue')
+    const wrapper = mount(AdminAppsView)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('仅管理员可操作')
+    expect(wrapper.find('[data-testid="admin-app-create"]').exists()).toBe(false)
+  })
+})

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS remote_app (
     id                    BIGINT PRIMARY KEY AUTO_INCREMENT,
     name                  VARCHAR(200)  NOT NULL             COMMENT '显示名称',
     icon                  VARCHAR(100)  DEFAULT 'desktop'    COMMENT '图标标识',
+    app_kind              VARCHAR(50)   NOT NULL DEFAULT 'commercial_software' COMMENT 'commercial_software/simulation_app/compute_tool',
     protocol              VARCHAR(20)   NOT NULL DEFAULT 'rdp',
     hostname              VARCHAR(255)  NOT NULL,
     port                  INT           NOT NULL DEFAULT 3389,
@@ -95,11 +96,11 @@ VALUES
     (3, '默认池-3-远程桌面', 'desktop',   1, 1, 120, 120, NULL, 1);
 
 INSERT IGNORE INTO remote_app
-    (id, name, icon, hostname, port, rdp_username, rdp_password, remote_app, pool_id, member_max_concurrent)
+    (id, name, icon, app_kind, hostname, port, rdp_username, rdp_password, remote_app, pool_id, member_max_concurrent)
 VALUES
-    (1, '记事本',   'edit',      '192.168.1.6', 3389, 'admin', 'password', '||notepad', 1, 1),
-    (2, '计算器',   'calculate', '192.168.1.6', 3389, 'admin', 'password', '||calc',    2, 1),
-    (3, '远程桌面', 'desktop',   '192.168.1.6', 3389, 'admin', 'password', NULL,        3, 1);
+    (1, '记事本',   'edit',      'commercial_software', '192.168.1.6', 3389, 'admin', 'password', '||notepad', 1, 1),
+    (2, '计算器',   'calculate', 'compute_tool',        '192.168.1.6', 3389, 'admin', 'password', '||calc',    2, 1),
+    (3, '远程桌面', 'desktop',   'simulation_app',      '192.168.1.6', 3389, 'admin', 'password', NULL,        3, 1);
 
 -- Token 缓存表（确保后端重启后复用已有 Guacamole session）
 CREATE TABLE IF NOT EXISTS token_cache (
@@ -115,11 +116,38 @@ CREATE TABLE IF NOT EXISTS portal_user (
     username      VARCHAR(64)   NOT NULL UNIQUE       COMMENT '登录用户名',
     password_hash VARCHAR(200)  NOT NULL              COMMENT 'bcrypt 哈希',
     display_name  VARCHAR(100)  DEFAULT ''            COMMENT '显示名称',
+    department    VARCHAR(100)  DEFAULT ''            COMMENT '所属部门',
     is_admin      TINYINT(1)    NOT NULL DEFAULT 0    COMMENT '是否管理员',
     quota_bytes   BIGINT        DEFAULT NULL          COMMENT '个人空间配额(字节), NULL=使用默认',
     is_active     TINYINT(1)    DEFAULT 1,
     created_at    DATETIME      DEFAULT CURRENT_TIMESTAMP,
     updated_at    DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS booking_register (
+    id            BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id       BIGINT       NOT NULL COMMENT '预约用户',
+    app_name      VARCHAR(200) NOT NULL COMMENT '预约应用名称',
+    scheduled_for DATETIME     NOT NULL COMMENT '预约时间',
+    purpose       VARCHAR(255) NOT NULL COMMENT '预约目的',
+    note          VARCHAR(1000) DEFAULT '' COMMENT '补充说明',
+    status        VARCHAR(20)  NOT NULL DEFAULT 'active' COMMENT 'active/cancelled',
+    created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    cancelled_at  DATETIME     DEFAULT NULL,
+    INDEX idx_booking_user_status_created (user_id, status, created_at),
+    INDEX idx_booking_schedule (status, scheduled_for)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS portal_comment (
+    id           BIGINT PRIMARY KEY AUTO_INCREMENT,
+    target_type  VARCHAR(20)   NOT NULL COMMENT 'app/case',
+    target_id    BIGINT        NOT NULL,
+    user_id      BIGINT        NOT NULL,
+    content      VARCHAR(2000) NOT NULL,
+    created_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_portal_comment_target (target_type, target_id, created_at, id),
+    INDEX idx_portal_comment_user (user_id, created_at),
+    FOREIGN KEY (user_id) REFERENCES portal_user(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 审计日志表
@@ -202,6 +230,37 @@ CREATE TABLE IF NOT EXISTS catalog_app (
     INDEX idx_catalog_app_kind_active (app_kind, is_active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS app_attachment (
+    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
+    pool_id         BIGINT       NOT NULL,
+    attachment_kind VARCHAR(30)  NOT NULL COMMENT 'tutorial_doc/video_resource/plugin_download',
+    title           VARCHAR(200) NOT NULL,
+    summary         VARCHAR(500) DEFAULT '',
+    url             VARCHAR(1000) NOT NULL,
+    sort_order      INT          NOT NULL DEFAULT 0,
+    is_active       TINYINT(1)   NOT NULL DEFAULT 1,
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_app_attachment_pool_kind (pool_id, attachment_kind, is_active, sort_order),
+    FOREIGN KEY (pool_id) REFERENCES resource_pool(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 应用脚本预设
+CREATE TABLE IF NOT EXISTS remote_app_script_profile (
+    id                   BIGINT PRIMARY KEY AUTO_INCREMENT,
+    remote_app_id        BIGINT       NOT NULL,
+    is_enabled           TINYINT(1)   NOT NULL DEFAULT 0,
+    executor_key         VARCHAR(100) NOT NULL COMMENT 'python_api/command_statusfile',
+    scratch_root         VARCHAR(500) DEFAULT NULL,
+    artifact_policy_json JSON         DEFAULT NULL,
+    log_policy_json      JSON         DEFAULT NULL,
+    created_at           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_remote_app_script_profile (remote_app_id),
+    INDEX idx_script_profile_enabled (is_enabled),
+    FOREIGN KEY (remote_app_id) REFERENCES remote_app(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Worker 节点组
 CREATE TABLE IF NOT EXISTS worker_group (
     id              BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -239,23 +298,6 @@ CREATE TABLE IF NOT EXISTS app_binding (
     FOREIGN KEY (resource_pool_id) REFERENCES resource_pool(id) ON DELETE SET NULL,
     FOREIGN KEY (worker_group_id) REFERENCES worker_group(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- 应用脚本预设
-CREATE TABLE IF NOT EXISTS remote_app_script_profile (
-    id                   BIGINT PRIMARY KEY AUTO_INCREMENT,
-    remote_app_id        BIGINT       NOT NULL,
-    is_enabled           TINYINT(1)   NOT NULL DEFAULT 0,
-    executor_key         VARCHAR(100) NOT NULL COMMENT 'python_api/command_statusfile',
-    scratch_root         VARCHAR(500) DEFAULT NULL,
-    artifact_policy_json JSON         DEFAULT NULL,
-    log_policy_json      JSON         DEFAULT NULL,
-    created_at           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_remote_app_script_profile (remote_app_id),
-    INDEX idx_script_profile_enabled (is_enabled),
-    FOREIGN KEY (remote_app_id) REFERENCES remote_app(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 
 -- Worker 节点
 CREATE TABLE IF NOT EXISTS worker_node (
@@ -390,6 +432,112 @@ CREATE TABLE IF NOT EXISTS platform_task_artifact (
     created_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_platform_task_artifact_kind (task_id, artifact_kind),
     FOREIGN KEY (task_id) REFERENCES platform_task(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS simulation_case (
+    id                   BIGINT PRIMARY KEY AUTO_INCREMENT,
+    case_uid             VARCHAR(64)   NOT NULL,
+    title                VARCHAR(200)  NOT NULL,
+    summary              VARCHAR(1000) DEFAULT '',
+    app_id               BIGINT        DEFAULT NULL,
+    visibility           VARCHAR(20)   NOT NULL DEFAULT 'public' COMMENT 'public/private',
+    status               VARCHAR(20)   NOT NULL DEFAULT 'published' COMMENT 'draft/published/archived',
+    published_by_user_id BIGINT        NOT NULL,
+    published_at         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at           DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at           DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_simulation_case_uid (case_uid),
+    INDEX idx_simulation_case_app_status (app_id, status, visibility),
+    FOREIGN KEY (app_id) REFERENCES catalog_app(id) ON DELETE SET NULL,
+    FOREIGN KEY (published_by_user_id) REFERENCES portal_user(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS simulation_case_source (
+    id                    BIGINT PRIMARY KEY AUTO_INCREMENT,
+    case_id               BIGINT       NOT NULL,
+    source_type           VARCHAR(30)  NOT NULL COMMENT 'platform_task/manual_upload',
+    source_task_id        BIGINT       DEFAULT NULL,
+    source_task_public_id VARCHAR(64)  DEFAULT NULL,
+    source_user_id        BIGINT       DEFAULT NULL,
+    source_status         VARCHAR(30)  DEFAULT NULL,
+    source_summary_json   JSON         DEFAULT NULL,
+    created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_case_source_case (case_id),
+    INDEX idx_case_source_task (source_task_id),
+    FOREIGN KEY (case_id) REFERENCES simulation_case(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_task_id) REFERENCES platform_task(id) ON DELETE SET NULL,
+    FOREIGN KEY (source_user_id) REFERENCES portal_user(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS simulation_case_package (
+    id                 BIGINT PRIMARY KEY AUTO_INCREMENT,
+    case_id            BIGINT        NOT NULL,
+    package_root       VARCHAR(1000) NOT NULL,
+    archive_path       VARCHAR(1000) NOT NULL,
+    archive_size_bytes BIGINT        NOT NULL DEFAULT 0,
+    asset_count        INT           NOT NULL DEFAULT 0,
+    created_at         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_simulation_case_package_case (case_id),
+    FOREIGN KEY (case_id) REFERENCES simulation_case(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS simulation_case_asset (
+    id                    BIGINT PRIMARY KEY AUTO_INCREMENT,
+    case_id               BIGINT        NOT NULL,
+    source_artifact_id    BIGINT        DEFAULT NULL,
+    asset_kind            VARCHAR(30)   NOT NULL COMMENT 'workspace_output/minio_archive/external_link',
+    display_name          VARCHAR(255)  NOT NULL,
+    package_relative_path VARCHAR(1000) NOT NULL,
+    size_bytes            BIGINT        DEFAULT NULL,
+    sort_order            INT           NOT NULL DEFAULT 0,
+    created_at            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_simulation_case_asset_case (case_id, sort_order, id),
+    FOREIGN KEY (case_id) REFERENCES simulation_case(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_artifact_id) REFERENCES platform_task_artifact(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS sdk_package (
+    id           BIGINT PRIMARY KEY AUTO_INCREMENT,
+    package_kind VARCHAR(30)   NOT NULL COMMENT 'cloud_platform/simulation_app',
+    name         VARCHAR(200)  NOT NULL,
+    summary      VARCHAR(1000) DEFAULT '',
+    homepage_url VARCHAR(1000) DEFAULT '',
+    is_active    TINYINT(1)    NOT NULL DEFAULT 1,
+    sort_order   INT           NOT NULL DEFAULT 0,
+    created_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_sdk_package_kind_active (package_kind, is_active, sort_order, id),
+    CONSTRAINT chk_sdk_package_kind CHECK (package_kind IN ('cloud_platform', 'simulation_app'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS sdk_version (
+    id            BIGINT PRIMARY KEY AUTO_INCREMENT,
+    package_id    BIGINT        NOT NULL,
+    version       VARCHAR(100)  NOT NULL,
+    release_notes TEXT          NULL,
+    released_at   DATETIME      DEFAULT NULL,
+    is_active     TINYINT(1)    NOT NULL DEFAULT 1,
+    sort_order    INT           NOT NULL DEFAULT 0,
+    created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_sdk_version_package_version (package_id, version),
+    INDEX idx_sdk_version_package_active (package_id, is_active, sort_order, id),
+    FOREIGN KEY (package_id) REFERENCES sdk_package(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS sdk_asset (
+    id           BIGINT PRIMARY KEY AUTO_INCREMENT,
+    version_id   BIGINT        NOT NULL,
+    asset_kind   VARCHAR(50)   NOT NULL COMMENT 'archive/wheel/docs/example/installer',
+    display_name VARCHAR(255)  NOT NULL,
+    download_url VARCHAR(1000) NOT NULL,
+    size_bytes   BIGINT        DEFAULT NULL,
+    is_active    TINYINT(1)    NOT NULL DEFAULT 1,
+    sort_order   INT           NOT NULL DEFAULT 0,
+    created_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_sdk_asset_version_active (version_id, is_active, sort_order, id),
+    FOREIGN KEY (version_id) REFERENCES sdk_version(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 默认管理员 (密码: admin123，生产环境请立即修改)

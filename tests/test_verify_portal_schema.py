@@ -67,13 +67,34 @@ def test_verify_schema_reports_missing_tables_and_columns():
     assert "missing table: worker_node" in problems
     assert "missing table: remote_app_script_profile" in problems
     assert "missing table: app_binding" in problems
+    assert "missing table: app_attachment" in problems
+    assert "missing table: booking_register" in problems
+    assert "missing table: portal_comment" in problems
+    assert "missing table: sdk_package" in problems
+    assert "missing table: sdk_version" in problems
+    assert "missing table: sdk_asset" in problems
+    assert "missing table: simulation_case" in problems
+    assert "missing table: simulation_case_source" in problems
+    assert "missing table: simulation_case_package" in problems
+    assert "missing table: simulation_case_asset" in problems
     assert "missing column: remote_app.disable_download" in problems
     assert "missing column: remote_app.disable_upload" in problems
     assert "missing column: remote_app.member_max_concurrent" in problems
+    assert "missing column: remote_app.app_kind" in problems
+    assert "missing column: portal_user.department" in problems
     assert "missing column: active_session.pool_id" in problems
     assert "missing column: active_session.reclaim_reason" in problems
     assert "missing column: launch_queue.request_mode" in problems
     assert "missing column: launch_queue.platform_task_id" in problems
+    assert "missing column: app_attachment.attachment_kind" in problems
+    assert "missing column: booking_register.scheduled_for" in problems
+    assert "missing column: portal_comment.content" in problems
+    assert "missing column: sdk_package.package_kind" in problems
+    assert "missing column: sdk_version.version" in problems
+    assert "missing column: sdk_asset.download_url" in problems
+    assert "missing column: simulation_case.case_uid" in problems
+    assert "missing column: simulation_case_package.package_root" in problems
+    assert "missing column: simulation_case_asset.package_relative_path" in problems
 
 
 def test_verify_schema_reports_nullable_default_violations():
@@ -148,3 +169,19 @@ def test_init_sql_creates_worker_group_before_app_binding():
         app_binding_index = sql_text.index("CREATE TABLE IF NOT EXISTS app_binding")
 
         assert worker_group_index < app_binding_index, f"{sql_path} 里 app_binding 先于 worker_group，冷启动会炸"
+
+
+def test_portal_ui_support_migration_defines_required_schema():
+    sql = Path("database/migrate_portal_ui_support.sql").read_text(encoding="utf-8")
+
+    assert "ALTER TABLE portal_user ADD COLUMN department" in sql
+    assert "ALTER TABLE remote_app ADD COLUMN app_kind" in sql
+    assert "CREATE TABLE IF NOT EXISTS app_attachment" in sql
+    assert "CREATE TABLE IF NOT EXISTS booking_register" in sql
+    assert "CREATE TABLE IF NOT EXISTS portal_comment" in sql
+    assert "CREATE TABLE IF NOT EXISTS sdk_package" in sql
+    assert "CREATE TABLE IF NOT EXISTS sdk_version" in sql
+    assert "CREATE TABLE IF NOT EXISTS sdk_asset" in sql
+    assert "CREATE TABLE IF NOT EXISTS simulation_case" in sql
+    assert "INDEX idx_case_source_case (case_id)" in sql
+    assert "UNIQUE KEY uk_case_source_case" not in sql

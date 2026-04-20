@@ -146,26 +146,14 @@ def ready():
 
 
 def root_redirect():
-    if not _portal_ui_available():
-        legacy_index = _frontend_root() / "index.html"
-        if legacy_index.exists():
-            return FileResponse(str(legacy_index))
     return RedirectResponse(url="/portal", status_code=307)
 
 
 def index_redirect():
-    if not _portal_ui_available():
-        legacy_index = _frontend_root() / "index.html"
-        if legacy_index.exists():
-            return FileResponse(str(legacy_index))
     return RedirectResponse(url="/portal", status_code=307)
 
 
 def admin_redirect():
-    if not _portal_ui_available():
-        legacy_admin = _frontend_root() / "admin.html"
-        if legacy_admin.exists():
-            return FileResponse(str(legacy_admin))
     return RedirectResponse(url="/portal/admin/apps", status_code=307)
 
 
@@ -213,8 +201,15 @@ def create_app() -> FastAPI:
     from backend.auth import router as auth_router
     from backend.router import router as remote_apps_router
     from backend.admin_router import router as admin_router
+    from backend.admin_analytics_router import router as admin_analytics_router
     from backend.admin_pool_router import router as admin_pool_router
     from backend.admin_worker_router import router as admin_worker_router
+    from backend.app_attachment_router import router as app_attachment_router
+    from backend.booking_router import router as booking_router
+    from backend.case_center_router import router as case_center_router
+    from backend.comment_router import router as comment_router
+    from backend.session_router import router as session_router
+    from backend.sdk_center_router import router as sdk_center_router
     from backend.monitor import router as monitor_router, admin_monitor_router
     from backend.dataset_router import router as dataset_router
     from backend.file_router import router as file_router
@@ -242,8 +237,15 @@ def create_app() -> FastAPI:
     _register_core_routes(app)
 
     app.include_router(auth_router)
+    app.include_router(session_router)
+    app.include_router(sdk_center_router)
+    app.include_router(app_attachment_router)
+    app.include_router(booking_router)
+    app.include_router(case_center_router)
+    app.include_router(comment_router)
     app.include_router(remote_apps_router)
     app.include_router(admin_router)
+    app.include_router(admin_analytics_router)
     app.include_router(admin_pool_router)
     app.include_router(admin_worker_router)
     app.include_router(monitor_router)

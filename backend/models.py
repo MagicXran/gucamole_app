@@ -2,9 +2,41 @@
 Pydantic 数据模型
 """
 
-from typing import Optional, List, Any
+from datetime import datetime
+from typing import Optional, List, Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator
+
+
+def _normalize_attachment_link_url(value: str) -> str:
+    normalized = value.strip()
+    parsed = urlsplit(normalized)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("link_url 只允许 http/https 绝对链接")
+    return normalized
+
+
+def _normalize_booking_datetime(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("scheduled_for 不能为空")
+
+    try:
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("scheduled_for 必须是合法日期时间") from exc
+
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+    return parsed.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _normalize_required_text(value: str, field_name: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{field_name} 不能为空")
+    return normalized
 
 
 class RemoteAppResponse(BaseModel):
@@ -56,6 +88,7 @@ class AppCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     icon: str = Field(default="desktop", max_length=100)
     protocol: str = Field(default="rdp", max_length=20)
+    app_kind: Literal["commercial_software", "simulation_app", "compute_tool"] = "commercial_software"
     hostname: str = Field(..., min_length=1, max_length=255)
     port: int = Field(default=3389, ge=1, le=65535)
     rdp_username: str = Field(default="", max_length=100)
@@ -124,6 +157,7 @@ class AppUpdateRequest(BaseModel):
     """修改应用（全部可选）"""
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     icon: Optional[str] = Field(default=None, max_length=100)
+    app_kind: Optional[Literal["commercial_software", "simulation_app", "compute_tool"]] = None
     hostname: Optional[str] = Field(default=None, min_length=1, max_length=255)
     port: Optional[int] = Field(default=None, ge=1, le=65535)
     rdp_username: Optional[str] = Field(default=None, max_length=100)
@@ -193,6 +227,7 @@ class AppAdminResponse(BaseModel):
     id: int
     name: str
     icon: str
+    app_kind: Literal["commercial_software", "simulation_app", "compute_tool"] = "commercial_software"
     protocol: str
     hostname: str
     port: int
@@ -236,6 +271,7 @@ class UserCreateRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=4, max_length=128)
     display_name: str = Field(default="", max_length=100)
+    department: str = Field(default="", max_length=100)
     is_admin: bool = False
     quota_gb: Optional[float] = Field(default=None, ge=0, description="个人空间配额(GB), 0=使用默认")
 
@@ -243,6 +279,7 @@ class UserCreateRequest(BaseModel):
 class UserUpdateRequest(BaseModel):
     """修改用户（密码留空=不改）"""
     display_name: Optional[str] = Field(default=None, max_length=100)
+    department: Optional[str] = Field(default=None, max_length=100)
     password: Optional[str] = Field(default=None, min_length=4, max_length=128)
     is_admin: Optional[bool] = None
     is_active: Optional[bool] = None
@@ -254,6 +291,7 @@ class UserAdminResponse(BaseModel):
     id: int
     username: str
     display_name: str
+    department: str = ""
     is_admin: bool
     is_active: bool
 
@@ -285,12 +323,60 @@ class PaginatedResponse(BaseModel):
     page_size: int
 
 
+class AnalyticsOverviewCardsResponse(BaseModel):
+    software_launches: int = 0
+    case_events: int = 0
+    active_users: int = 0
+    department_count: int = 0
+
+
+class SoftwareAccessRankingItemResponse(BaseModel):
+    app_id: int
+    app_name: str
+    launch_count: int = 0
+
+
+class CaseAccessRankingItemResponse(BaseModel):
+    case_id: int
+    case_uid: str
+    case_title: str
+    detail_count: int = 0
+    download_count: int = 0
+    transfer_count: int = 0
+    event_count: int = 0
+
+
+class UserAnalyticsRankingItemResponse(BaseModel):
+    user_id: int
+    username: str
+    display_name: str
+    department: str = "未设置"
+    software_launch_count: int = 0
+    case_event_count: int = 0
+    event_count: int = 0
+
+
+class DepartmentAnalyticsRankingItemResponse(BaseModel):
+    department: str
+    user_count: int = 0
+    event_count: int = 0
+
+
+class AdminAnalyticsOverviewResponse(BaseModel):
+    overview: AnalyticsOverviewCardsResponse
+    software_ranking: List[SoftwareAccessRankingItemResponse] = Field(default_factory=list)
+    case_ranking: List[CaseAccessRankingItemResponse] = Field(default_factory=list)
+    user_ranking: List[UserAnalyticsRankingItemResponse] = Field(default_factory=list)
+    department_ranking: List[DepartmentAnalyticsRankingItemResponse] = Field(default_factory=list)
+
+
 class ResourcePoolCardResponse(BaseModel):
     """资源池卡片数据"""
     id: int = Field(..., description="代表性 launch_app_id")
     pool_id: int
     name: str
     icon: str = "desktop"
+    app_kind: Literal["commercial_software", "simulation_app", "compute_tool"] = "commercial_software"
     protocol: str = "rdp"
     supports_gui: bool = True
     supports_script: bool = False
@@ -310,6 +396,177 @@ class ResourcePoolCardResponse(BaseModel):
     queued_count: int = 0
     max_concurrent: int = 1
     has_capacity: bool = True
+
+
+class AppAttachmentItemResponse(BaseModel):
+    id: int
+    title: str
+    summary: str = ""
+    link_url: str
+    sort_order: int = 0
+
+
+class PoolAttachmentResponse(BaseModel):
+    pool_id: int
+    tutorial_docs: List[AppAttachmentItemResponse] = Field(default_factory=list)
+    video_resources: List[AppAttachmentItemResponse] = Field(default_factory=list)
+    plugin_downloads: List[AppAttachmentItemResponse] = Field(default_factory=list)
+
+
+class AppAttachmentUpsertItem(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=500)
+    link_url: str = Field(..., min_length=1, max_length=1000)
+    sort_order: int = Field(default=0, ge=0)
+
+    @field_validator("link_url")
+    @classmethod
+    def check_link_url(cls, value: str) -> str:
+        return _normalize_attachment_link_url(value)
+
+
+class PoolAttachmentUpdateRequest(BaseModel):
+    tutorial_docs: List[AppAttachmentUpsertItem] = Field(default_factory=list)
+    video_resources: List[AppAttachmentUpsertItem] = Field(default_factory=list)
+    plugin_downloads: List[AppAttachmentUpsertItem] = Field(default_factory=list)
+
+
+class BookingCreateRequest(BaseModel):
+    app_name: str = Field(..., min_length=1, max_length=200)
+    scheduled_for: str = Field(..., min_length=1, max_length=32)
+    purpose: str = Field(..., min_length=1, max_length=255)
+    note: str = Field(default="", max_length=1000)
+
+    @field_validator("app_name")
+    @classmethod
+    def check_app_name(cls, value: str) -> str:
+        return _normalize_required_text(value, "app_name")
+
+    @field_validator("scheduled_for")
+    @classmethod
+    def check_scheduled_for(cls, value: str) -> str:
+        return _normalize_booking_datetime(value)
+
+    @field_validator("purpose")
+    @classmethod
+    def check_purpose(cls, value: str) -> str:
+        return _normalize_required_text(value, "purpose")
+
+
+class BookingRecordResponse(BaseModel):
+    id: int
+    user_id: int
+    app_name: str
+    scheduled_for: Any
+    purpose: str
+    note: str = ""
+    status: Literal["active", "cancelled"] | str = "active"
+    created_at: Any = None
+    cancelled_at: Any = None
+
+
+class CasePublishRequest(BaseModel):
+    task_id: str = Field(..., min_length=1, max_length=64)
+    title: str = Field(..., min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=1000)
+
+    @field_validator("task_id", "title")
+    @classmethod
+    def check_required_case_text(cls, value: str, info) -> str:
+        return _normalize_required_text(value, info.field_name)
+
+
+class CasePublishResponse(BaseModel):
+    case_uid: str
+    archive_path: str
+    asset_count: int
+
+
+class CaseAssetResponse(BaseModel):
+    id: int
+    asset_kind: str
+    display_name: str
+    package_relative_path: str
+    size_bytes: Optional[int] = None
+    sort_order: int = 0
+
+
+class CaseListItemResponse(BaseModel):
+    id: int
+    case_uid: str
+    title: str
+    summary: str = ""
+    app_id: Optional[int] = None
+    published_at: Any = None
+    asset_count: int = 0
+
+
+class CaseDetailResponse(CaseListItemResponse):
+    assets: List[CaseAssetResponse] = Field(default_factory=list)
+
+
+class CaseTransferResponse(BaseModel):
+    case_id: int
+    case_uid: str
+    target_path: str
+    asset_count: int = 0
+
+
+class CommentCreateRequest(BaseModel):
+    target_type: str = Field(..., min_length=1, max_length=20)
+    target_id: int = Field(..., ge=1)
+    content: str = Field(..., min_length=1, max_length=2000)
+
+    @field_validator("target_type")
+    @classmethod
+    def normalize_target_type(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("content")
+    @classmethod
+    def normalize_comment_content(cls, value: str) -> str:
+        return _normalize_required_text(value, "content")
+
+
+class CommentItemResponse(BaseModel):
+    id: int
+    target_type: Literal["app", "case"]
+    target_id: int
+    user_id: int
+    author_name: str
+    content: str
+    created_at: Any = None
+
+
+class SdkPackageListItemResponse(BaseModel):
+    id: int
+    package_kind: Literal["cloud_platform", "simulation_app"]
+    name: str
+    summary: str = ""
+    homepage_url: str = ""
+
+
+class SdkAssetResponse(BaseModel):
+    id: int
+    version_id: int
+    asset_kind: str
+    display_name: str
+    download_url: str
+    size_bytes: Optional[int] = None
+    sort_order: int = 0
+
+
+class SdkVersionResponse(BaseModel):
+    id: int
+    package_id: int
+    version: str
+    release_notes: str = ""
+    released_at: Any = None
+    assets: List[SdkAssetResponse] = Field(default_factory=list)
+
+
+class SdkPackageDetailResponse(SdkPackageListItemResponse):
+    versions: List[SdkVersionResponse] = Field(default_factory=list)
 
 
 class LaunchQueueConsumeRequest(BaseModel):

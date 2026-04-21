@@ -43,11 +43,15 @@ BASE_MENU_TREE = [
 ]
 
 ADMIN_MENU_ITEMS = [
+    {"key": "admin-pools", "title": "资源池", "path": "/admin/pools"},
     {"key": "admin-apps", "title": "App管理", "path": "/admin/apps"},
+    {"key": "admin-users", "title": "用户管理", "path": "/admin/users"},
+    {"key": "admin-acl", "title": "权限管理", "path": "/admin/acl"},
     {"key": "admin-queues", "title": "任务调度", "path": "/admin/queues"},
     {"key": "admin-monitor", "title": "资源监控", "path": "/admin/monitor"},
     {"key": "admin-workers", "title": "Worker状态", "path": "/admin/workers"},
     {"key": "admin-analytics", "title": "统计看板", "path": "/admin/analytics"},
+    {"key": "admin-audit", "title": "审计日志", "path": "/admin/audit"},
 ]
 
 ADMIN_MENU_GROUP = {

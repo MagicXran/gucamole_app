@@ -1,6 +1,13 @@
 import http from '@/services/http'
 
-import type { AdminAppFormPayload, AdminAppRecord, AdminPoolRecord, PoolAttachments } from '@/modules/admin/types/apps'
+import type {
+  AdminAppFormPayload,
+  AdminAppRecord,
+  AdminPoolRecord,
+  AdminScriptProfilesResponse,
+  AdminWorkerGroupsResponse,
+  PoolAttachments,
+} from '@/modules/admin/types/apps'
 
 export function listAdminApps() {
   return http.get<AdminAppRecord[]>('/api/admin/apps')
@@ -20,6 +27,14 @@ export function deleteAdminApp(appId: number) {
 
 export function listAdminPools() {
   return http.get<AdminPoolRecord[]>('/api/admin/pools')
+}
+
+export function listAdminWorkerGroups() {
+  return http.get<AdminWorkerGroupsResponse>('/api/admin/workers/groups')
+}
+
+export function listAdminScriptProfiles() {
+  return http.get<AdminScriptProfilesResponse>('/api/admin/script-profiles')
 }
 
 export function getAdminPoolAttachments(poolId: number) {

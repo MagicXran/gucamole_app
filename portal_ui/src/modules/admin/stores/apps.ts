@@ -7,10 +7,20 @@ import {
   getAdminPoolAttachments,
   listAdminApps,
   listAdminPools,
+  listAdminScriptProfiles,
+  listAdminWorkerGroups,
   replaceAdminPoolAttachments,
   updateAdminApp,
 } from '@/modules/admin/services/api/apps'
-import type { AdminAppFormPayload, AdminAppRecord, AdminPoolRecord, AttachmentItemDraft, PoolAttachments } from '@/modules/admin/types/apps'
+import type {
+  AdminAppFormPayload,
+  AdminAppRecord,
+  AdminPoolRecord,
+  AdminScriptProfile,
+  AdminWorkerGroup,
+  AttachmentItemDraft,
+  PoolAttachments,
+} from '@/modules/admin/types/apps'
 
 function normalizeAttachmentItems(items: AttachmentItemDraft[]) {
   return items
@@ -53,6 +63,8 @@ function normalizePoolAttachments(payload: PoolAttachments, poolId: number): Poo
 export const useAdminAppsStore = defineStore('admin-apps', () => {
   const items = ref<AdminAppRecord[]>([])
   const pools = ref<AdminPoolRecord[]>([])
+  const workerGroups = ref<AdminWorkerGroup[]>([])
+  const scriptProfiles = ref<AdminScriptProfile[]>([])
   const attachments = ref<PoolAttachments>(emptyPoolAttachments())
   const loading = ref(false)
   const attachmentsLoading = ref(false)
@@ -82,8 +94,26 @@ export const useAdminAppsStore = defineStore('admin-apps', () => {
     }
   }
 
+  async function loadWorkerGroups() {
+    try {
+      const response = await listAdminWorkerGroups()
+      workerGroups.value = response.data.items
+    } catch {
+      workerGroups.value = []
+    }
+  }
+
+  async function loadScriptProfiles() {
+    try {
+      const response = await listAdminScriptProfiles()
+      scriptProfiles.value = response.data.items
+    } catch {
+      scriptProfiles.value = []
+    }
+  }
+
   async function bootstrap() {
-    await Promise.all([loadApps(), loadPools()])
+    await Promise.all([loadApps(), loadPools(), loadWorkerGroups(), loadScriptProfiles()])
   }
 
   async function loadPoolAttachments(poolId: number | null) {
@@ -153,6 +183,8 @@ export const useAdminAppsStore = defineStore('admin-apps', () => {
   return {
     items,
     pools,
+    workerGroups,
+    scriptProfiles,
     attachments,
     loading,
     attachmentsLoading,
@@ -160,6 +192,8 @@ export const useAdminAppsStore = defineStore('admin-apps', () => {
     errorMessage,
     bootstrap,
     loadApps,
+    loadWorkerGroups,
+    loadScriptProfiles,
     loadPoolAttachments,
     saveApp,
     removeApp,

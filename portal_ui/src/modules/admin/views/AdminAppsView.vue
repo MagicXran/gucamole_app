@@ -3,7 +3,7 @@
     <header class="admin-apps-view__header">
       <div>
         <h1>App管理</h1>
-        <p>最小真闭环：列表、编辑 `app_kind`、维护池级共享附件。</p>
+        <p>完整连接参数、脚本绑定、池级共享附件统一维护。</p>
       </div>
       <button
         v-if="isAdmin"
@@ -56,6 +56,8 @@
       :mode="dialogMode"
       :saving="adminAppsStore.saving"
       :pools="adminAppsStore.pools"
+      :worker-groups="adminAppsStore.workerGroups"
+      :script-profiles="adminAppsStore.scriptProfiles"
       :initial-app="selectedApp"
       :attachments="draftAttachments"
       :attachments-loading="adminAppsStore.attachmentsLoading"

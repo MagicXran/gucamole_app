@@ -120,10 +120,15 @@ function renderGuacamoleWindow(popup: Window, appName: string, redirectUrl: stri
     '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">' +
       `<title>${escapeHtml(appName)}</title>` +
       '<style>html,body{margin:0;padding:0;overflow:hidden;background:#0f172a}iframe{width:100vw;height:100vh;border:none}</style></head><body>' +
-      `<iframe id="guac-frame" src="${escapeHtml(redirectUrl)}" allow="clipboard-read;clipboard-write"></iframe>` +
+      `<iframe id="guac-frame" src="${escapeHtml(redirectUrl)}" allow="clipboard-read;clipboard-write" tabindex="-1"></iframe>` +
       '<script>' +
       `const cfg=${configJson};` +
       'const frame=document.getElementById("guac-frame");' +
+      'const focusGuacamoleFrame=function(){try{frame.focus();if(frame.contentWindow){frame.contentWindow.focus();}}catch(e){}};' +
+      'frame.addEventListener("load",focusGuacamoleFrame);' +
+      'window.setTimeout(focusGuacamoleFrame,0);' +
+      'window.setTimeout(focusGuacamoleFrame,300);' +
+      'window.setTimeout(focusGuacamoleFrame,1000);' +
       'const notifySessionEnd=function(){try{navigator.sendBeacon("/api/monitor/session-end",new Blob([JSON.stringify({session_id:cfg.sessionId})],{type:"application/json"}))}catch(e){}};' +
       'const closePopupWithNotice=function(message){if(window.__portalClosing){return;}window.__portalClosing=true;try{const notice=document.createElement("div");notice.setAttribute("style","position:fixed;top:0;left:0;right:0;z-index:2147483647;padding:10px 14px;background:#b91c1c;color:#fff;font:14px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,Microsoft YaHei,sans-serif;text-align:center");notice.textContent=message||cfg.defaultReclaimMessage;document.body.appendChild(notice);}catch(e){}notifySessionEnd();setTimeout(function(){window.close();},1500);};' +
       'const fallbackControl={shouldReport:function(){return !window.__portalClosing;},processNetworkError:function(){return {reclaimed:false,message:""};},processResponse:function(status,payload){if(status===409&&payload&&(payload.code==="session_reclaimed"||payload.code==="session_idle_reclaimed")){closePopupWithNotice(typeof payload.detail==="string"&&payload.detail?payload.detail:cfg.defaultReclaimMessage);return {reclaimed:true,message:cfg.defaultReclaimMessage};}return {reclaimed:false,message:""};}};' +
@@ -133,7 +138,9 @@ function renderGuacamoleWindow(popup: Window, appName: string, redirectUrl: stri
       'const activity=function(){postMonitor("/api/monitor/activity");};' +
       'window.__portalActivityTimer=window.setInterval(function(){if(document.hasFocus()){activity();}},15000);' +
       'window.addEventListener("focus",activity);' +
+      'window.addEventListener("focus",focusGuacamoleFrame);' +
       'document.addEventListener("click",activity,true);' +
+      'document.addEventListener("click",focusGuacamoleFrame,true);' +
       'document.addEventListener("keydown",activity,true);' +
       'import("/js/portal-session-control.js").then(function(mod){control=mod.createPortalSessionControl({onReclaimed:closePopupWithNotice});}).catch(function(){});' +
       'window.addEventListener("beforeunload",function(){if(control.shouldReport()){notifySessionEnd();}});' +

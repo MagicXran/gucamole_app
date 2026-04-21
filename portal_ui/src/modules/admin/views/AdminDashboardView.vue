@@ -3,7 +3,7 @@
     <header class="admin-dashboard__header">
       <div>
         <h1>系统管理工作台</h1>
-        <p>先把运营最需要的三把刀接进 Vue：App管理、任务调度、资源监控。</p>
+        <p>把旧后台真正能干活的入口都接回 Vue，别再留占位坑人。</p>
       </div>
     </header>
 
@@ -33,11 +33,20 @@ const adminItems = computed(() => {
 })
 
 function adminSummary(path?: string) {
+  if (path === '/admin/pools') {
+    return '资源池容量、自动放行和回收策略。'
+  }
   if (path === '/admin/analytics') {
     return '软件热度、案例活跃度、用户与部门排行。'
   }
   if (path === '/admin/apps') {
     return '应用配置、分类运营、池级附件。'
+  }
+  if (path === '/admin/users') {
+    return '账号、改密、配额、管理员权限。'
+  }
+  if (path === '/admin/acl') {
+    return '按用户和应用分配访问权限。'
   }
   if (path === '/admin/queues') {
     return '排队明细、状态查看、取消排队。'
@@ -47,6 +56,9 @@ function adminSummary(path?: string) {
   }
   if (path === '/admin/workers') {
     return '节点组、节点状态、执行侧健康度。'
+  }
+  if (path === '/admin/audit') {
+    return '按用户、动作、日期检索操作痕迹。'
   }
   return '系统管理入口。'
 }

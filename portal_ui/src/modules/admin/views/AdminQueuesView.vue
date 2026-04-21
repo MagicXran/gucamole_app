@@ -12,7 +12,7 @@
       {{ queuesStore.errorMessage }}
     </div>
     <div v-else-if="queuesStore.loading" class="admin-ops-view__state">加载排队中...</div>
-    <table v-else class="admin-ops-view__table">
+      <table v-else class="admin-ops-view__table">
       <thead>
         <tr>
           <th>资源池</th>
@@ -20,21 +20,23 @@
           <th>状态</th>
           <th>创建时间</th>
           <th>Ready 到期</th>
+          <th>取消原因</th>
           <th>操作</th>
         </tr>
       </thead>
       <tbody>
         <tr v-if="queuesStore.items.length === 0">
-          <td colspan="6">当前无排队记录</td>
+          <td colspan="7">当前无排队记录</td>
         </tr>
         <tr v-for="item in queuesStore.items" :key="item.queue_id">
           <td>{{ item.pool_name }}</td>
           <td>{{ item.display_name }}</td>
           <td>{{ item.status }}</td>
           <td>{{ item.created_at || '-' }}</td>
-          <td>{{ item.ready_expires_at || item.cancel_reason || '-' }}</td>
+          <td>{{ item.ready_expires_at || '-' }}</td>
+          <td>{{ item.cancel_reason || '-' }}</td>
           <td>
-            <button type="button" :data-testid="`admin-queue-cancel-${item.queue_id}`" @click="queuesStore.cancelQueue(item.queue_id)">
+            <button type="button" :data-testid="`admin-queue-cancel-${item.queue_id}`" @click="handleCancel(item.queue_id)">
               取消
             </button>
           </td>
@@ -50,6 +52,13 @@ import { onMounted } from 'vue'
 import { useAdminQueuesStore } from '@/modules/admin/stores/queues'
 
 const queuesStore = useAdminQueuesStore()
+
+async function handleCancel(queueId: number) {
+  if (typeof window.confirm === 'function' && !window.confirm('确定取消这条排队？')) {
+    return
+  }
+  await queuesStore.cancelQueue(queueId)
+}
 
 onMounted(async () => {
   await queuesStore.loadQueues()

@@ -58,10 +58,14 @@ export type AdminWorkerNode = {
   status: string
   workspace_share: string
   scratch_root: string
+  max_concurrent_tasks?: number
   software_ready_count: number
   software_total_count: number
   last_heartbeat_at?: string
   latest_enrollment_status?: string
+  latest_enrollment_expires_at?: string
+  last_error?: string
+  software_inventory?: Record<string, AdminWorkerSoftwareItem>
 }
 
 export type AdminWorkerGroupsResponse = {
@@ -70,4 +74,42 @@ export type AdminWorkerGroupsResponse = {
 
 export type AdminWorkerNodesResponse = {
   items: AdminWorkerNode[]
+}
+
+export type AdminWorkerSoftwareItem = {
+  software_name?: string
+  ready?: boolean
+  issues?: string[]
+}
+
+export type AdminWorkerGroupCreatePayload = {
+  group_key: string
+  name: string
+  description: string
+  max_claim_batch: number
+}
+
+export type AdminWorkerNodeCreatePayload = {
+  group_id: number
+  display_name: string
+  expected_hostname: string
+  scratch_root: string
+  workspace_share: string
+  max_concurrent_tasks: number
+}
+
+export type AdminWorkerEnrollmentResponse = {
+  worker_node_id: number
+  plain_token: string
+  expires_at?: string
+}
+
+export type AdminWorkerTokenResponse = {
+  worker_node_id: number
+  plain_token: string
+}
+
+export type AdminWorkerRevokeResponse = {
+  worker_node_id: number
+  status: string
 }

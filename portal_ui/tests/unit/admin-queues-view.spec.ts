@@ -22,7 +22,7 @@ describe('AdminQueuesView', () => {
     vi.restoreAllMocks()
   })
 
-  it('renders queue rows and cancels a queue item', async () => {
+  it('renders ready expiry and cancel reason separately, and requires confirmation before cancel', async () => {
     const sessionStore = useSessionStore()
     sessionStore.$patch({
       authenticated: true,
@@ -36,10 +36,10 @@ describe('AdminQueuesView', () => {
             queue_id: 12,
             pool_name: '求解池',
             display_name: '测试员',
-            status: 'queued',
+            status: 'ready',
             created_at: '2026-04-18 10:00:00',
-            ready_expires_at: '',
-            cancel_reason: '',
+            ready_expires_at: '2026-04-18 10:05:00',
+            cancel_reason: 'worker lost',
           },
         ],
       },
@@ -55,6 +55,16 @@ describe('AdminQueuesView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('求解池')
+    expect(wrapper.text()).toContain('2026-04-18 10:05:00')
+    expect(wrapper.text()).toContain('worker lost')
+
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    await wrapper.get('[data-testid="admin-queue-cancel-12"]').trigger('click')
+    await flushPromises()
+
+    expect(opsApi.cancelAdminQueue).not.toHaveBeenCalled()
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     await wrapper.get('[data-testid="admin-queue-cancel-12"]').trigger('click')
     await flushPromises()
 

@@ -10,6 +10,8 @@ vi.mock('@/modules/admin/services/api/apps', () => ({
   getAdminPoolAttachments: vi.fn(),
   listAdminApps: vi.fn(),
   listAdminPools: vi.fn(),
+  listAdminScriptProfiles: vi.fn(),
+  listAdminWorkerGroups: vi.fn(),
   replaceAdminPoolAttachments: vi.fn(),
   updateAdminApp: vi.fn(),
 }))
@@ -291,5 +293,140 @@ describe('AdminAppsView', () => {
 
     expect(wrapper.text()).toContain('仅管理员可操作')
     expect(wrapper.find('[data-testid="admin-app-create"]').exists()).toBe(false)
+  })
+
+  it('restores legacy RDP, transfer, localization, and script parameters in the app dialog payload', async () => {
+    const { default: AdminAppFormDialog } = await import('@/modules/admin/components/AdminAppFormDialog.vue')
+    const wrapper = mount(AdminAppFormDialog, {
+      props: {
+        open: true,
+        mode: 'edit',
+        saving: false,
+        pools: [
+          {
+            id: 7,
+            name: 'Fluent共享池',
+            icon: 'desktop',
+            max_concurrent: 2,
+            auto_dispatch_enabled: true,
+            dispatch_grace_seconds: 120,
+            stale_timeout_seconds: 120,
+            idle_timeout_seconds: null,
+            is_active: true,
+            active_count: 0,
+            queued_count: 0,
+          },
+        ],
+        workerGroups: [
+          {
+            id: 3,
+            group_key: 'solver',
+            name: '求解节点组',
+            description: '',
+            node_count: 1,
+            active_node_count: 1,
+            is_active: true,
+          },
+        ],
+        scriptProfiles: [
+          {
+            profile_key: 'ansys_mapdl',
+            display_name: 'ANSYS MAPDL',
+            description: 'MAPDL 脚本任务',
+            executor_key: 'python_api',
+            python_executable: 'C:\\Python311\\python.exe',
+            python_env: { LICENSE_SERVER: '10.0.0.8' },
+          },
+        ],
+        initialApp: {
+          id: 9,
+          name: 'Fluent',
+          icon: 'desktop',
+          protocol: 'rdp',
+          app_kind: 'commercial_software',
+          hostname: 'rdp.example.local',
+          port: 3389,
+          rdp_username: 'old-user',
+          rdp_password: 'old-pass',
+          domain: 'OLD',
+          security: 'nla',
+          ignore_cert: true,
+          remote_app: 'fluent.exe',
+          remote_app_dir: 'C:\\apps\\fluent',
+          remote_app_args: '-driver',
+          color_depth: 24,
+          disable_gfx: true,
+          resize_method: 'display-update',
+          enable_wallpaper: false,
+          enable_font_smoothing: true,
+          disable_copy: false,
+          disable_paste: true,
+          enable_audio: true,
+          enable_audio_input: false,
+          enable_printing: true,
+          disable_download: null,
+          disable_upload: 1,
+          timezone: 'Asia/Shanghai',
+          keyboard_layout: 'zh-cn-qwerty',
+          pool_id: 7,
+          member_max_concurrent: 1,
+          is_active: true,
+          script_enabled: true,
+          script_profile_key: 'ansys_mapdl',
+          script_profile_name: 'ANSYS MAPDL',
+          script_executor_key: 'python_api',
+          script_worker_group_id: 3,
+          script_scratch_root: 'D:\\scratch',
+          script_python_executable: 'C:\\Python311\\python.exe',
+          script_python_env: { LICENSE_SERVER: '10.0.0.8' },
+        },
+        attachments: {
+          pool_id: 7,
+          tutorial_docs: [],
+          video_resources: [],
+          plugin_downloads: [],
+        },
+        attachmentsLoading: false,
+        attachmentBindingWarning: '',
+      },
+    })
+
+    expect(wrapper.get('[data-testid="admin-app-rdp-username"]').element).toBeInstanceOf(HTMLInputElement)
+    expect((wrapper.get('[data-testid="admin-app-security"]').element as HTMLSelectElement).value).toBe('nla')
+    expect((wrapper.get('[data-testid="admin-app-color-depth"]').element as HTMLSelectElement).value).toBe('24')
+    expect((wrapper.get('[data-testid="admin-app-disable-upload"]').element as HTMLSelectElement).value).toBe('1')
+    expect((wrapper.get('[data-testid="admin-app-script-profile"]').element as HTMLSelectElement).value).toBe('ansys_mapdl')
+
+    await wrapper.get('[data-testid="admin-app-rdp-username"]').setValue('new-user')
+    await wrapper.get('[data-testid="admin-app-disable-download"]').setValue('0')
+    await wrapper.get('[data-testid="admin-app-script-python-env"]').setValue('{"LICENSE_SERVER":"10.0.0.9"}')
+    await wrapper.get('[data-testid="admin-app-submit"]').trigger('click')
+
+    const submitPayload = wrapper.emitted('submit')?.[0]?.[0]
+    expect(submitPayload).toMatchObject({
+      appId: 9,
+      payload: expect.objectContaining({
+        rdp_username: 'new-user',
+        rdp_password: 'old-pass',
+        domain: 'OLD',
+        security: 'nla',
+        remote_app_dir: 'C:\\apps\\fluent',
+        remote_app_args: '-driver',
+        color_depth: 24,
+        disable_gfx: true,
+        resize_method: 'display-update',
+        disable_download: 0,
+        disable_upload: 1,
+        timezone: 'Asia/Shanghai',
+        keyboard_layout: 'zh-cn-qwerty',
+        script_enabled: true,
+        script_profile_key: 'ansys_mapdl',
+        script_executor_key: 'python_api',
+        script_worker_group_id: 3,
+        script_scratch_root: 'D:\\scratch',
+        script_python_executable: 'C:\\Python311\\python.exe',
+        script_python_env: { LICENSE_SERVER: '10.0.0.9' },
+      }),
+    })
   })
 })

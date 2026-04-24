@@ -97,4 +97,52 @@ describe('compute store', () => {
     expect(store.getAppByPoolId(999)).toBeUndefined()
     expect(store.loaded).toBe(true)
   })
+
+  it('keeps existing cards during background refresh failure', async () => {
+    vi.spyOn(computeApi, 'listRemoteApps').mockRejectedValue(new Error('boom'))
+
+    const store = useComputeStore()
+    store.apps = [
+      {
+        id: 1,
+        pool_id: 10,
+        name: 'ANSYS Fluent',
+        icon: 'desktop',
+        protocol: 'rdp',
+        supports_gui: true,
+        supports_script: false,
+        script_runtime_id: null,
+        script_profile_key: null,
+        script_profile_name: null,
+        script_schedulable: false,
+        script_status_code: '',
+        script_status_label: '',
+        script_status_tone: '',
+        script_status_summary: '',
+        script_status_reason: '',
+        resource_status_code: 'available',
+        resource_status_label: '可用',
+        resource_status_tone: 'success',
+        active_count: 1,
+        queued_count: 0,
+        max_concurrent: 4,
+        has_capacity: true,
+      },
+    ] as never
+    store.loaded = true
+
+    const request = store.refreshApps()
+
+    expect(store.loading).toBe(false)
+    expect(store.refreshing).toBe(true)
+    expect(store.apps).toHaveLength(1)
+
+    await request
+
+    expect(store.loading).toBe(false)
+    expect(store.refreshing).toBe(false)
+    expect(store.apps.map((app) => app.name)).toEqual(['ANSYS Fluent'])
+    expect(store.errorMessage).toBe('')
+    expect(store.refreshErrorMessage).toBe('boom')
+  })
 })

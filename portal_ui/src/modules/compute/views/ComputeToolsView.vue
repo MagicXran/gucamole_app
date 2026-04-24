@@ -17,20 +17,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 
 import AppCard from '@/modules/compute/components/AppCard.vue'
 import AppFilterBar from '@/modules/compute/components/AppFilterBar.vue'
+import { useComputeAutoRefresh } from '@/modules/compute/composables/useComputeAutoRefresh'
 import { useComputeStore } from '@/stores/compute'
 
 const computeStore = useComputeStore()
 const items = computed(() => computeStore.filteredApps.filter((app) => app.app_kind === 'compute_tool'))
-
-onMounted(() => {
-  if (!computeStore.loaded && !computeStore.loading && computeStore.apps.length === 0) {
-    void computeStore.loadApps()
-  }
-})
+useComputeAutoRefresh(computeStore)
 </script>
 
 <style scoped>

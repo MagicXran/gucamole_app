@@ -1,13 +1,20 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import CommercialSoftwareView from '@/modules/compute/views/CommercialSoftwareView.vue'
+import * as computeApi from '@/services/api/compute'
 import { useComputeStore } from '@/stores/compute'
 
 describe('CommercialSoftwareView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.restoreAllMocks()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('renders loaded app cards and filters by search text', async () => {
@@ -90,6 +97,10 @@ describe('CommercialSoftwareView', () => {
         has_capacity: true,
       },
     ]
+    vi.spyOn(computeApi, 'listRemoteApps').mockResolvedValue({
+      data: store.apps as never,
+      headers: {},
+    } as never)
 
     const wrapper = mount(CommercialSoftwareView, {
       global: {
@@ -98,6 +109,8 @@ describe('CommercialSoftwareView', () => {
         },
       },
     })
+    await vi.runAllTimersAsync()
+    await flushPromises()
 
     expect(wrapper.text()).toContain('ANSYS Fluent')
     expect(wrapper.text()).toContain('COMSOL Multiphysics')

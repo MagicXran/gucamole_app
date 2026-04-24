@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as computeApi from '@/services/api/compute'
 import ComputeToolsView from '@/modules/compute/views/ComputeToolsView.vue'
@@ -10,9 +10,14 @@ describe('ComputeToolsView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.restoreAllMocks()
+    vi.useFakeTimers()
   })
 
-  it('only renders compute_tool resources', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('only renders compute_tool resources', async () => {
     const store = useComputeStore()
     store.apps = [
       {
@@ -69,6 +74,10 @@ describe('ComputeToolsView', () => {
       },
     ] as never
     store.loaded = true
+    vi.spyOn(computeApi, 'listRemoteApps').mockResolvedValue({
+      data: store.apps as never,
+      headers: {},
+    } as never)
 
     const wrapper = mount(ComputeToolsView, {
       global: {
@@ -77,6 +86,8 @@ describe('ComputeToolsView', () => {
         },
       },
     })
+    await vi.runAllTimersAsync()
+    await flushPromises()
 
     expect(wrapper.text()).toContain('热力学计算器')
     expect(wrapper.text()).not.toContain('仿真脚本平台')
@@ -122,6 +133,7 @@ describe('ComputeToolsView', () => {
         },
       },
     })
+    await vi.runAllTimersAsync()
     await flushPromises()
 
     expect(wrapper.text()).toContain('热力学计算器')
@@ -140,16 +152,161 @@ describe('ComputeToolsView', () => {
     expect(listSpy).not.toHaveBeenCalled()
   })
 
-  it('shows error state instead of empty state', () => {
+  it('keeps cards rendered while background refresh is active', async () => {
+    const store = useComputeStore()
+    store.apps = [
+      {
+        id: 2,
+        pool_id: 11,
+        app_kind: 'compute_tool',
+        name: '热力学计算器',
+        icon: 'calculate',
+        protocol: 'rdp',
+        supports_gui: true,
+        supports_script: false,
+        script_runtime_id: null,
+        script_profile_key: null,
+        script_profile_name: null,
+        script_schedulable: false,
+        script_status_code: '',
+        script_status_label: '',
+        script_status_tone: '',
+        script_status_summary: '',
+        script_status_reason: '',
+        resource_status_code: 'available',
+        resource_status_label: '可用',
+        resource_status_tone: 'success',
+        active_count: 0,
+        queued_count: 0,
+        max_concurrent: 1,
+        has_capacity: true,
+      },
+    ] as never
+    store.loaded = true
+    store.refreshing = true
+    const listSpy = vi.spyOn(computeApi, 'listRemoteApps').mockResolvedValue({ data: [], headers: {} } as never)
+
+    const wrapper = mount(ComputeToolsView, {
+      global: {
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+        },
+      },
+    })
+    await vi.runAllTimersAsync()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('热力学计算器')
+    expect(wrapper.text()).not.toContain('加载中')
+    expect(listSpy).not.toHaveBeenCalled()
+  })
+
+  it('refreshes app list only once on route entry', async () => {
+    const store = useComputeStore()
+    store.apps = [
+      {
+        id: 2,
+        pool_id: 11,
+        app_kind: 'compute_tool',
+        name: '热力学计算器',
+        icon: 'calculate',
+        protocol: 'rdp',
+        supports_gui: true,
+        supports_script: false,
+        script_runtime_id: null,
+        script_profile_key: null,
+        script_profile_name: null,
+        script_schedulable: false,
+        script_status_code: '',
+        script_status_label: '',
+        script_status_tone: '',
+        script_status_summary: '',
+        script_status_reason: '',
+        resource_status_code: 'available',
+        resource_status_label: '可用',
+        resource_status_tone: 'success',
+        active_count: 0,
+        queued_count: 0,
+        max_concurrent: 1,
+        has_capacity: true,
+      },
+    ] as never
+    store.loaded = true
+    const listSpy = vi.spyOn(computeApi, 'listRemoteApps').mockResolvedValue({
+      data: store.apps as never,
+      headers: {},
+    } as never)
+
+    mount(ComputeToolsView, {
+      global: {
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+        },
+      },
+    })
+    await vi.runAllTimersAsync()
+    await flushPromises()
+
+    expect(listSpy).toHaveBeenCalledTimes(1)
+
+    window.dispatchEvent(new Event('focus'))
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false })
+    document.dispatchEvent(new Event('visibilitychange'))
+    window.dispatchEvent(new CustomEvent('portal-compute-launch'))
+    await vi.runAllTimersAsync()
+    await flushPromises()
+
+    expect(listSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes stale error state on mount', async () => {
     const store = useComputeStore()
     store.errorMessage = '接口炸了'
     store.loaded = true
-    const listSpy = vi.spyOn(computeApi, 'listRemoteApps').mockResolvedValue({ data: [], headers: {} } as never)
+    const listSpy = vi.spyOn(computeApi, 'listRemoteApps').mockResolvedValue({
+      data: [
+        {
+          id: 2,
+          pool_id: 11,
+          app_kind: 'compute_tool',
+          name: '热力学计算器',
+          icon: 'calculate',
+          protocol: 'rdp',
+          supports_gui: true,
+          supports_script: false,
+          script_runtime_id: null,
+          script_profile_key: null,
+          script_profile_name: null,
+          script_schedulable: false,
+          script_status_code: '',
+          script_status_label: '',
+          script_status_tone: '',
+          script_status_summary: '',
+          script_status_reason: '',
+          resource_status_code: 'available',
+          resource_status_label: '可用',
+          resource_status_tone: 'success',
+          active_count: 0,
+          queued_count: 0,
+          max_concurrent: 1,
+          has_capacity: true,
+        },
+      ],
+      headers: {},
+    } as never)
 
-    const wrapper = mount(ComputeToolsView)
+    const wrapper = mount(ComputeToolsView, {
+      global: {
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+        },
+      },
+    })
+    await vi.runAllTimersAsync()
+    await flushPromises()
 
-    expect(wrapper.text()).toContain('接口炸了')
-    expect(wrapper.text()).not.toContain('暂无计算工具')
-    expect(listSpy).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('热力学计算器')
+    expect(wrapper.text()).not.toContain('接口炸了')
+    expect(listSpy).toHaveBeenCalled()
   })
 })

@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as computeApi from '@/services/api/compute'
 import SimulationAppView from '@/modules/compute/views/SimulationAppView.vue'
@@ -10,9 +10,14 @@ describe('SimulationAppView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.restoreAllMocks()
+    vi.useFakeTimers()
   })
 
-  it('only renders simulation_app resources', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('only renders simulation_app resources', async () => {
     const store = useComputeStore()
     store.apps = [
       {
@@ -69,6 +74,10 @@ describe('SimulationAppView', () => {
       },
     ] as never
     store.loaded = true
+    vi.spyOn(computeApi, 'listRemoteApps').mockResolvedValue({
+      data: store.apps as never,
+      headers: {},
+    } as never)
 
     const wrapper = mount(SimulationAppView, {
       global: {
@@ -77,6 +86,8 @@ describe('SimulationAppView', () => {
         },
       },
     })
+    await vi.runAllTimersAsync()
+    await flushPromises()
 
     expect(wrapper.text()).toContain('仿真脚本平台')
     expect(wrapper.text()).not.toContain('热力学计算器')
@@ -122,6 +133,7 @@ describe('SimulationAppView', () => {
         },
       },
     })
+    await vi.runAllTimersAsync()
     await flushPromises()
 
     expect(wrapper.text()).toContain('仿真脚本平台')
@@ -140,16 +152,54 @@ describe('SimulationAppView', () => {
     expect(listSpy).not.toHaveBeenCalled()
   })
 
-  it('shows error state instead of empty state', () => {
+  it('refreshes stale error state on mount', async () => {
     const store = useComputeStore()
     store.errorMessage = '接口炸了'
     store.loaded = true
-    const listSpy = vi.spyOn(computeApi, 'listRemoteApps').mockResolvedValue({ data: [], headers: {} } as never)
+    const listSpy = vi.spyOn(computeApi, 'listRemoteApps').mockResolvedValue({
+      data: [
+        {
+          id: 1,
+          pool_id: 10,
+          app_kind: 'simulation_app',
+          name: '仿真脚本平台',
+          icon: 'terminal',
+          protocol: 'rdp',
+          supports_gui: true,
+          supports_script: true,
+          script_runtime_id: 1,
+          script_profile_key: 'solver',
+          script_profile_name: 'Solver',
+          script_schedulable: true,
+          script_status_code: 'ready',
+          script_status_label: '可调度',
+          script_status_tone: 'success',
+          script_status_summary: '',
+          script_status_reason: '',
+          resource_status_code: 'available',
+          resource_status_label: '可用',
+          resource_status_tone: 'success',
+          active_count: 0,
+          queued_count: 0,
+          max_concurrent: 1,
+          has_capacity: true,
+        },
+      ],
+      headers: {},
+    } as never)
 
-    const wrapper = mount(SimulationAppView)
+    const wrapper = mount(SimulationAppView, {
+      global: {
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+        },
+      },
+    })
+    await vi.runAllTimersAsync()
+    await flushPromises()
 
-    expect(wrapper.text()).toContain('接口炸了')
-    expect(wrapper.text()).not.toContain('暂无仿真应用')
-    expect(listSpy).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('仿真脚本平台')
+    expect(wrapper.text()).not.toContain('接口炸了')
+    expect(listSpy).toHaveBeenCalled()
   })
 })

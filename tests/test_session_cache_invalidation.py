@@ -1,12 +1,15 @@
 import asyncio
 import sys
 import types
+from contextlib import nullcontext
 
 import httpx
+import pytest
 from fastapi import FastAPI
 
 import backend.admin_pool_router as admin_pool_router
 import backend.monitor as monitor
+import backend.resource_pool_service as resource_pool_service
 from backend.models import UserInfo
 from backend.resource_pool_service import ResourcePoolService
 
@@ -101,6 +104,30 @@ class FakeResourcePoolReclaimDB:
             (session_id, str(params.get("reason")), str(params.get("target_status")))
         )
         return 1
+
+
+class FakePrepareLaunchDB:
+    def __init__(self, user_app_live_count: int = 0):
+        self.user_app_live_count = user_app_live_count
+
+    def execute_query(self, query: str, params=None, fetch_one: bool = False):
+        if "/* rps:get_launch_target */" in query:
+            row = {
+                "requested_app_id": 1,
+                "pool_id": 1,
+                "pool_name": "记事本",
+            }
+            if fetch_one:
+                return row
+            return [row]
+        if "/* rps:get_user_app_live_count */" in query:
+            row = {"live_count": self.user_app_live_count}
+            if fetch_one:
+                return row
+            return [row]
+        if fetch_one:
+            return None
+        return []
 
 
 def _install_router_stub(monkeypatch, guac_service: FakeGuacService):
@@ -255,3 +282,62 @@ def test_reclaim_idle_sessions_handles_orphan_rows_with_null_pool_id():
 def test_default_orphan_timeouts_follow_monitor_session_timeout_config():
     assert ResourcePoolService.DEFAULT_STALE_TIMEOUT_SECONDS == monitor.SESSION_TIMEOUT_SECONDS
     assert ResourcePoolService.DEFAULT_ORPHAN_IDLE_TIMEOUT_SECONDS == monitor.SESSION_TIMEOUT_SECONDS
+
+
+def test_prepare_launch_allows_second_session_in_same_pool_when_capacity_remains(monkeypatch):
+    service = ResourcePoolService(db=FakePrepareLaunchDB())
+
+    monkeypatch.setattr(service, "_pool_lock", lambda pool_id: nullcontext())
+    monkeypatch.setattr(service, "expire_ready_entries", lambda **kwargs: [])
+    monkeypatch.setattr(
+        resource_pool_service,
+        "CONFIG",
+        {"launch_policy": {"same_user_same_app_limit": 0}},
+    )
+    monkeypatch.setattr(
+        service,
+        "get_live_user_pool_state",
+        lambda **kwargs: {"state_kind": "session", "id": "session-1", "status": "active"},
+    )
+    monkeypatch.setattr(
+        service,
+        "pick_launchable_member",
+        lambda **kwargs: {"id": 1, "pool_id": 1, "member_max_concurrent": 3, "active_count": 1},
+    )
+    monkeypatch.setattr(service, "_count_pool_live_queue_entries", lambda pool_id: 0)
+    monkeypatch.setattr(service, "_pool_has_capacity", lambda pool_id: True)
+    monkeypatch.setattr(service, "_create_launch_reservation", lambda **kwargs: 77)
+
+    decision = service.prepare_launch(user_id=2, requested_app_id=1)
+
+    assert decision == {
+        "status": "started",
+        "pool_id": 1,
+        "member_app_id": 1,
+        "requested_app_name": "记事本",
+        "connection_name": "app_1",
+        "queue_id": 77,
+    }
+
+
+def test_prepare_launch_blocks_same_user_same_app_when_config_limit_reached(monkeypatch):
+    service = ResourcePoolService(db=FakePrepareLaunchDB(user_app_live_count=1))
+
+    monkeypatch.setattr(service, "_pool_lock", lambda pool_id: nullcontext())
+    monkeypatch.setattr(service, "expire_ready_entries", lambda **kwargs: [])
+    monkeypatch.setattr(
+        resource_pool_service,
+        "CONFIG",
+        {"launch_policy": {"same_user_same_app_limit": 1}},
+    )
+    monkeypatch.setattr(service, "get_live_user_pool_state", lambda **kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "pick_launchable_member",
+        lambda **kwargs: {"id": 1, "pool_id": 1, "member_max_concurrent": 3, "active_count": 1},
+    )
+    monkeypatch.setattr(service, "_count_pool_live_queue_entries", lambda pool_id: 0)
+    monkeypatch.setattr(service, "_pool_has_capacity", lambda pool_id: True)
+
+    with pytest.raises(ValueError, match="同一用户最多同时打开 1 个“记事本”实例"):
+        service.prepare_launch(user_id=2, requested_app_id=1)

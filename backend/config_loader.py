@@ -70,6 +70,15 @@ def load_config() -> dict:
         "PORTAL_OBJECT_STORAGE_SECURE",
         str(storage_cfg.get("secure", False)),
     ).lower() in {"1", "true", "yes", "on"}
+    launch_policy = config.setdefault("launch_policy", {})
+    raw_same_user_same_app_limit = os.environ.get(
+        "PORTAL_LAUNCH_SAME_USER_SAME_APP_LIMIT",
+        launch_policy.get("same_user_same_app_limit", 0),
+    )
+    try:
+        launch_policy["same_user_same_app_limit"] = max(0, int(raw_same_user_same_app_limit or 0))
+    except (TypeError, ValueError):
+        launch_policy["same_user_same_app_limit"] = 0
     return config
 
 

@@ -1,3 +1,5 @@
+import axios from 'axios'
+
 import { PORTAL_TOKEN_KEY } from '@/constants/auth'
 import http from '@/services/http'
 
@@ -30,6 +32,7 @@ type QueueTicket = {
 
 const launchLock = new Map<number, number>()
 const queuePollers = new Map<number, number>()
+const COMPUTE_LAUNCH_EVENT = 'portal-compute-launch'
 
 function escapeHtml(value: string) {
   return value
@@ -96,6 +99,34 @@ function renderErrorWindow(popup: Window, appName: string, message: string) {
     `${appName} - 启动失败`,
     `<h1 style="font-size:1.15rem;color:#fca5a5">启动失败</h1><p class="meta">${escapeHtml(message)}</p>`,
   )
+}
+
+function emitLaunchRefresh() {
+  window.dispatchEvent(new CustomEvent(COMPUTE_LAUNCH_EVENT))
+}
+
+function resolveAxiosLikeResponse(error: unknown) {
+  if (axios.isAxiosError(error)) {
+    return error.response
+  }
+  if (error && typeof error === 'object' && 'response' in error) {
+    return (error as { response?: { status?: number; data?: { detail?: string } } }).response
+  }
+  return undefined
+}
+
+function resolveLaunchErrorMessage(error: unknown) {
+  const response = resolveAxiosLikeResponse(error)
+  if (response) {
+    const detail = typeof response.data?.detail === 'string' ? response.data.detail.trim() : ''
+    if (detail) {
+      return detail
+    }
+    if (response.status === 409) {
+      return '当前启动请求与现有会话状态冲突，请稍后重试'
+    }
+  }
+  return error instanceof Error ? error.message : '远程应用启动失败'
 }
 
 function stopQueuePolling(queueId: number) {
@@ -221,6 +252,7 @@ async function launchIntoPopup({
       stopQueuePolling(payload.queue_id)
     }
     renderGuacamoleWindow(popup, appName, payload.redirect_url, payload.session_id)
+    emitLaunchRefresh()
     return
   }
   if (payload.queue_id) {
@@ -232,6 +264,7 @@ async function launchIntoPopup({
       poolId: payload.pool_id || poolId,
       popup,
     })
+    emitLaunchRefresh()
     return
   }
   throw new Error(`未知启动状态：${payload.status}`)
@@ -248,7 +281,8 @@ export async function launchRemoteApp(appId: number, appName: string, poolId: nu
   try {
     await launchIntoPopup({ appId, appName, poolId, popup })
   } catch (error) {
-    renderErrorWindow(popup, appName, error instanceof Error ? error.message : '远程应用启动失败')
+    const message = resolveLaunchErrorMessage(error)
+    renderErrorWindow(popup, appName, message)
     throw error
   } finally {
     launchLock.delete(appId)

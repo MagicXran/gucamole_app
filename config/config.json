@@ -1,4 +1,4 @@
-﻿{
+{
   "database": {
     "host": "127.0.0.1",
     "port": 33060,
@@ -39,7 +39,13 @@
     "session_timeout_seconds": 120,
     "cleanup_interval_seconds": 60
   },
-  "file_transfer": {
+  "launch_policy": {
+
+    "same_user_same_app_limit": 0
+
+  },
+
+  "file_transfer": {
     "enabled": true,
     "default_quota_gb": 10,
     "max_file_size_gb": 50,

@@ -95,7 +95,35 @@ deploy/
 - `PORTAL_HOST` 不是 RDP 主机地址
 - `remote_app.hostname` 才是 RDP 主机地址
 
-## 6. 推荐的生产部署模式
+`PORTAL_BIND_IP` / `PORTAL_PORT` 是 Docker 在宿主机实际监听的地址；`PORTAL_PUBLIC_HOST` / `PORTAL_PUBLIC_PORT` 是浏览器和 Worker 看到的外部地址。两者相同可以不设置 public 变量，两者不同必须显式设置，别让回跳 URL 跟着内部端口跑偏。
+
+## 6. Dev / Prod Profile
+
+| Profile | Docker 监听 | 外部访问 | bridge | 用途 |
+|---|---|---|---|---|
+| `dev` | `127.0.0.1:18880` | `192.168.56.25:8880` | 必须 | Windows 开发机 + VMware Worker VM |
+| `prod-direct` | `0.0.0.0:8880` | `portal.example.com:8880` | 禁止 | Linux 内网 / VPN |
+| `prod-proxy` | `127.0.0.1:18880` | `https://portal.example.com` | 禁止 | 正式 Nginx / Caddy / LB / WAF |
+
+开发机固定流程：
+
+```powershell
+Copy-Item deploy\.env.development.example deploy\.env
+cd deploy
+docker compose up -d --build
+cd ..
+python deploy\host_port_bridge.py --listen-host 192.168.56.25 --listen-port 8880 --target-host 127.0.0.1 --target-port 18880
+```
+
+Worker 的 `registration_payload.json` 使用：
+
+```ini
+portal_base_url=http://192.168.56.25:8880
+```
+
+生产环境别启动 `host_port_bridge.py`。把开发补丁搬上服务器，这事就像拿创可贴修水管，迟早喷你一脸。
+
+## 7. 推荐的生产部署模式
 
 ### 模式 A：Portal 自己直接对外提供服务
 
@@ -127,6 +155,8 @@ PORTAL_HOST=portal.example.com
 PORTAL_BIND_IP=127.0.0.1
 PORTAL_PORT=18880
 PORTAL_HOST=portal.example.com
+PORTAL_PUBLIC_HOST=portal.example.com
+PORTAL_PUBLIC_PORT=443
 ```
 
 然后由外层正式代理反向转发到 `127.0.0.1:18880`。
@@ -136,9 +166,9 @@ PORTAL_HOST=portal.example.com
 - Windows Server + Docker Desktop + bridge 硬上生产
 - 继续沿用开发机 `192.168.56.x` 这类 VMware 网卡地址
 
-## 7. 生产部署前准备
+## 8. 生产部署前准备
 
-### 7.1 服务器要求
+### 8.1 服务器要求
 
 - Linux
 - Docker Engine
@@ -146,7 +176,7 @@ PORTAL_HOST=portal.example.com
 - 可以访问目标 Windows RemoteApp 主机 `3389`
 - 足够的磁盘给 MySQL 和 `/drive`
 
-### 7.2 数据目录准备
+### 8.2 数据目录准备
 
 ```bash
 sudo mkdir -p /srv/nercar-portal/mysql
@@ -155,7 +185,7 @@ sudo mkdir -p /srv/nercar-portal/drive
 
 > MySQL 数据目录必须放在 Linux 本地文件系统上，别放到奇怪的共享盘。
 
-## 8. 生产 `.env` 配置
+## 9. 生产 `.env` 配置
 
 最稳的做法：
 
@@ -169,7 +199,7 @@ cp .env.production.example .env
 
 推荐直接从 `deploy/.env.production.example` 开始，而不是继续拿开发机 `.env` 改。
 
-### 8.1 最小可用生产示例
+### 9.1 最小可用生产示例
 
 ```ini
 PORTAL_INSTANCE_ID=nercar-portal-prod
@@ -192,7 +222,7 @@ GUAC_DRIVE_SOURCE=/srv/nercar-portal/drive
 TZ=Asia/Shanghai
 ```
 
-### 8.2 字段解释
+### 9.2 字段解释
 
 | 变量 | 含义 | 生产建议 |
 |---|---|---|
@@ -203,11 +233,13 @@ TZ=Asia/Shanghai
 | `PORTAL_HOST` | 用户访问门户的域名 / IP | 写真实域名或真实 IP |
 | `PORTAL_BIND_IP` | 宿主机绑定地址 | 直接对外时用 `0.0.0.0` |
 | `PORTAL_PORT` | 宿主机发布端口 | 常见 `8880` / `80` / `18880` |
+| `PORTAL_PUBLIC_HOST` | 浏览器 / Worker 实际访问的外部主机名 | 外部地址不同于监听地址时设置 |
+| `PORTAL_PUBLIC_PORT` | 浏览器 / Worker 实际访问的外部端口 | 外部端口不同于监听端口时设置 |
 | `PORTAL_JWT_SECRET` | JWT 签名密钥 | 必改 |
 | `MYSQL_DATA_SOURCE` | MySQL 数据目录 | 强烈建议显式设置 |
 | `GUAC_DRIVE_SOURCE` | `/drive` 数据目录 | 强烈建议显式设置 |
 
-## 9. 哪些配置会被环境变量覆盖
+## 10. 哪些配置会被环境变量覆盖
 
 `config/config.json` 里的数据库和 Guacamole 地址在 Docker 里会被环境变量覆盖。
 
@@ -226,11 +258,11 @@ TZ=Asia/Shanghai
 2. 脚本 profile 配置
 3. drive / monitor / quota 等静态配置
 
-## 10. 业务数据也必须改
+## 11. 业务数据也必须改
 
 这项目最阴的坑不是 `.env`，而是数据库业务数据没改。
 
-### 10.1 `remote_app` 表必须核对
+### 11.1 `remote_app` 表必须核对
 
 你必须确认：
 
@@ -244,7 +276,7 @@ TZ=Asia/Shanghai
 
 如果生产上的 Windows 主机不是开发环境那台，Portal 能启动也没用，点应用照样死。
 
-### 10.2 ACL 和资源池也要核对
+### 11.2 ACL 和资源池也要核对
 
 这些表也别装看不见：
 
@@ -257,7 +289,7 @@ TZ=Asia/Shanghai
 - 门户能登录但看不到应用
 - 看得到应用但排队异常
 
-### 10.3 如果启用脚本任务，还要核对 Worker 相关表
+### 11.3 如果启用脚本任务，还要核对 Worker 相关表
 
 - `app_binding`
 - `worker_group`
@@ -265,28 +297,28 @@ TZ=Asia/Shanghai
 - `worker_enrollment`
 - `worker_auth_token`
 
-## 11. 启动步骤
+## 12. 启动步骤
 
-### 11.1 进入部署目录
+### 12.1 进入部署目录
 
 ```bash
 cd deploy
 ```
 
-### 11.2 复制并编辑生产 `.env`
+### 12.2 复制并编辑生产 `.env`
 
 ```bash
 cp .env.production.example .env
 vi .env
 ```
 
-### 11.3 启动整套服务
+### 12.3 启动整套服务
 
 ```bash
 docker compose up -d --build
 ```
 
-### 11.4 查看状态
+### 12.4 查看状态
 
 ```bash
 docker compose ps
@@ -298,9 +330,9 @@ docker compose ps
 - `portal-backend` up
 - `nginx` up
 
-## 12. 启动后验收
+## 13. 启动后验收
 
-### 12.1 健康检查
+### 13.1 健康检查
 
 ```bash
 curl -s http://127.0.0.1:${PORTAL_PORT}/health
@@ -312,7 +344,7 @@ curl -s http://127.0.0.1:${PORTAL_PORT}/health
 {"status":"ok"}
 ```
 
-### 12.2 检查数据库
+### 13.2 检查数据库
 
 ```bash
 docker compose exec -T guac-sql mysql -uroot -p你的密码 --default-character-set=utf8mb4 -e "SHOW DATABASES"
@@ -323,7 +355,7 @@ docker compose exec -T guac-sql mysql -uroot -p你的密码 --default-character-
 - `guacamole_db`
 - `guacamole_portal_db`
 
-### 12.3 检查应用数据
+### 13.3 检查应用数据
 
 ```bash
 docker compose exec -T guac-sql mysql -uroot -p你的密码 --default-character-set=utf8mb4 guacamole_portal_db -e "SELECT id, name, hostname, port FROM remote_app"
@@ -334,14 +366,14 @@ docker compose exec -T guac-sql mysql -uroot -p你的密码 --default-character-
 - `hostname` 是否已经换成真实 Windows 主机
 - 不是开发机 IP
 
-### 12.4 浏览器验收
+### 13.4 浏览器验收
 
 1. 登录页能打开
 2. 管理员能登录
 3. 用户能看到应用卡片
 4. 点击 RemoteApp 能进入 Guacamole
 
-## 13. Worker 部署（仅脚本任务需要）
+## 14. Worker 部署（仅脚本任务需要）
 
 Worker 不是容器的一部分，而是独立 Windows 主机。
 
@@ -361,9 +393,9 @@ Portal 只负责：
 6. 在 Worker 主机上注册
 7. 保证 Worker 进程常驻
 
-## 14. 日常运维
+## 15. 日常运维
 
-### 14.1 看日志
+### 15.1 看日志
 
 ```bash
 docker compose logs -f nginx
@@ -373,20 +405,20 @@ docker compose logs -f guacd
 docker compose logs -f guac-sql
 ```
 
-### 14.2 重启
+### 15.2 重启
 
 ```bash
 docker compose restart nginx portal-backend
 docker compose restart guac-web
 ```
 
-### 14.3 全量重建
+### 15.3 全量重建
 
 ```bash
 docker compose up -d --build
 ```
 
-### 14.4 备份
+### 15.4 备份
 
 ```bash
 ./backup.sh status
@@ -395,32 +427,32 @@ docker compose up -d --build
 
 > 导入导出 MySQL 时一定带 `--default-character-set=utf8mb4`，不然中文迟早乱码。
 
-## 15. 常见坑
+## 16. 常见坑
 
-### 15.1 不要继续用 bridge
+### 16.1 不要继续用 bridge
 
 生产 Linux 不需要它。  
 如果你发现自己又想把 `host_port_bridge.py` 搬上服务器，说明你的入口设计已经歪了。
 
-### 15.2 不要把 `PORTAL_HOST` 留成开发 IP
+### 16.2 不要把 `PORTAL_HOST` 留成开发 IP
 
 `192.168.56.x` 这种值一看就是开发机残留。
 
-### 15.3 不要把 MySQL 暴露到公网
+### 16.3 不要把 MySQL 暴露到公网
 
 当前 compose 只绑定本机，这是对的。
 
-### 15.4 不要忘记改 `remote_app.hostname`
+### 16.4 不要忘记改 `remote_app.hostname`
 
 这比没改密码还常见，而且更阴险。
 
-### 15.5 不要误用旧 compose
+### 16.5 不要误用旧 compose
 
 真正入口只有：
 
 - `deploy/docker-compose.yml`
 
-## 16. 推荐上线顺序
+## 17. 推荐上线顺序
 
 1. 准备 Linux 服务器
 2. 创建数据目录
@@ -432,7 +464,7 @@ docker compose up -d --build
 8. 登录门户测试 RemoteApp
 9. 如果启用脚本任务，再单独上线 Worker
 
-## 17. 结论
+## 18. 结论
 
 这项目的生产部署主线其实不复杂：
 

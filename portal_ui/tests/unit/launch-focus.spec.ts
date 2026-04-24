@@ -53,4 +53,36 @@ describe('launchRemoteApp popup focus handling', () => {
     expect(html).toContain('window.addEventListener("focus",focusGuacamoleFrame)')
     expect(html).toContain('document.addEventListener("click",focusGuacamoleFrame,true)')
   })
+
+  it('surfaces server detail instead of generic 409 text', async () => {
+    vi.mocked(http.post).mockRejectedValue(
+      Object.assign(new Error('Request failed with status code 409'), {
+        response: {
+          status: 409,
+          data: {
+            detail: '同一用户最多同时打开 1 个“记事本”实例，请先关闭现有窗口',
+          },
+        },
+      }) as never,
+    )
+
+    let html = ''
+    const popup = {
+      closed: false,
+      document: {
+        open: vi.fn(),
+        write: vi.fn((value: string) => {
+          html += value
+        }),
+        close: vi.fn(),
+      },
+    } as unknown as Window
+    vi.spyOn(window, 'open').mockReturnValue(popup)
+
+    const { launchRemoteApp } = await import('@/modules/compute/services/launch')
+
+    await expect(launchRemoteApp(1, '记事本', 1)).rejects.toThrow('Request failed with status code 409')
+    expect(html).toContain('同一用户最多同时打开 1 个“记事本”实例，请先关闭现有窗口')
+    expect(html).not.toContain('Request failed with status code 409')
+  })
 })

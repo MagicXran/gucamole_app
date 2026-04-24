@@ -53,6 +53,50 @@ function renderDebugConfig(envText) {
   return result.stdout;
 }
 
+test('public portal URL can differ from the Docker bind port', () => {
+  const rendered = renderConfig([
+    'TZ=Asia/Shanghai',
+    'PORTAL_HOST=127.0.0.1',
+    'PORTAL_PORT=18880',
+    'PORTAL_PUBLIC_HOST=192.168.56.25',
+    'PORTAL_PUBLIC_PORT=8880',
+    'PORTAL_BIND_IP=127.0.0.1',
+    'PORTAL_INSTANCE_ID=portal-dev-public-url',
+    'MYSQL_ROOT_PASSWORD=abcd',
+    'MYSQL_PASSWORD=efgh',
+    'JSON_SECRET_KEY=00112233445566778899aabbccddeeff',
+  ].join('\n'));
+
+  assert.match(rendered, /host_ip: 127\.0\.0\.1/);
+  assert.match(rendered, /published: "18880"/);
+  assert.match(rendered, /GUACAMOLE_EXTERNAL_URL: http:\/\/192\.168\.56\.25:8880\/guacamole/);
+});
+
+test('development env template uses loopback Docker binding with VM-facing public URL', () => {
+  const envText = fs.readFileSync(path.join(repoRoot, 'deploy', '.env.development.example'), 'utf8');
+  const rendered = renderConfig(envText);
+
+  assert.match(envText, /^PORTAL_BIND_IP=127\.0\.0\.1$/m);
+  assert.match(envText, /^PORTAL_PORT=18880$/m);
+  assert.match(envText, /^PORTAL_PUBLIC_HOST=192\.168\.56\.25$/m);
+  assert.match(envText, /^PORTAL_PUBLIC_PORT=8880$/m);
+  assert.match(envText, /portal_base_url=http:\/\/192\.168\.56\.25:8880/);
+  assert.match(rendered, /host_ip: 127\.0\.0\.1/);
+  assert.match(rendered, /published: "18880"/);
+  assert.match(rendered, /GUACAMOLE_EXTERNAL_URL: http:\/\/192\.168\.56\.25:8880\/guacamole/);
+});
+
+test('production env template exposes portal directly without a dev bridge port', () => {
+  const envText = fs.readFileSync(path.join(repoRoot, 'deploy', '.env.production.example'), 'utf8');
+  const rendered = renderConfig(envText);
+
+  assert.match(envText, /^PORTAL_BIND_IP=0\.0\.0\.0$/m);
+  assert.match(envText, /^PORTAL_PORT=8880$/m);
+  assert.match(rendered, /host_ip: 0\.0\.0\.0/);
+  assert.match(rendered, /published: "8880"/);
+  assert.doesNotMatch(rendered, /published: "18880"/);
+});
+
 test('legacy root env aliases still resolve compose secrets', () => {
   const rendered = renderConfig([
     'TZ=Asia/Shanghai',
@@ -67,6 +111,7 @@ test('legacy root env aliases still resolve compose secrets', () => {
   assert.match(rendered, /MYSQL_USER: guacamole_user/);
   assert.match(rendered, /MYSQL_PASSWORD: xran/);
   assert.match(rendered, /JSON_SECRET_KEY: 4c0b569e4c96df157eee1b65dd0e4d41/);
+  assert.match(rendered, /GUACAMOLE_EXTERNAL_URL: http:\/\/localhost:8880\/guacamole/);
   assert.match(rendered, /PORTAL_DB_PASSWORD: xran/);
 });
 

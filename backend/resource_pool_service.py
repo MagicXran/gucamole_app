@@ -38,6 +38,15 @@ class ResourcePoolService:
     def _now(self) -> datetime:
         return self._now_provider()
 
+    @staticmethod
+    def _same_user_same_app_limit() -> int:
+        launch_policy = CONFIG.get("launch_policy", {}) or {}
+        raw_limit = launch_policy.get("same_user_same_app_limit", 0)
+        try:
+            return max(0, int(raw_limit or 0))
+        except (TypeError, ValueError):
+            return 0
+
     @contextmanager
     def _pool_lock(self, pool_id: int):
         lock_name = f"resource_pool:{pool_id}"
@@ -113,6 +122,41 @@ class ResourcePoolService:
         if not row:
             return None
         return {"state_kind": "session", "id": str(row["session_id"]), "status": str(row["status"])}
+
+    def _count_user_app_live_entries(
+        self,
+        *,
+        user_id: int,
+        app_id: int,
+        exclude_queue_id: int | None = None,
+    ) -> int:
+        row = self._db.execute_query(
+            """
+            /* rps:get_user_app_live_count */
+            SELECT
+                (
+                    SELECT COUNT(*)
+                    FROM active_session s
+                    WHERE s.user_id = %(user_id)s
+                      AND s.app_id = %(app_id)s
+                      AND s.status IN ('active', 'reclaim_pending')
+                ) + (
+                    SELECT COUNT(*)
+                    FROM launch_queue q
+                    WHERE q.user_id = %(user_id)s
+                      AND q.assigned_app_id = %(app_id)s
+                      AND q.status IN ('ready', 'launching')
+                      AND (%(exclude_queue_id)s IS NULL OR q.id <> %(exclude_queue_id)s)
+                ) AS live_count
+            """,
+            {
+                "user_id": user_id,
+                "app_id": app_id,
+                "exclude_queue_id": exclude_queue_id,
+            },
+            fetch_one=True,
+        ) or {"live_count": 0}
+        return int(row.get("live_count") or 0)
 
     def pick_launchable_member(self, user_id: int, pool_id: int, *, exclude_queue_id: int | None = None) -> dict[str, Any] | None:
         rows = self._db.execute_query(
@@ -410,6 +454,7 @@ class ResourcePoolService:
 
         pool_id = int(launch_target["pool_id"])
         pool_name = str(launch_target["pool_name"])
+        same_user_same_app_limit = self._same_user_same_app_limit()
 
         with self._pool_lock(pool_id):
             self.expire_ready_entries(pool_id=pool_id)
@@ -453,6 +498,18 @@ class ResourcePoolService:
                 if not member:
                     return self._invalidate_queue_if_unusable(queue_id=int(queue_id), user_id=user_id, pool_id=pool_id, reason="member_unavailable")
 
+                if same_user_same_app_limit > 0:
+                    live_count = self._count_user_app_live_entries(
+                        user_id=user_id,
+                        app_id=int(entry["assigned_app_id"]),
+                        exclude_queue_id=int(queue_id),
+                    )
+                    if live_count >= same_user_same_app_limit:
+                        self._cancel_queue_as_invalid(int(queue_id), "same_user_app_limit")
+                        raise ValueError(
+                            f"同一用户最多同时打开 {same_user_same_app_limit} 个“{pool_name}”实例，请先关闭现有窗口"
+                        )
+
                 updated = self._db.execute_update(
                     """
                     /* rps:queue_mark_launching */
@@ -480,11 +537,20 @@ class ResourcePoolService:
             if live_state:
                 if live_state["state_kind"] == "queue":
                     return self.get_queue_status(queue_id=int(live_state["id"]), user_id=user_id)
-                raise ValueError("当前资源池已有运行中的会话")
 
             member = self.pick_launchable_member(user_id=user_id, pool_id=pool_id)
             if self._count_pool_live_queue_entries(pool_id) > 0 or not self._pool_has_capacity(pool_id) or not member:
                 return self._enqueue_request(user_id, pool_id, requested_app_id)
+
+            if same_user_same_app_limit > 0:
+                live_count = self._count_user_app_live_entries(
+                    user_id=user_id,
+                    app_id=int(member["id"]),
+                )
+                if live_count >= same_user_same_app_limit:
+                    raise ValueError(
+                        f"同一用户最多同时打开 {same_user_same_app_limit} 个“{pool_name}”实例，请先关闭现有窗口"
+                    )
 
             reservation_id = self._create_launch_reservation(
                 user_id=user_id,

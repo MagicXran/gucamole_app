@@ -37,6 +37,20 @@ class _TaskRepo:
         return payload
 
 
+class _StandaloneTaskRepo(_TaskRepo):
+    def __init__(self):
+        self.queued_payloads = []
+
+    def get_script_launch_target(self, user_id, requested_runtime_id):
+        target = super().get_script_launch_target(user_id, requested_runtime_id)
+        target["pool_id"] = None
+        return target
+
+    def insert_task_queue(self, payload):
+        self.queued_payloads.append(payload)
+        return payload
+
+
 def test_submit_script_task_excludes_output_directory_from_snapshot(tmp_path, monkeypatch: pytest.MonkeyPatch):
     user_root = tmp_path / "portal_u1"
     user_root.mkdir()
@@ -105,3 +119,30 @@ def test_submit_script_task_excludes_only_nested_results_root_subtree(tmp_path, 
 
 def test_format_bytes_uses_megabytes_for_megabyte_values():
     assert _format_bytes(1048576) == "1.0 MB"
+
+
+def test_submit_script_task_skips_pool_queue_for_standalone_runtime(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    user_root = tmp_path / "portal_u1"
+    user_root.mkdir()
+    entry_file = user_root / "worker_smoke.py"
+    entry_file.write_text("print('ok')\n", encoding="utf-8")
+
+    monkeypatch.setattr(task_service_module, "_get_usage_sync", lambda user_id: 0)
+    monkeypatch.setattr(task_service_module, "_get_quota", lambda user_id: 10 * 1024 * 1024)
+
+    repo = _StandaloneTaskRepo()
+    service = TaskService(
+        repo=repo,
+        drive_root=tmp_path,
+        task_id_factory=lambda: "task_standalone",
+        results_root_name="Output",
+    )
+
+    created = service.submit_script_task(
+        user_id=1,
+        requested_runtime_id=4,
+        entry_path="worker_smoke.py",
+    )
+
+    assert created["task_id"] == "task_standalone"
+    assert repo.queued_payloads == []

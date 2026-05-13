@@ -13,7 +13,7 @@
     <div v-else-if="computeStore.loading" class="commercial-view__empty">加载中...</div>
     <div v-else-if="commercialApps.length === 0" class="commercial-view__empty">暂无可用软件</div>
     <div v-else class="commercial-view__grid">
-      <AppCard v-for="app in commercialApps" :key="app.pool_id" :app="app" />
+      <AppCard v-for="app in commercialApps" :key="app.capacity_pool_id ?? app.pool_id ?? app.runtime_id ?? app.id" :app="app" />
     </div>
   </section>
 </template>

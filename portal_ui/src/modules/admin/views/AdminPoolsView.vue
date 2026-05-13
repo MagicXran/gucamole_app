@@ -2,14 +2,14 @@
   <section class="admin-ops-view">
     <header class="admin-ops-view__header">
       <div>
-        <h1>资源池</h1>
+        <h1>容量池</h1>
         <p>池级并发、自动放行、ready 宽限、失联/空闲回收策略。</p>
       </div>
-      <button type="button" data-testid="admin-pool-create" @click="openCreate">新建资源池</button>
+      <button type="button" data-testid="admin-pool-create" @click="openCreate">新建容量池</button>
     </header>
 
     <div v-if="errorMessage" class="admin-ops-view__state admin-ops-view__state--error">{{ errorMessage }}</div>
-    <div v-else-if="loading" class="admin-ops-view__state">资源池加载中...</div>
+    <div v-else-if="loading" class="admin-ops-view__state">容量池加载中...</div>
     <table v-else class="admin-ops-view__table">
       <thead>
         <tr>
@@ -26,7 +26,7 @@
       </thead>
       <tbody>
         <tr v-if="pools.length === 0">
-          <td colspan="9">暂无资源池</td>
+          <td colspan="9">暂无容量池</td>
         </tr>
         <tr v-for="pool in pools" :key="pool.id">
           <td>{{ pool.id }}</td>
@@ -45,7 +45,7 @@
     <div v-if="dialogOpen" class="admin-pools__dialog">
       <div class="admin-pools__panel">
         <header class="admin-pools__panel-header">
-          <h2>{{ selectedPool ? '编辑资源池' : '新建资源池' }}</h2>
+          <h2>{{ selectedPool ? '编辑容量池' : '新建容量池' }}</h2>
           <button type="button" @click="closeDialog">关闭</button>
         </header>
         <div class="admin-pools__form">
@@ -58,6 +58,19 @@
           <label class="admin-pools__checkbox"><input v-model="form.auto_dispatch_enabled" type="checkbox" data-testid="admin-pool-auto"><span>启用自动放行</span></label>
           <label class="admin-pools__checkbox"><input v-model="form.is_active" type="checkbox" data-testid="admin-pool-active"><span>启用</span></label>
         </div>
+        <section class="admin-pools__attachments">
+          <header class="admin-pools__attachments-header">
+            <h3>容量池共享附件</h3>
+            <p v-if="selectedPool && attachmentsLoading">加载附件中...</p>
+            <p v-else-if="!selectedPool">先保存容量池，再维护共享附件。</p>
+          </header>
+          <AdminPoolAttachmentsEditor
+            v-if="selectedPool"
+            :model-value="attachments"
+            :disabled="saving"
+            @update:model-value="attachments = $event"
+          />
+        </section>
         <footer class="admin-pools__panel-actions">
           <button type="button" @click="closeDialog">取消</button>
           <button type="button" data-testid="admin-pool-submit" :disabled="saving" @click="submitPool">保存</button>
@@ -70,7 +83,10 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 
-import { createAdminPool, listAdminPools, updateAdminPool } from '@/modules/admin/services/api/pools'
+import AdminPoolAttachmentsEditor from '@/modules/admin/components/AdminPoolAttachmentsEditor.vue'
+import { clonePoolAttachments, emptyPoolAttachments } from '@/modules/admin/stores/apps'
+import { createAdminPool, getAdminPoolAttachments, listAdminPools, replaceAdminPoolAttachments, updateAdminPool } from '@/modules/admin/services/api/pools'
+import type { PoolAttachments } from '@/modules/admin/types/apps'
 import type { AdminPoolPayload, AdminPoolRecord } from '@/modules/admin/types/pools'
 
 const pools = ref<AdminPoolRecord[]>([])
@@ -79,6 +95,8 @@ const saving = ref(false)
 const errorMessage = ref('')
 const dialogOpen = ref(false)
 const selectedPool = ref<AdminPoolRecord | null>(null)
+const attachmentsLoading = ref(false)
+const attachments = ref<PoolAttachments>(emptyPoolAttachments())
 
 const form = reactive({
   name: '',
@@ -118,18 +136,30 @@ function buildPayload(): AdminPoolPayload {
 function openCreate() {
   selectedPool.value = null
   fillForm(null)
+  attachments.value = emptyPoolAttachments()
   dialogOpen.value = true
 }
 
-function openEdit(pool: AdminPoolRecord) {
+async function openEdit(pool: AdminPoolRecord) {
   selectedPool.value = pool
   fillForm(pool)
+  attachmentsLoading.value = true
   dialogOpen.value = true
+  try {
+    const response = await getAdminPoolAttachments(pool.id)
+    attachments.value = clonePoolAttachments(response.data)
+  } catch {
+    attachments.value = emptyPoolAttachments(pool.id)
+  } finally {
+    attachmentsLoading.value = false
+  }
 }
 
 function closeDialog() {
   dialogOpen.value = false
   selectedPool.value = null
+  attachments.value = emptyPoolAttachments()
+  attachmentsLoading.value = false
 }
 
 async function loadPools() {
@@ -139,7 +169,7 @@ async function loadPools() {
     const response = await listAdminPools()
     pools.value = response.data
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '加载资源池失败'
+    errorMessage.value = error instanceof Error ? error.message : '加载容量池失败'
     pools.value = []
   } finally {
     loading.value = false
@@ -150,8 +180,14 @@ async function submitPool() {
   saving.value = true
   try {
     const payload = buildPayload()
-    if (selectedPool.value) await updateAdminPool(selectedPool.value.id, payload)
-    else await createAdminPool(payload)
+    if (selectedPool.value) {
+      await updateAdminPool(selectedPool.value.id, payload)
+      const normalizedAttachments = clonePoolAttachments(attachments.value)
+      const attachmentResponse = await replaceAdminPoolAttachments(selectedPool.value.id, normalizedAttachments)
+      attachments.value = clonePoolAttachments(attachmentResponse.data)
+    } else {
+      await createAdminPool(payload)
+    }
     await loadPools()
     closeDialog()
   } finally {
@@ -212,6 +248,24 @@ onMounted(() => {
   display: flex !important;
   align-items: center;
   gap: 8px !important;
+}
+
+.admin-pools__attachments {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.admin-pools__attachments-header {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-pools__attachments-header h3,
+.admin-pools__attachments-header p {
+  margin: 0;
 }
 
 input {

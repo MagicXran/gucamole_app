@@ -68,8 +68,12 @@ export const useComputeStore = defineStore('compute', () => {
     }
   }
 
+  function getAppByCapacityPoolId(poolId: number) {
+    return apps.value.find((app) => (app.capacity_pool_id ?? app.pool_id) === poolId)
+  }
+
   function getAppByPoolId(poolId: number) {
-    return apps.value.find((app) => app.pool_id === poolId)
+    return getAppByCapacityPoolId(poolId)
   }
 
   async function refreshApps() {
@@ -88,5 +92,6 @@ export const useComputeStore = defineStore('compute', () => {
     loadApps,
     refreshApps,
     getAppByPoolId,
+    getAppByCapacityPoolId,
   }
 })

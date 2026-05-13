@@ -30,7 +30,7 @@ pool_service = ResourcePoolService(db=db)
 
 def _ensure_pool_exists(pool_id: int | None, conn=None):
     if pool_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "应用必须绑定到资源池")
+        return
     pool = db.execute_query(
         "SELECT id FROM resource_pool WHERE id = %(id)s AND is_active = 1",
         {"id": pool_id},
@@ -83,6 +83,17 @@ def _parse_script_runtime_config(runtime_config_json):
     if not isinstance(runtime_config_json, dict):
         return {}
     return runtime_config_json
+
+
+def _runtime_health_meta(status_value: str | None) -> tuple[str, str, str]:
+    status_key = str(status_value or "unknown").strip().lower() or "unknown"
+    if status_key == "healthy":
+        return status_key, "健康", "success"
+    if status_key == "cooldown":
+        return status_key, "冷却中", "warning"
+    if status_key == "unreachable":
+        return status_key, "不可达", "danger"
+    return status_key, "未探测", "neutral"
 
 
 def _upsert_catalog_bindings(app_row: dict, *, script_enabled: bool | None, script_profile_key: str | None, script_executor_key: str | None, script_worker_group_id: int | None, script_scratch_root: str | None, script_python_executable: str | None = None, script_python_env: dict[str, str] | None = None, conn=None):
@@ -314,12 +325,18 @@ def _get_app_admin_row(app_id: int, conn=None):
         """
         SELECT
             a.*,
+            COALESCE(h.health_status, 'unknown') AS runtime_health_status,
+            COALESCE(h.consecutive_failures, 0) AS runtime_consecutive_failures,
+            h.cooldown_until AS runtime_cooldown_until,
+            h.last_failure_reason AS runtime_last_failure_reason,
             COALESCE(sp.is_enabled, 0) AS script_enabled,
             sp.executor_key AS script_executor_key,
             sp.scratch_root AS script_scratch_root,
             sb.worker_group_id AS script_worker_group_id,
             sb.runtime_config_json AS script_runtime_config_json
         FROM remote_app a
+        LEFT JOIN remote_app_health h
+          ON h.remote_app_id = a.id
         LEFT JOIN remote_app_script_profile sp
           ON sp.remote_app_id = a.id
         LEFT JOIN app_binding sb
@@ -334,6 +351,11 @@ def _get_app_admin_row(app_id: int, conn=None):
     )
     if row:
         runtime_config = _parse_script_runtime_config(row.get("script_runtime_config_json"))
+        status_key, status_label, status_tone = _runtime_health_meta(row.get("runtime_health_status"))
+        row["runtime_health_status"] = status_key
+        row["runtime_health_status_label"] = status_label
+        row["runtime_health_status_tone"] = status_tone
+        row["launch_target_kind"] = "capacity_pool_member" if row.get("pool_id") else "standalone_runtime"
         row["script_profile_key"] = runtime_config.get("script_profile_key")
         profile = get_script_profile(row["script_profile_key"]) if row.get("script_profile_key") else None
         row["script_profile_name"] = profile.get("display_name") if profile else None
@@ -353,12 +375,18 @@ def list_apps(admin: UserInfo = Depends(require_admin)):
         """
         SELECT
             a.*,
+            COALESCE(h.health_status, 'unknown') AS runtime_health_status,
+            COALESCE(h.consecutive_failures, 0) AS runtime_consecutive_failures,
+            h.cooldown_until AS runtime_cooldown_until,
+            h.last_failure_reason AS runtime_last_failure_reason,
             COALESCE(sp.is_enabled, 0) AS script_enabled,
             sp.executor_key AS script_executor_key,
             sp.scratch_root AS script_scratch_root,
             sb.worker_group_id AS script_worker_group_id,
             sb.runtime_config_json AS script_runtime_config_json
         FROM remote_app a
+        LEFT JOIN remote_app_health h
+          ON h.remote_app_id = a.id
         LEFT JOIN remote_app_script_profile sp
           ON sp.remote_app_id = a.id
         LEFT JOIN app_binding sb
@@ -369,6 +397,11 @@ def list_apps(admin: UserInfo = Depends(require_admin)):
     )
     for row in rows:
         runtime_config = _parse_script_runtime_config(row.get("script_runtime_config_json"))
+        status_key, status_label, status_tone = _runtime_health_meta(row.get("runtime_health_status"))
+        row["runtime_health_status"] = status_key
+        row["runtime_health_status_label"] = status_label
+        row["runtime_health_status_tone"] = status_tone
+        row["launch_target_kind"] = "capacity_pool_member" if row.get("pool_id") else "standalone_runtime"
         row["script_profile_key"] = runtime_config.get("script_profile_key")
         profile = get_script_profile(row["script_profile_key"]) if row.get("script_profile_key") else None
         row["script_profile_name"] = profile.get("display_name") if profile else None

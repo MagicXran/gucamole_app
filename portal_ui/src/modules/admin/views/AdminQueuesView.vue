@@ -15,7 +15,7 @@
       <table v-else class="admin-ops-view__table">
       <thead>
         <tr>
-          <th>资源池</th>
+          <th>容量池</th>
           <th>用户</th>
           <th>状态</th>
           <th>创建时间</th>

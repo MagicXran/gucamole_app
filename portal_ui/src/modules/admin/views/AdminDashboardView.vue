@@ -34,13 +34,13 @@ const adminItems = computed(() => {
 
 function adminSummary(path?: string) {
   if (path === '/admin/pools') {
-    return '资源池容量、自动放行和回收策略。'
+    return '容量池容量、自动放行、共享附件和回收策略。'
   }
   if (path === '/admin/analytics') {
     return '软件热度、案例活跃度、用户与部门排行。'
   }
   if (path === '/admin/apps') {
-    return '应用配置、分类运营、池级附件。'
+    return '运行实例配置、脚本绑定、健康状态和容量池归属。'
   }
   if (path === '/admin/users') {
     return '账号、改密、配额、管理员权限。'

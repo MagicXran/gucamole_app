@@ -7,12 +7,10 @@ import { useSessionStore } from '@/stores/session'
 vi.mock('@/modules/admin/services/api/apps', () => ({
   createAdminApp: vi.fn(),
   deleteAdminApp: vi.fn(),
-  getAdminPoolAttachments: vi.fn(),
   listAdminApps: vi.fn(),
   listAdminPools: vi.fn(),
   listAdminScriptProfiles: vi.fn(),
   listAdminWorkerGroups: vi.fn(),
-  replaceAdminPoolAttachments: vi.fn(),
   updateAdminApp: vi.fn(),
 }))
 
@@ -24,7 +22,7 @@ describe('AdminAppsView', () => {
     vi.restoreAllMocks()
   })
 
-  it('loads apps, edits app_kind, and saves pool attachments through the Vue admin workbench', async () => {
+  it('loads runtimes and saves app_kind changes through the Vue admin workbench', async () => {
     const sessionStore = useSessionStore()
     sessionStore.$patch({
       authenticated: true,
@@ -72,15 +70,6 @@ describe('AdminAppsView', () => {
       ],
       headers: {},
     } as never)
-    vi.mocked(appsApi.getAdminPoolAttachments).mockResolvedValue({
-      data: {
-        pool_id: 7,
-        tutorial_docs: [{ title: '用户手册', summary: 'PDF', link_url: 'https://example/doc', sort_order: 0 }],
-        video_resources: [],
-        plugin_downloads: [],
-      },
-      headers: {},
-    } as never)
     vi.mocked(appsApi.updateAdminApp).mockResolvedValue({
       data: {
         id: 9,
@@ -97,31 +86,20 @@ describe('AdminAppsView', () => {
       },
       headers: {},
     } as never)
-    vi.mocked(appsApi.replaceAdminPoolAttachments).mockResolvedValue({
-      data: {
-        pool_id: 7,
-        tutorial_docs: [{ title: '新版手册', summary: '', link_url: 'https://example/new-doc', sort_order: 0 }],
-        video_resources: [],
-        plugin_downloads: [],
-      },
-      headers: {},
-    } as never)
 
     const { default: AdminAppsView } = await import('@/modules/admin/views/AdminAppsView.vue')
     const wrapper = mount(AdminAppsView)
     await flushPromises()
 
     expect(wrapper.text()).toContain('Fluent')
+    expect(wrapper.text()).toContain('容量池成员')
 
     await wrapper.get('[data-testid="admin-app-edit-9"]').trigger('click')
     await flushPromises()
 
-    expect(appsApi.getAdminPoolAttachments).toHaveBeenCalledWith(7)
     expect((wrapper.get('[data-testid="admin-app-kind"]').element as HTMLSelectElement).value).toBe('commercial_software')
 
     await wrapper.get('[data-testid="admin-app-kind"]').setValue('simulation_app')
-    await wrapper.get('[data-testid="attachment-title-tutorial_docs-0"]').setValue('新版手册')
-    await wrapper.get('[data-testid="attachment-link-tutorial_docs-0"]').setValue('https://example/new-doc')
     await wrapper.get('[data-testid="admin-app-submit"]').trigger('click')
     await flushPromises()
 
@@ -131,20 +109,9 @@ describe('AdminAppsView', () => {
         app_kind: 'simulation_app',
       }),
     )
-    expect(appsApi.replaceAdminPoolAttachments).toHaveBeenCalledWith(
-      7,
-      expect.objectContaining({
-        tutorial_docs: [
-          expect.objectContaining({
-            title: '新版手册',
-            link_url: 'https://example/new-doc',
-          }),
-        ],
-      }),
-    )
   })
 
-  it('keeps existing pool attachments bound to the original pool when editing app pool selection', async () => {
+  it('allows switching runtime between standalone and capacity-pool mode without leaking pool attachment warnings', async () => {
     const sessionStore = useSessionStore()
     sessionStore.$patch({
       authenticated: true,
@@ -205,15 +172,6 @@ describe('AdminAppsView', () => {
       ],
       headers: {},
     } as never)
-    vi.mocked(appsApi.getAdminPoolAttachments).mockResolvedValue({
-      data: {
-        pool_id: 7,
-        tutorial_docs: [{ title: '原始手册', summary: '', link_url: 'https://example/original', sort_order: 0 }],
-        video_resources: [],
-        plugin_downloads: [],
-      },
-      headers: {},
-    } as never)
     vi.mocked(appsApi.updateAdminApp).mockResolvedValue({
       data: {
         id: 9,
@@ -230,15 +188,6 @@ describe('AdminAppsView', () => {
       },
       headers: {},
     } as never)
-    vi.mocked(appsApi.replaceAdminPoolAttachments).mockResolvedValue({
-      data: {
-        pool_id: 7,
-        tutorial_docs: [{ title: '改过的手册', summary: '', link_url: 'https://example/changed', sort_order: 0 }],
-        video_resources: [],
-        plugin_downloads: [],
-      },
-      headers: {},
-    } as never)
 
     const { default: AdminAppsView } = await import('@/modules/admin/views/AdminAppsView.vue')
     const wrapper = mount(AdminAppsView)
@@ -247,15 +196,26 @@ describe('AdminAppsView', () => {
     await wrapper.get('[data-testid="admin-app-edit-9"]').trigger('click')
     await flushPromises()
 
+    await wrapper.get('[data-testid="admin-app-pool"]').setValue('')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toMatch(/仍绑定原资源池|保存 App 后再改/)
+    await wrapper.get('[data-testid="admin-app-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(appsApi.updateAdminApp).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({
+        pool_id: null,
+      }),
+    )
+
+    await wrapper.get('[data-testid="admin-app-edit-9"]').trigger('click')
+    await flushPromises()
+
     await wrapper.get('[data-testid="admin-app-pool"]').setValue('11')
     await flushPromises()
 
-    expect(wrapper.text()).toMatch(/仍绑定原资源池|保存 App 后再改/)
-    expect(appsApi.getAdminPoolAttachments).toHaveBeenCalledTimes(1)
-    expect(appsApi.getAdminPoolAttachments).toHaveBeenCalledWith(7)
-
-    await wrapper.get('[data-testid="attachment-title-tutorial_docs-0"]').setValue('改过的手册')
-    await wrapper.get('[data-testid="attachment-link-tutorial_docs-0"]').setValue('https://example/changed')
     await wrapper.get('[data-testid="admin-app-submit"]').trigger('click')
     await flushPromises()
 
@@ -263,12 +223,6 @@ describe('AdminAppsView', () => {
       9,
       expect.objectContaining({
         pool_id: 11,
-      }),
-    )
-    expect(appsApi.replaceAdminPoolAttachments).toHaveBeenCalledWith(
-      7,
-      expect.objectContaining({
-        tutorial_docs: [expect.objectContaining({ title: '改过的手册' })],
       }),
     )
   })
@@ -380,14 +334,6 @@ describe('AdminAppsView', () => {
           script_python_executable: 'C:\\Python311\\python.exe',
           script_python_env: { LICENSE_SERVER: '10.0.0.8' },
         },
-        attachments: {
-          pool_id: 7,
-          tutorial_docs: [],
-          video_resources: [],
-          plugin_downloads: [],
-        },
-        attachmentsLoading: false,
-        attachmentBindingWarning: '',
       },
     })
 
@@ -428,5 +374,6 @@ describe('AdminAppsView', () => {
         script_python_env: { LICENSE_SERVER: '10.0.0.9' },
       }),
     })
+    expect(submitPayload).not.toHaveProperty('attachments')
   })
 })

@@ -7,6 +7,8 @@ import ComputeToolsView from '@/modules/compute/views/ComputeToolsView.vue'
 import { useComputeStore } from '@/stores/compute'
 
 describe('ComputeToolsView', () => {
+  const mountedWrappers: Array<{ unmount: () => void }> = []
+
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.restoreAllMocks()
@@ -14,6 +16,9 @@ describe('ComputeToolsView', () => {
   })
 
   afterEach(() => {
+    while (mountedWrappers.length) {
+      mountedWrappers.pop()?.unmount()
+    }
     vi.useRealTimers()
   })
 
@@ -86,6 +91,7 @@ describe('ComputeToolsView', () => {
         },
       },
     })
+    mountedWrappers.push(wrapper)
     await vi.runAllTimersAsync()
     await flushPromises()
 
@@ -133,6 +139,7 @@ describe('ComputeToolsView', () => {
         },
       },
     })
+    mountedWrappers.push(wrapper)
     await vi.runAllTimersAsync()
     await flushPromises()
 
@@ -146,6 +153,7 @@ describe('ComputeToolsView', () => {
     const listSpy = vi.spyOn(computeApi, 'listRemoteApps').mockResolvedValue({ data: [], headers: {} } as never)
 
     const wrapper = mount(ComputeToolsView)
+    mountedWrappers.push(wrapper)
 
     expect(wrapper.text()).toContain('加载中')
     expect(wrapper.text()).not.toContain('暂无计算工具')
@@ -193,6 +201,7 @@ describe('ComputeToolsView', () => {
         },
       },
     })
+    mountedWrappers.push(wrapper)
     await vi.runAllTimersAsync()
     await flushPromises()
 
@@ -237,13 +246,14 @@ describe('ComputeToolsView', () => {
       headers: {},
     } as never)
 
-    mount(ComputeToolsView, {
+    const wrapper = mount(ComputeToolsView, {
       global: {
         stubs: {
           RouterLink: { template: '<a><slot /></a>' },
         },
       },
     })
+    mountedWrappers.push(wrapper)
     await vi.runAllTimersAsync()
     await flushPromises()
 
@@ -252,11 +262,13 @@ describe('ComputeToolsView', () => {
     window.dispatchEvent(new Event('focus'))
     Object.defineProperty(document, 'hidden', { configurable: true, value: false })
     document.dispatchEvent(new Event('visibilitychange'))
+    expect(listSpy).toHaveBeenCalledTimes(1)
+
     window.dispatchEvent(new CustomEvent('portal-compute-launch'))
     await vi.runAllTimersAsync()
     await flushPromises()
 
-    expect(listSpy).toHaveBeenCalledTimes(1)
+    expect(listSpy).toHaveBeenCalledTimes(2)
   })
 
   it('refreshes stale error state on mount', async () => {
@@ -302,6 +314,7 @@ describe('ComputeToolsView', () => {
         },
       },
     })
+    mountedWrappers.push(wrapper)
     await vi.runAllTimersAsync()
     await flushPromises()
 

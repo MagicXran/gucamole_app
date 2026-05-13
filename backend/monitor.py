@@ -308,3 +308,12 @@ def dispatch_ready_queue_entries():
     if moved:
         logger.info("自动放行队列: %d 条", len(moved))
     return len(moved)
+
+
+def probe_runtime_health():
+    """轻量探测 RemoteApp 运行实例可达性。"""
+    try:
+        return pool_service.probe_runtime_health()
+    except Exception:
+        logger.exception("运行实例健康探测异常")
+        return []

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+import socket
 from typing import Any, Callable
 
 from backend.database import CONFIG
@@ -30,6 +31,9 @@ class ResourcePoolService:
     OCCUPIED_SESSION_STATUSES = ("active", "reclaim_pending")
     DEFAULT_STALE_TIMEOUT_SECONDS = int(_monitor_cfg.get("session_timeout_seconds", 120))
     DEFAULT_ORPHAN_IDLE_TIMEOUT_SECONDS = int(_monitor_cfg.get("session_timeout_seconds", 120))
+    DEFAULT_RUNTIME_FAILURE_COOLDOWN_SECONDS = int(_monitor_cfg.get("runtime_failure_cooldown_seconds", 300))
+    DEFAULT_RUNTIME_MAX_COOLDOWN_SECONDS = int(_monitor_cfg.get("runtime_failure_max_cooldown_seconds", 1800))
+    DEFAULT_RUNTIME_PROBE_TIMEOUT_SECONDS = float(_monitor_cfg.get("runtime_probe_timeout_seconds", 1.5))
 
     def __init__(self, db, now_provider: Callable[[], datetime] | None = None):
         self._db = db
@@ -48,8 +52,7 @@ class ResourcePoolService:
             return 0
 
     @contextmanager
-    def _pool_lock(self, pool_id: int):
-        lock_name = f"resource_pool:{pool_id}"
+    def _named_lock(self, lock_name: str):
         if hasattr(self._db, "get_connection"):
             conn = self._db.get_connection()
             cursor = None
@@ -68,7 +71,7 @@ class ResourcePoolService:
                 finally:
                     if cursor is not None:
                         cursor.close()
-                    conn.close()
+                conn.close()
             return
 
         row = self._db.execute_query(
@@ -86,6 +89,264 @@ class ResourcePoolService:
                 {"lock_name": lock_name},
                 fetch_one=True,
             )
+
+    @contextmanager
+    def _pool_lock(self, pool_id: int):
+        with self._named_lock(f"resource_pool:{pool_id}"):
+            yield
+
+    @contextmanager
+    def _runtime_lock(self, runtime_id: int):
+        with self._named_lock(f"remote_app:{runtime_id}"):
+            yield
+
+    @staticmethod
+    def _runtime_health_status_meta(status: str) -> dict[str, str]:
+        normalized = str(status or "unknown").strip().lower() or "unknown"
+        meta = {
+            "healthy": {"label": "健康", "tone": "success"},
+            "unknown": {"label": "未探测", "tone": "neutral"},
+            "cooldown": {"label": "冷却中", "tone": "warning"},
+            "unreachable": {"label": "不可达", "tone": "danger"},
+        }.get(normalized)
+        if meta:
+            return {"status": normalized, **meta}
+        return {"status": normalized, "label": normalized, "tone": "neutral"}
+
+    @staticmethod
+    def _runtime_health_sort_rank(status: str) -> int:
+        normalized = str(status or "unknown").strip().lower() or "unknown"
+        if normalized == "healthy":
+            return 0
+        if normalized == "unknown":
+            return 1
+        if normalized == "cooldown":
+            return 2
+        if normalized == "unreachable":
+            return 3
+        return 4
+
+    def _build_runtime_health_payload(self, row: dict[str, Any] | None) -> dict[str, Any]:
+        row = row or {}
+        meta = self._runtime_health_status_meta(str(row.get("health_status") or "unknown"))
+        return {
+            "status": meta["status"],
+            "label": meta["label"],
+            "tone": meta["tone"],
+            "consecutive_failures": int(row.get("consecutive_failures") or 0),
+            "cooldown_until": row.get("cooldown_until"),
+            "last_failure_reason": str(row.get("last_failure_reason") or "") or None,
+            "last_probe_ok": row.get("last_probe_ok"),
+        }
+
+    def get_runtime_health(self, runtime_id: int) -> dict[str, Any]:
+        row = self._db.execute_query(
+            """
+            /* rps:get_runtime_health */
+            SELECT remote_app_id, health_status, consecutive_failures, cooldown_until,
+                   last_failure_reason, last_probe_ok
+            FROM remote_app_health
+            WHERE remote_app_id = %(runtime_id)s
+            LIMIT 1
+            """,
+            {"runtime_id": runtime_id},
+            fetch_one=True,
+        )
+        return self._build_runtime_health_payload(row)
+
+    def runtime_is_launchable(self, runtime_id: int) -> tuple[bool, dict[str, Any]]:
+        health = self.get_runtime_health(runtime_id)
+        cooldown_until = health.get("cooldown_until")
+        if cooldown_until and cooldown_until > self._now():
+            return False, health
+        if health["status"] == "unreachable":
+            return False, health
+        return True, health
+
+    def _count_runtime_active_sessions(self, runtime_id: int) -> int:
+        row = self._db.execute_query(
+            """
+            /* rps:get_runtime_active_session_count */
+            SELECT COUNT(*) AS active_count
+            FROM active_session
+            WHERE app_id = %(runtime_id)s
+              AND status IN ('active', 'reclaim_pending')
+            """,
+            {"runtime_id": runtime_id},
+            fetch_one=True,
+        ) or {"active_count": 0}
+        return int(row.get("active_count") or 0)
+
+    def mark_runtime_launch_success(self, runtime_id: int):
+        self._db.execute_update(
+            """
+            /* rps:mark_runtime_launch_success */
+            INSERT INTO remote_app_health (
+                remote_app_id, health_status, consecutive_failures, cooldown_until,
+                last_failure_at, last_failure_reason, last_success_at, last_probe_at, last_probe_ok
+            )
+            VALUES (
+                %(runtime_id)s, 'healthy', 0, NULL, NULL, NULL, %(event_at)s, %(event_at)s, 1
+            )
+            ON DUPLICATE KEY UPDATE
+                health_status = 'healthy',
+                consecutive_failures = 0,
+                cooldown_until = NULL,
+                last_failure_at = NULL,
+                last_failure_reason = NULL,
+                last_success_at = VALUES(last_success_at),
+                last_probe_at = VALUES(last_probe_at),
+                last_probe_ok = VALUES(last_probe_ok)
+            """,
+            {"runtime_id": runtime_id, "event_at": self._now()},
+        )
+
+    def mark_runtime_launch_failure(self, runtime_id: int, reason: str):
+        current = self.get_runtime_health(runtime_id)
+        failures = int(current.get("consecutive_failures") or 0) + 1
+        cooldown_seconds = min(
+            self.DEFAULT_RUNTIME_FAILURE_COOLDOWN_SECONDS * (2 ** max(0, failures - 1)),
+            self.DEFAULT_RUNTIME_MAX_COOLDOWN_SECONDS,
+        )
+        event_at = self._now()
+        self._db.execute_update(
+            """
+            /* rps:mark_runtime_launch_failure */
+            INSERT INTO remote_app_health (
+                remote_app_id, health_status, consecutive_failures, cooldown_until,
+                last_failure_at, last_failure_reason, last_success_at, last_probe_at, last_probe_ok
+            )
+            VALUES (
+                %(runtime_id)s, 'cooldown', %(failures)s, %(cooldown_until)s,
+                %(event_at)s, %(reason)s, NULL, %(event_at)s, 0
+            )
+            ON DUPLICATE KEY UPDATE
+                health_status = 'cooldown',
+                consecutive_failures = %(failures)s,
+                cooldown_until = %(cooldown_until)s,
+                last_failure_at = %(event_at)s,
+                last_failure_reason = %(reason)s,
+                last_probe_at = %(event_at)s,
+                last_probe_ok = 0
+            """,
+            {
+                "runtime_id": runtime_id,
+                "failures": failures,
+                "cooldown_until": event_at + timedelta(seconds=cooldown_seconds),
+                "event_at": event_at,
+                "reason": (reason or "launch failed")[:500],
+            },
+        )
+
+    def probe_runtime_health(self) -> list[dict[str, Any]]:
+        rows = self._db.execute_query(
+            """
+            /* rps:list_runtime_probe_targets */
+            SELECT
+                a.id,
+                a.hostname,
+                a.port,
+                h.health_status,
+                h.cooldown_until,
+                h.consecutive_failures
+            FROM remote_app a
+            LEFT JOIN remote_app_health h
+              ON h.remote_app_id = a.id
+            WHERE a.is_active = 1
+            ORDER BY a.id ASC
+            """
+        )
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            runtime_id = int(row["id"])
+            probe_ok = False
+            try:
+                with socket.create_connection(
+                    (str(row["hostname"]), int(row.get("port") or 3389)),
+                    timeout=self.DEFAULT_RUNTIME_PROBE_TIMEOUT_SECONDS,
+                ):
+                    probe_ok = True
+            except OSError:
+                probe_ok = False
+
+            event_at = self._now()
+            if probe_ok:
+                health_status = str(row.get("health_status") or "unknown")
+                cooldown_until = row.get("cooldown_until")
+                if health_status == "cooldown" and cooldown_until and cooldown_until > event_at:
+                    self._db.execute_update(
+                        """
+                        /* rps:update_runtime_probe */
+                        INSERT INTO remote_app_health (
+                            remote_app_id, health_status, consecutive_failures, cooldown_until,
+                            last_probe_at, last_probe_ok
+                        )
+                        VALUES (
+                            %(runtime_id)s, %(health_status)s, %(consecutive_failures)s, %(cooldown_until)s,
+                            %(event_at)s, 1
+                        )
+                        ON DUPLICATE KEY UPDATE
+                            last_probe_at = %(event_at)s,
+                            last_probe_ok = 1
+                        """,
+                        {
+                            "runtime_id": runtime_id,
+                            "health_status": health_status,
+                            "consecutive_failures": int(row.get("consecutive_failures") or 0),
+                            "cooldown_until": cooldown_until,
+                            "event_at": event_at,
+                        },
+                    )
+                else:
+                    self.mark_runtime_launch_success(runtime_id)
+            else:
+                health_status = str(row.get("health_status") or "unknown")
+                cooldown_until = row.get("cooldown_until")
+                if health_status == "cooldown" and cooldown_until and cooldown_until > event_at:
+                    self._db.execute_update(
+                        """
+                        /* rps:update_runtime_probe */
+                        INSERT INTO remote_app_health (
+                            remote_app_id, health_status, consecutive_failures, cooldown_until,
+                            last_probe_at, last_probe_ok
+                        )
+                        VALUES (
+                            %(runtime_id)s, %(health_status)s, %(consecutive_failures)s, %(cooldown_until)s,
+                            %(event_at)s, 0
+                        )
+                        ON DUPLICATE KEY UPDATE
+                            last_probe_at = %(event_at)s,
+                            last_probe_ok = 0
+                        """,
+                        {
+                            "runtime_id": runtime_id,
+                            "health_status": health_status,
+                            "consecutive_failures": int(row.get("consecutive_failures") or 0),
+                            "cooldown_until": cooldown_until,
+                            "event_at": event_at,
+                        },
+                    )
+                else:
+                    self._db.execute_update(
+                        """
+                        /* rps:mark_runtime_probe_failed */
+                        INSERT INTO remote_app_health (
+                            remote_app_id, health_status, consecutive_failures, cooldown_until,
+                            last_failure_reason, last_probe_at, last_probe_ok
+                        )
+                        VALUES (
+                            %(runtime_id)s, 'unreachable', 0, NULL, 'tcp connect failed', %(event_at)s, 0
+                        )
+                        ON DUPLICATE KEY UPDATE
+                            health_status = 'unreachable',
+                            last_failure_reason = 'tcp connect failed',
+                            last_probe_at = %(event_at)s,
+                            last_probe_ok = 0
+                        """,
+                        {"runtime_id": runtime_id, "event_at": event_at},
+                    )
+            results.append({"runtime_id": runtime_id, "probe_ok": probe_ok})
+        return results
 
     def get_live_user_pool_state(self, user_id: int, pool_id: int) -> dict[str, Any] | None:
         row = self._db.execute_query(
@@ -166,6 +427,9 @@ class ResourcePoolService:
                 a.id,
                 a.pool_id,
                 a.member_max_concurrent,
+                COALESCE(h.health_status, 'unknown') AS health_status,
+                COALESCE(h.consecutive_failures, 0) AS consecutive_failures,
+                h.cooldown_until,
                 (
                     SELECT COUNT(*)
                     FROM active_session s
@@ -178,11 +442,23 @@ class ResourcePoolService:
                       AND (%(exclude_queue_id)s IS NULL OR q.id <> %(exclude_queue_id)s)
                 ) AS active_count
             FROM remote_app a
+            LEFT JOIN remote_app_health h
+              ON h.remote_app_id = a.id
             JOIN remote_app_acl acl ON acl.app_id = a.id AND acl.user_id = %(user_id)s
             WHERE a.pool_id = %(pool_id)s
               AND a.is_active = 1
+              AND (h.cooldown_until IS NULL OR h.cooldown_until <= NOW())
+              AND COALESCE(h.health_status, 'unknown') NOT IN ('cooldown', 'unreachable')
             HAVING active_count < a.member_max_concurrent
-            ORDER BY active_count ASC, a.id ASC
+            ORDER BY
+                CASE COALESCE(h.health_status, 'unknown')
+                    WHEN 'healthy' THEN 0
+                    WHEN 'unknown' THEN 1
+                    ELSE 9
+                END ASC,
+                COALESCE(h.consecutive_failures, 0) ASC,
+                active_count ASC,
+                a.id ASC
             """,
             {"user_id": user_id, "pool_id": pool_id, "exclude_queue_id": exclude_queue_id},
         )
@@ -194,7 +470,161 @@ class ResourcePoolService:
             "pool_id": int(row["pool_id"]),
             "member_max_concurrent": int(row["member_max_concurrent"]),
             "active_count": int(row["active_count"]),
+            "health_status": str(row.get("health_status") or "unknown"),
+            "consecutive_failures": int(row.get("consecutive_failures") or 0),
+            "cooldown_until": row.get("cooldown_until"),
         }
+
+    def _build_resource_status_payload(
+        self,
+        *,
+        has_capacity: bool,
+        queued_count: int,
+        active_count: int,
+        max_concurrent: int,
+        healthy_member_available: bool = True,
+    ) -> dict[str, str]:
+        if queued_count > 0:
+            return {
+                "resource_status_code": "queued",
+                "resource_status_label": "排队中",
+                "resource_status_tone": "warning",
+            }
+        if active_count >= max_concurrent:
+            return {
+                "resource_status_code": "busy",
+                "resource_status_label": "忙碌",
+                "resource_status_tone": "warning",
+            }
+        if has_capacity and healthy_member_available:
+            return {
+                "resource_status_code": "available",
+                "resource_status_label": "可用",
+                "resource_status_tone": "success",
+            }
+        return {
+            "resource_status_code": "runtime_unavailable",
+            "resource_status_label": "运行实例异常",
+            "resource_status_tone": "danger",
+        }
+
+    def _list_standalone_runtime_cards(self, user_id: int) -> list[dict[str, Any]]:
+        rows = self._db.execute_query(
+            """
+            /* rps:list_standalone_runtimes */
+            SELECT
+                a.id,
+                a.id AS runtime_id,
+                a.name,
+                a.icon,
+                a.app_kind,
+                a.protocol,
+                a.member_max_concurrent AS max_concurrent,
+                COALESCE(sp.is_enabled, 0) AS supports_script,
+                CASE WHEN COALESCE(sp.is_enabled, 0) = 1 THEN a.id ELSE NULL END AS script_runtime_id,
+                COALESCE(h.health_status, 'unknown') AS runtime_health_status,
+                COALESCE(h.consecutive_failures, 0) AS runtime_consecutive_failures,
+                h.cooldown_until AS runtime_cooldown_until,
+                h.last_failure_reason AS runtime_last_failure_reason,
+                COUNT(DISTINCT CASE WHEN s.status IN ('active', 'reclaim_pending') THEN s.id END) AS active_count
+            FROM remote_app a
+            JOIN remote_app_acl acl
+              ON acl.app_id = a.id
+             AND acl.user_id = %(user_id)s
+            LEFT JOIN remote_app_script_profile sp
+              ON sp.remote_app_id = a.id
+            LEFT JOIN active_session s
+              ON s.app_id = a.id
+             AND s.status IN ('active', 'reclaim_pending')
+            LEFT JOIN remote_app_health h
+              ON h.remote_app_id = a.id
+            WHERE a.pool_id IS NULL
+              AND a.is_active = 1
+            GROUP BY a.id, a.name, a.icon, a.app_kind, a.protocol, a.member_max_concurrent,
+                     sp.is_enabled, h.health_status, h.consecutive_failures, h.cooldown_until, h.last_failure_reason
+            ORDER BY a.name ASC, a.id ASC
+            """,
+            {"user_id": user_id},
+        )
+        cards: list[dict[str, Any]] = []
+        for row in rows:
+            health = self._build_runtime_health_payload(
+                {
+                    "health_status": row.get("runtime_health_status"),
+                    "consecutive_failures": row.get("runtime_consecutive_failures"),
+                    "cooldown_until": row.get("runtime_cooldown_until"),
+                    "last_failure_reason": row.get("runtime_last_failure_reason"),
+                }
+            )
+            active_count = int(row.get("active_count") or 0)
+            max_concurrent = int(row.get("max_concurrent") or 1)
+            runtime_launchable, _ = self.runtime_is_launchable(int(row["runtime_id"]))
+            has_capacity = runtime_launchable and active_count < max_concurrent
+            cards.append(
+                {
+                    "id": int(row["id"]),
+                    "pool_id": None,
+                    "capacity_pool_id": None,
+                    "runtime_id": int(row["runtime_id"]),
+                    "launch_target_kind": "standalone_runtime",
+                    "launch_target_label": "独立运行",
+                    "name": str(row["name"]),
+                    "icon": str(row.get("icon") or "desktop"),
+                    "app_kind": str(row.get("app_kind") or "commercial_software"),
+                    "protocol": str(row.get("protocol") or "rdp"),
+                    "supports_gui": True,
+                    "supports_script": bool(row.get("supports_script")),
+                    "script_runtime_id": int(row["script_runtime_id"]) if row.get("script_runtime_id") else None,
+                    "runtime_health_status": health["status"],
+                    "runtime_health_status_label": health["label"],
+                    "runtime_health_status_tone": health["tone"],
+                    "active_count": active_count,
+                    "queued_count": 0,
+                    "max_concurrent": max_concurrent,
+                    "has_capacity": has_capacity,
+                    **self._build_resource_status_payload(
+                        has_capacity=has_capacity,
+                        queued_count=0,
+                        active_count=active_count,
+                        max_concurrent=max_concurrent,
+                        healthy_member_available=runtime_launchable,
+                    ),
+                }
+            )
+        return cards
+
+    def _prepare_standalone_launch(self, *, user_id: int, launch_target: dict[str, Any]) -> dict[str, Any]:
+        runtime_id = int(launch_target["requested_app_id"])
+        runtime_name = str(launch_target.get("name") or launch_target.get("pool_name") or runtime_id)
+        same_user_same_app_limit = self._same_user_same_app_limit()
+        with self._runtime_lock(runtime_id):
+            runtime_launchable, health = self.runtime_is_launchable(runtime_id)
+            if not runtime_launchable:
+                if health["status"] == "cooldown" and health.get("cooldown_until"):
+                    raise ValueError(f"运行实例“{runtime_name}”冷却中，请稍后重试")
+                raise ValueError(f"运行实例“{runtime_name}”当前不可用，请联系管理员")
+
+            active_count = self._count_runtime_active_sessions(runtime_id)
+            max_concurrent = int(launch_target.get("member_max_concurrent") or 1)
+            if active_count >= max_concurrent:
+                raise ValueError(f"运行实例“{runtime_name}”已满，请稍后重试")
+
+            if same_user_same_app_limit > 0:
+                live_count = self._count_user_app_live_entries(user_id=user_id, app_id=runtime_id)
+                if live_count >= same_user_same_app_limit:
+                    raise ValueError(
+                        f"同一用户最多同时打开 {same_user_same_app_limit} 个“{runtime_name}”实例，请先关闭现有窗口"
+                    )
+
+            return {
+                "status": "started",
+                "pool_id": None,
+                "session_pool_id": None,
+                "member_app_id": runtime_id,
+                "requested_app_name": runtime_name,
+                "connection_name": f"app_{runtime_id}",
+                "queue_id": None,
+            }
 
     def _has_accessible_member(self, user_id: int, pool_id: int) -> bool:
         row = self._db.execute_query(
@@ -225,7 +655,10 @@ class ResourcePoolService:
                 p.id AS pool_id,
                 p.name,
                 p.icon,
+                MAX(a.app_kind) AS app_kind,
                 MAX(a.protocol) AS protocol,
+                MAX(COALESCE(sp.is_enabled, 0)) AS supports_script,
+                MIN(CASE WHEN COALESCE(sp.is_enabled, 0) = 1 THEN a.id ELSE NULL END) AS script_runtime_id,
                 p.max_concurrent,
                 COUNT(DISTINCT CASE WHEN s.status IN ('active', 'reclaim_pending') THEN s.id END) AS active_count,
                 COUNT(DISTINCT CASE WHEN q.status IN ('queued', 'ready', 'launching') THEN q.id END) AS queued_count
@@ -236,6 +669,8 @@ class ResourcePoolService:
             JOIN remote_app_acl acl
               ON acl.app_id = a.id
              AND acl.user_id = %(user_id)s
+            LEFT JOIN remote_app_script_profile sp
+              ON sp.remote_app_id = a.id
             LEFT JOIN active_session s
               ON s.pool_id = p.id
              AND s.status IN ('active', 'reclaim_pending')
@@ -254,18 +689,39 @@ class ResourcePoolService:
             active_count = int(row.get("active_count") or 0)
             queued_count = int(row.get("queued_count") or 0)
             max_concurrent = int(row.get("max_concurrent") or 1)
-            has_member_capacity = self.pick_launchable_member(user_id=user_id, pool_id=pool_id) is not None
+            member = self.pick_launchable_member(user_id=user_id, pool_id=pool_id)
+            has_member_capacity = member is not None
+            runtime_health = self._runtime_health_status_meta("healthy" if member else "unreachable")
             result.append({
                 "id": int(row["launch_app_id"]),
                 "pool_id": pool_id,
+                "capacity_pool_id": pool_id,
+                "runtime_id": int(row["launch_app_id"]),
+                "launch_target_kind": "capacity_pool",
+                "launch_target_label": "容量池",
                 "name": str(row["name"]),
                 "icon": str(row.get("icon") or "desktop"),
+                "app_kind": str(row.get("app_kind") or "commercial_software"),
                 "protocol": str(row.get("protocol") or "rdp"),
+                "supports_gui": True,
+                "supports_script": bool(row.get("supports_script")),
+                "script_runtime_id": int(row["script_runtime_id"]) if row.get("script_runtime_id") else None,
+                "runtime_health_status": runtime_health["status"],
+                "runtime_health_status_label": "有可用成员" if member else "无健康成员",
+                "runtime_health_status_tone": "success" if member else "danger",
                 "active_count": active_count,
                 "queued_count": queued_count,
                 "max_concurrent": max_concurrent,
                 "has_capacity": queued_count == 0 and active_count < max_concurrent and has_member_capacity,
+                **self._build_resource_status_payload(
+                    has_capacity=queued_count == 0 and active_count < max_concurrent and has_member_capacity,
+                    queued_count=queued_count,
+                    active_count=active_count,
+                    max_concurrent=max_concurrent,
+                    healthy_member_available=has_member_capacity,
+                ),
             })
+        result.extend(self._list_standalone_runtime_cards(user_id))
         return result
 
     def _count_pool_live_queue_entries(self, pool_id: int) -> int:
@@ -432,7 +888,9 @@ class ResourcePoolService:
             /* rps:get_launch_target */
             SELECT
                 a.id AS requested_app_id,
+                a.name,
                 a.pool_id,
+                a.member_max_concurrent,
                 COALESCE(p.name, a.name) AS pool_name
             FROM remote_app a
             JOIN remote_app_acl acl
@@ -450,7 +908,7 @@ class ResourcePoolService:
         if not launch_target:
             raise ValueError("无权访问该应用")
         if launch_target.get("pool_id") is None:
-            raise ValueError("应用未分配资源池")
+            return self._prepare_standalone_launch(user_id=user_id, launch_target=launch_target)
 
         pool_id = int(launch_target["pool_id"])
         pool_name = str(launch_target["pool_name"])
@@ -527,6 +985,7 @@ class ResourcePoolService:
                 return {
                     "status": "started",
                     "pool_id": pool_id,
+                    "session_pool_id": pool_id,
                     "member_app_id": int(entry["assigned_app_id"]),
                     "requested_app_name": pool_name,
                     "connection_name": f"app_{int(entry['assigned_app_id'])}",
@@ -561,6 +1020,7 @@ class ResourcePoolService:
             return {
                 "status": "started",
                 "pool_id": pool_id,
+                "session_pool_id": pool_id,
                 "member_app_id": int(member["id"]),
                 "requested_app_name": pool_name,
                 "connection_name": f"app_{int(member['id'])}",

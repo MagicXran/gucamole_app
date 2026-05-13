@@ -10,7 +10,7 @@
     <div class="app-card__header">
       <div>
         <h2>{{ app.name }}</h2>
-        <p>{{ app.protocol.toUpperCase() }} · 资源池 #{{ app.pool_id }}</p>
+        <p>{{ app.protocol.toUpperCase() }} · {{ launchLabel }}</p>
       </div>
       <span :class="['app-card__status', statusToneClass]">
         {{ app.resource_status_label || (app.has_capacity ? '可用' : '忙碌') }}
@@ -25,7 +25,14 @@
 
     <div class="app-card__actions">
       <span v-if="launching" class="app-card__launching">启动中...</span>
-      <RouterLink class="app-card__link" :to="`/compute/pools/${app.pool_id}`" @click.stop>查看详情</RouterLink>
+      <RouterLink
+        v-if="detailPoolId"
+        class="app-card__link"
+        :to="`/compute/pools/${detailPoolId}`"
+        @click.stop
+      >
+        查看详情
+      </RouterLink>
     </div>
     <p v-if="errorMessage" class="app-card__error">{{ errorMessage }}</p>
   </article>
@@ -43,6 +50,11 @@ const props = defineProps<{
 }>()
 
 const statusToneClass = computed(() => `app-card__status--${props.app.resource_status_tone || 'neutral'}`)
+const detailPoolId = computed(() => props.app.capacity_pool_id ?? props.app.pool_id ?? null)
+const launchLabel = computed(() => {
+  if (props.app.launch_target_kind === 'standalone_runtime') return '独立运行'
+  return detailPoolId.value ? `容量池 #${detailPoolId.value}` : '容量池'
+})
 const launching = ref(false)
 const errorMessage = ref('')
 
@@ -53,7 +65,7 @@ async function handleLaunch() {
   launching.value = true
   errorMessage.value = ''
   try {
-    await launchRemoteApp(props.app.id, props.app.name, props.app.pool_id || 0)
+    await launchRemoteApp(props.app.id, props.app.name, detailPoolId.value || 0)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '远程应用启动失败'
   } finally {

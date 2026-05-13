@@ -92,4 +92,27 @@ describe('AppCard', () => {
 
     expect(wrapper.text()).toContain('远程应用启动失败')
   })
+
+  it('hides detail link for standalone runtime cards', () => {
+    const wrapper = mount(AppCard, {
+      props: {
+        app: {
+          ...APP,
+          pool_id: null,
+          launch_target_kind: 'standalone_runtime',
+          launch_target_label: '独立运行',
+        },
+      },
+      global: {
+        stubs: {
+          RouterLink: {
+            template: '<a class="detail-link"><slot /></a>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.find('.detail-link').exists()).toBe(false)
+    expect(wrapper.text()).toContain('独立运行')
+  })
 })

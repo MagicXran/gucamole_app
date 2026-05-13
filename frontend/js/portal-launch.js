@@ -383,7 +383,7 @@ function renderCards(apps) {
         card.onclick = function() { launchApp(app.id, app.name, app.pool_id || 0); };
 
         var icon = ICON_MAP[app.icon] || ICON_MAP['desktop'];
-        var appLabel = '资源池';
+        var appLabel = app.launch_target_label || (app.pool_id ? '容量池' : '独立运行');
 
         var iconSpan = document.createElement('span');
         iconSpan.className = 'app-card__icon';

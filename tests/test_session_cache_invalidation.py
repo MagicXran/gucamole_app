@@ -2,6 +2,7 @@ import asyncio
 import sys
 import types
 from contextlib import nullcontext
+from datetime import timedelta
 
 import httpx
 import pytest
@@ -125,6 +126,43 @@ class FakePrepareLaunchDB:
             if fetch_one:
                 return row
             return [row]
+        if fetch_one:
+            return None
+        return []
+
+
+class FakeStandaloneLaunchDB:
+    def __init__(self, user_app_live_count: int = 0, active_count: int = 0):
+        self.user_app_live_count = user_app_live_count
+        self.active_count = active_count
+
+    def execute_query(self, query: str, params=None, fetch_one: bool = False):
+        if "/* rps:get_launch_target */" in query:
+            row = {
+                "requested_app_id": 9,
+                "name": "独立实例",
+                "pool_id": None,
+                "member_max_concurrent": 2,
+                "pool_name": "独立实例",
+            }
+            if fetch_one:
+                return row
+            return [row]
+        if "/* rps:get_user_app_live_count */" in query:
+            row = {"live_count": self.user_app_live_count}
+            if fetch_one:
+                return row
+            return [row]
+        if "/* rps:get_runtime_active_session_count */" in query:
+            row = {"active_count": self.active_count}
+            if fetch_one:
+                return row
+            return [row]
+        if "/* rps:get_runtime_health */" in query:
+            row = None
+            if fetch_one:
+                return row
+            return []
         if fetch_one:
             return None
         return []
@@ -313,6 +351,7 @@ def test_prepare_launch_allows_second_session_in_same_pool_when_capacity_remains
     assert decision == {
         "status": "started",
         "pool_id": 1,
+        "session_pool_id": 1,
         "member_app_id": 1,
         "requested_app_name": "记事本",
         "connection_name": "app_1",
@@ -341,3 +380,46 @@ def test_prepare_launch_blocks_same_user_same_app_when_config_limit_reached(monk
 
     with pytest.raises(ValueError, match="同一用户最多同时打开 1 个“记事本”实例"):
         service.prepare_launch(user_id=2, requested_app_id=1)
+
+
+def test_prepare_launch_allows_standalone_runtime_without_pool(monkeypatch):
+    service = ResourcePoolService(db=FakeStandaloneLaunchDB())
+
+    monkeypatch.setattr(service, "_runtime_lock", lambda runtime_id: nullcontext())
+    monkeypatch.setattr(
+        resource_pool_service,
+        "CONFIG",
+        {"launch_policy": {"same_user_same_app_limit": 0}},
+    )
+
+    decision = service.prepare_launch(user_id=2, requested_app_id=9)
+
+    assert decision == {
+        "status": "started",
+        "pool_id": None,
+        "session_pool_id": None,
+        "member_app_id": 9,
+        "requested_app_name": "独立实例",
+        "connection_name": "app_9",
+        "queue_id": None,
+    }
+
+
+def test_prepare_launch_blocks_standalone_runtime_during_cooldown(monkeypatch):
+    service = ResourcePoolService(db=FakeStandaloneLaunchDB())
+
+    monkeypatch.setattr(service, "_runtime_lock", lambda runtime_id: nullcontext())
+    monkeypatch.setattr(
+        service,
+        "runtime_is_launchable",
+        lambda runtime_id: (
+            False,
+            {
+                "status": "cooldown",
+                "cooldown_until": service._now() + timedelta(seconds=60),
+            },
+        ),
+    )
+
+    with pytest.raises(ValueError, match="冷却中"):
+        service.prepare_launch(user_id=2, requested_app_id=9)

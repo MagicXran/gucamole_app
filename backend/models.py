@@ -256,6 +256,13 @@ class AppAdminResponse(BaseModel):
     pool_id: Optional[int] = None
     member_max_concurrent: int = 1
     is_active: bool = True
+    launch_target_kind: Literal["capacity_pool_member", "standalone_runtime"] = "capacity_pool_member"
+    runtime_health_status: str = "unknown"
+    runtime_health_status_label: str = "未知"
+    runtime_health_status_tone: str = "neutral"
+    runtime_consecutive_failures: int = 0
+    runtime_cooldown_until: Any = None
+    runtime_last_failure_reason: Optional[str] = None
     script_enabled: bool = False
     script_profile_key: Optional[str] = None
     script_profile_name: Optional[str] = None
@@ -371,9 +378,13 @@ class AdminAnalyticsOverviewResponse(BaseModel):
 
 
 class ResourcePoolCardResponse(BaseModel):
-    """资源池卡片数据"""
+    """启动卡片数据"""
     id: int = Field(..., description="代表性 launch_app_id")
-    pool_id: int
+    pool_id: Optional[int] = None
+    capacity_pool_id: Optional[int] = None
+    runtime_id: Optional[int] = None
+    launch_target_kind: Literal["capacity_pool", "standalone_runtime"] = "capacity_pool"
+    launch_target_label: str = "容量池"
     name: str
     icon: str = "desktop"
     app_kind: Literal["commercial_software", "simulation_app", "compute_tool"] = "commercial_software"
@@ -392,6 +403,9 @@ class ResourcePoolCardResponse(BaseModel):
     resource_status_code: str = ""
     resource_status_label: str = ""
     resource_status_tone: str = ""
+    runtime_health_status: str = "unknown"
+    runtime_health_status_label: str = "未知"
+    runtime_health_status_tone: str = "neutral"
     active_count: int = 0
     queued_count: int = 0
     max_concurrent: int = 1
@@ -577,7 +591,7 @@ class LaunchQueueConsumeRequest(BaseModel):
 class QueueStatusResponse(BaseModel):
     """排队状态响应"""
     queue_id: int
-    pool_id: int
+    pool_id: Optional[int] = None
     status: str
     position: int = 0
     ready_expires_at: Any = None
@@ -592,7 +606,7 @@ class LaunchOrQueueResponse(BaseModel):
     session_id: str = ""
     queue_id: int = 0
     position: int = 0
-    pool_id: int = 0
+    pool_id: Optional[int] = None
 
 
 class ResourcePoolCreateRequest(BaseModel):

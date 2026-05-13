@@ -3,7 +3,7 @@
     <div class="admin-app-dialog__panel">
       <header class="admin-app-dialog__header">
         <div>
-          <h2>{{ mode === 'edit' ? '编辑应用' : '新建应用' }}</h2>
+          <h2>{{ mode === 'edit' ? '编辑运行实例' : '新建运行实例' }}</h2>
           <p>按旧后台完整参数来，别再把 RDP 配置剁成半截。</p>
         </div>
         <button type="button" @click="$emit('close')">关闭</button>
@@ -33,9 +33,9 @@
           <label><span>主机</span><input v-model="form.hostname" data-testid="admin-app-hostname"></label>
           <label><span>端口</span><input v-model.number="form.port" type="number" min="1" max="65535" data-testid="admin-app-port"></label>
           <label>
-            <span>资源池</span>
-            <select v-model="form.pool_id" data-testid="admin-app-pool" @change="emitPoolChange">
-              <option :value="null">未绑定</option>
+            <span>容量池</span>
+            <select v-model="form.pool_id" data-testid="admin-app-pool">
+              <option :value="null">独立运行（不加入容量池）</option>
               <option v-for="pool in pools" :key="pool.id" :value="pool.id">{{ pool.name }}</option>
             </select>
           </label>
@@ -220,21 +220,6 @@
         </div>
       </details>
 
-      <section class="admin-app-dialog__attachments">
-        <header>
-          <h3>资源池共享附件</h3>
-          <p v-if="attachmentBindingWarning" class="admin-app-dialog__warning">{{ attachmentBindingWarning }}</p>
-          <p v-if="attachmentsLoading">加载附件中...</p>
-          <p v-else-if="!form.pool_id">先选择资源池，再维护附件。</p>
-        </header>
-        <AdminPoolAttachmentsEditor
-          v-if="form.pool_id"
-          :model-value="attachments"
-          :disabled="saving"
-          @update:model-value="$emit('update:attachments', $event)"
-        />
-      </section>
-
       <footer class="admin-app-dialog__actions">
         <button type="button" @click="$emit('close')">取消</button>
         <button type="button" data-testid="admin-app-submit" :disabled="saving" @click="handleSubmit">
@@ -248,7 +233,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 
-import AdminPoolAttachmentsEditor from '@/modules/admin/components/AdminPoolAttachmentsEditor.vue'
 import type {
   AdminAppFormPayload,
   AdminAppRecord,
@@ -256,7 +240,6 @@ import type {
   AdminScriptProfile,
   AdminWorkerGroup,
   ColorDepth,
-  PoolAttachments,
   ScriptExecutorKey,
   TransferPolicy,
 } from '@/modules/admin/types/apps'
@@ -269,16 +252,11 @@ const props = defineProps<{
   workerGroups: AdminWorkerGroup[]
   scriptProfiles: AdminScriptProfile[]
   initialApp: AdminAppRecord | null
-  attachments: PoolAttachments
-  attachmentsLoading: boolean
-  attachmentBindingWarning: string
 }>()
 
 const emit = defineEmits<{
   close: []
-  submit: [{ appId: number | null; payload: AdminAppFormPayload; attachments: PoolAttachments }]
-  'pool-change': [poolId: number | null]
-  'update:attachments': [value: PoolAttachments]
+  submit: [{ appId: number | null; payload: AdminAppFormPayload }]
 }>()
 
 const scriptPythonEnvText = ref('')
@@ -441,19 +419,6 @@ watch(
   { immediate: true },
 )
 
-function cloneAttachments(payload: PoolAttachments): PoolAttachments {
-  return {
-    pool_id: payload.pool_id,
-    tutorial_docs: payload.tutorial_docs.map((item) => ({ ...item })),
-    video_resources: payload.video_resources.map((item) => ({ ...item })),
-    plugin_downloads: payload.plugin_downloads.map((item) => ({ ...item })),
-  }
-}
-
-function emitPoolChange() {
-  emit('pool-change', normalizePositiveId(form.pool_id))
-}
-
 function applySelectedScriptProfile() {
   const profile = selectedScriptProfile.value
   if (!profile) return
@@ -523,7 +488,6 @@ function handleSubmit() {
       script_python_executable: nullableText(form.script_python_executable),
       script_python_env: parsedEnv,
     },
-    attachments: cloneAttachments(props.attachments),
   })
 }
 </script>
@@ -560,8 +524,6 @@ function handleSubmit() {
 .admin-app-dialog__header h2,
 .admin-app-dialog__header p,
 .admin-app-dialog__section h3,
-.admin-app-dialog__attachments h3,
-.admin-app-dialog__attachments p,
 .admin-app-dialog__subsection h4 {
   margin: 0;
 }
@@ -572,8 +534,7 @@ function handleSubmit() {
 }
 
 .admin-app-dialog__section,
-.admin-app-dialog__details,
-.admin-app-dialog__attachments {
+.admin-app-dialog__details {
   display: grid;
   gap: 12px;
   padding: 16px;
@@ -621,10 +582,6 @@ function handleSubmit() {
   display: flex !important;
   align-items: center;
   gap: 8px !important;
-}
-
-.admin-app-dialog__attachments {
-  background: #fff;
 }
 
 .admin-app-dialog__warning {

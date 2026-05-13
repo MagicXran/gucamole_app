@@ -6,7 +6,6 @@ import type {
   AdminPoolRecord,
   AdminScriptProfilesResponse,
   AdminWorkerGroupsResponse,
-  PoolAttachments,
 } from '@/modules/admin/types/apps'
 
 export function listAdminApps() {
@@ -35,12 +34,4 @@ export function listAdminWorkerGroups() {
 
 export function listAdminScriptProfiles() {
   return http.get<AdminScriptProfilesResponse>('/api/admin/script-profiles')
-}
-
-export function getAdminPoolAttachments(poolId: number) {
-  return http.get<PoolAttachments>(`/api/admin/pools/${poolId}/attachments`)
-}
-
-export function replaceAdminPoolAttachments(poolId: number, payload: PoolAttachments) {
-  return http.put<PoolAttachments>(`/api/admin/pools/${poolId}/attachments`, payload)
 }

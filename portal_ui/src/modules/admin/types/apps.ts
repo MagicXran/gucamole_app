@@ -7,6 +7,7 @@ export type AdminAppRecord = {
   id: number
   name: string
   icon: string
+  launch_target_kind?: 'capacity_pool_member' | 'standalone_runtime'
   app_kind: AppKind
   protocol: string
   hostname: string
@@ -36,6 +37,12 @@ export type AdminAppRecord = {
   pool_id: number | null
   member_max_concurrent: number
   is_active: boolean
+  runtime_health_status?: string
+  runtime_health_status_label?: string
+  runtime_health_status_tone?: string
+  runtime_consecutive_failures?: number
+  runtime_cooldown_until?: string | null
+  runtime_last_failure_reason?: string | null
   script_enabled?: boolean
   script_profile_key?: string | null
   script_profile_name?: string | null

@@ -1,6 +1,10 @@
 export type ComputeAppCard = {
   id: number
-  pool_id: number
+  pool_id: number | null
+  capacity_pool_id?: number | null
+  runtime_id?: number | null
+  launch_target_kind?: 'capacity_pool' | 'standalone_runtime'
+  launch_target_label?: string
   app_kind?: 'commercial_software' | 'simulation_app' | 'compute_tool'
   name: string
   icon: string
@@ -19,6 +23,9 @@ export type ComputeAppCard = {
   resource_status_code: string
   resource_status_label: string
   resource_status_tone: string
+  runtime_health_status?: string
+  runtime_health_status_label?: string
+  runtime_health_status_tone?: string
   active_count: number
   queued_count: number
   max_concurrent: number

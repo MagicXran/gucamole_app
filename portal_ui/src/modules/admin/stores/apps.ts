@@ -4,12 +4,10 @@ import { ref } from 'vue'
 import {
   createAdminApp,
   deleteAdminApp,
-  getAdminPoolAttachments,
   listAdminApps,
   listAdminPools,
   listAdminScriptProfiles,
   listAdminWorkerGroups,
-  replaceAdminPoolAttachments,
   updateAdminApp,
 } from '@/modules/admin/services/api/apps'
 import type {
@@ -18,20 +16,8 @@ import type {
   AdminPoolRecord,
   AdminScriptProfile,
   AdminWorkerGroup,
-  AttachmentItemDraft,
   PoolAttachments,
 } from '@/modules/admin/types/apps'
-
-function normalizeAttachmentItems(items: AttachmentItemDraft[]) {
-  return items
-    .map((item, index) => ({
-      title: String(item.title || '').trim(),
-      summary: String(item.summary || '').trim(),
-      link_url: String(item.link_url || '').trim(),
-      sort_order: index,
-    }))
-    .filter((item) => item.title || item.link_url)
-}
 
 export function emptyPoolAttachments(poolId = 0): PoolAttachments {
   return {
@@ -51,23 +37,12 @@ export function clonePoolAttachments(payload: PoolAttachments): PoolAttachments 
   }
 }
 
-function normalizePoolAttachments(payload: PoolAttachments, poolId: number): PoolAttachments {
-  return {
-    pool_id: poolId,
-    tutorial_docs: normalizeAttachmentItems(payload.tutorial_docs),
-    video_resources: normalizeAttachmentItems(payload.video_resources),
-    plugin_downloads: normalizeAttachmentItems(payload.plugin_downloads),
-  }
-}
-
 export const useAdminAppsStore = defineStore('admin-apps', () => {
   const items = ref<AdminAppRecord[]>([])
   const pools = ref<AdminPoolRecord[]>([])
   const workerGroups = ref<AdminWorkerGroup[]>([])
   const scriptProfiles = ref<AdminScriptProfile[]>([])
-  const attachments = ref<PoolAttachments>(emptyPoolAttachments())
   const loading = ref(false)
-  const attachmentsLoading = ref(false)
   const saving = ref(false)
   const errorMessage = ref('')
 
@@ -116,46 +91,13 @@ export const useAdminAppsStore = defineStore('admin-apps', () => {
     await Promise.all([loadApps(), loadPools(), loadWorkerGroups(), loadScriptProfiles()])
   }
 
-  async function loadPoolAttachments(poolId: number | null) {
-    if (!poolId) {
-      attachments.value = emptyPoolAttachments()
-      return attachments.value
-    }
-    attachmentsLoading.value = true
-    try {
-      const response = await getAdminPoolAttachments(poolId)
-      attachments.value = clonePoolAttachments(response.data)
-      return attachments.value
-    } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : '加载资源池附件失败'
-      attachments.value = emptyPoolAttachments(poolId)
-      return attachments.value
-    } finally {
-      attachmentsLoading.value = false
-    }
-  }
-
-  async function saveApp(
-    appId: number | null,
-    payload: AdminAppFormPayload,
-    attachmentPayload: PoolAttachments,
-    attachmentPoolId: number | null = payload.pool_id,
-  ) {
+  async function saveApp(appId: number | null, payload: AdminAppFormPayload) {
     saving.value = true
     errorMessage.value = ''
     try {
       const response = appId
         ? await updateAdminApp(appId, payload)
         : await createAdminApp(payload)
-
-      if (attachmentPoolId) {
-        const normalizedAttachments = normalizePoolAttachments(attachmentPayload, attachmentPoolId)
-        const attachmentResponse = await replaceAdminPoolAttachments(attachmentPoolId, normalizedAttachments)
-        attachments.value = clonePoolAttachments(attachmentResponse.data)
-      } else {
-        attachments.value = emptyPoolAttachments()
-      }
-
       await loadApps()
       return response.data
     } catch (error) {
@@ -185,16 +127,13 @@ export const useAdminAppsStore = defineStore('admin-apps', () => {
     pools,
     workerGroups,
     scriptProfiles,
-    attachments,
     loading,
-    attachmentsLoading,
     saving,
     errorMessage,
     bootstrap,
     loadApps,
     loadWorkerGroups,
     loadScriptProfiles,
-    loadPoolAttachments,
     saveApp,
     removeApp,
   }

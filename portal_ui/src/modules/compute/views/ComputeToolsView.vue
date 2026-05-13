@@ -11,7 +11,7 @@
     <div v-else-if="computeStore.errorMessage" class="compute-view__state compute-view__state--error">{{ computeStore.errorMessage }}</div>
     <div v-else-if="items.length === 0" class="compute-view__state">暂无计算工具</div>
     <div v-else class="compute-view__grid">
-      <AppCard v-for="app in items" :key="app.pool_id" :app="app" />
+      <AppCard v-for="app in items" :key="app.capacity_pool_id ?? app.pool_id ?? app.runtime_id ?? app.id" :app="app" />
     </div>
   </section>
 </template>

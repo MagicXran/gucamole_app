@@ -65,6 +65,7 @@ def test_verify_schema_reports_missing_tables_and_columns():
     assert "missing table: launch_queue" in problems
     assert "missing table: worker_group" in problems
     assert "missing table: worker_node" in problems
+    assert "missing table: remote_app_health" in problems
     assert "missing table: remote_app_script_profile" in problems
     assert "missing table: app_binding" in problems
     assert "missing table: app_attachment" in problems
@@ -81,6 +82,8 @@ def test_verify_schema_reports_missing_tables_and_columns():
     assert "missing column: remote_app.disable_upload" in problems
     assert "missing column: remote_app.member_max_concurrent" in problems
     assert "missing column: remote_app.app_kind" in problems
+    assert "missing column: remote_app_health.health_status" in problems
+    assert "missing column: remote_app_health.consecutive_failures" in problems
     assert "missing column: portal_user.department" in problems
     assert "missing column: active_session.pool_id" in problems
     assert "missing column: active_session.reclaim_reason" in problems

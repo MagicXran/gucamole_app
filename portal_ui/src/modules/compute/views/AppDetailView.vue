@@ -8,7 +8,7 @@
       <header class="app-detail__header">
         <div>
           <h1>{{ app.name }}</h1>
-          <p>{{ app.protocol.toUpperCase() }} · 资源池 #{{ app.pool_id }}</p>
+          <p>{{ app.protocol.toUpperCase() }} · 容量池 #{{ app.capacity_pool_id ?? app.pool_id }}</p>
         </div>
         <div class="app-detail__header-actions">
           <button class="app-detail__launch" :disabled="launching" @click="handleLaunch">
@@ -129,7 +129,7 @@ const emptyAttachments = (poolId: number): PoolAttachmentResponse => ({
 })
 
 const poolId = computed(() => Number(route.params.poolId))
-const app = computed(() => computeStore.getAppByPoolId(poolId.value))
+const app = computed(() => computeStore.getAppByCapacityPoolId(poolId.value))
 const isResolving = computed(() => computeStore.loading || (!computeStore.loaded && computeStore.apps.length === 0 && !computeStore.errorMessage))
 const backPath = computed(() => {
   if (app.value?.app_kind === 'simulation_app') return '/compute/simulation'
@@ -273,7 +273,7 @@ async function handleLaunch() {
   launching.value = true
   try {
     const { launchRemoteApp } = await import('@/modules/compute/services/launch')
-    await launchRemoteApp(app.value.id, app.value.name, app.value.pool_id || 0)
+    await launchRemoteApp(app.value.id, app.value.name, app.value.capacity_pool_id ?? app.value.pool_id ?? 0)
   } finally {
     launching.value = false
   }

@@ -10,12 +10,12 @@ type LaunchResponse = {
   session_id: string
   queue_id: number
   position: number
-  pool_id: number
+  pool_id: number | null
 }
 
 type QueueStatusResponse = {
   queue_id: number
-  pool_id: number
+  pool_id: number | null
   status: string
   position: number
   ready_expires_at?: string | null

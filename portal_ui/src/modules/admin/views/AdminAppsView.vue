@@ -2,8 +2,8 @@
   <section class="admin-apps-view">
     <header class="admin-apps-view__header">
       <div>
-        <h1>App管理</h1>
-        <p>完整连接参数、脚本绑定、池级共享附件统一维护。</p>
+        <h1>运行实例管理</h1>
+        <p>维护具体 RemoteApp/RDP 运行实例、脚本绑定和容量池归属。</p>
       </div>
       <button
         v-if="isAdmin"
@@ -19,29 +19,33 @@
     <div v-else-if="adminAppsStore.errorMessage" class="admin-apps-view__guard admin-apps-view__guard--error">
       {{ adminAppsStore.errorMessage }}
     </div>
-    <div v-else-if="adminAppsStore.loading" class="admin-apps-view__guard">应用加载中...</div>
+    <div v-else-if="adminAppsStore.loading" class="admin-apps-view__guard">运行实例加载中...</div>
     <table v-else class="admin-apps-view__table">
       <thead>
         <tr>
           <th>ID</th>
           <th>名称</th>
+          <th>形态</th>
           <th>分类</th>
           <th>主机</th>
-          <th>资源池</th>
+          <th>容量池</th>
+          <th>健康</th>
           <th>状态</th>
           <th>操作</th>
         </tr>
       </thead>
       <tbody>
         <tr v-if="adminAppsStore.items.length === 0">
-          <td colspan="7">暂无应用</td>
+          <td colspan="8">暂无运行实例</td>
         </tr>
         <tr v-for="app in adminAppsStore.items" :key="app.id">
           <td>{{ app.id }}</td>
           <td>{{ app.name }}</td>
+          <td>{{ launchKindLabel(app.launch_target_kind) }}</td>
           <td>{{ kindLabel(app.app_kind) }}</td>
           <td>{{ app.hostname }}:{{ app.port }}</td>
           <td>{{ poolName(app.pool_id) }}</td>
+          <td>{{ app.runtime_health_status_label || '未探测' }}</td>
           <td>{{ app.is_active ? '启用' : '禁用' }}</td>
           <td class="admin-apps-view__actions">
             <button type="button" :data-testid="`admin-app-edit-${app.id}`" @click="openEdit(app)">编辑</button>
@@ -59,13 +63,8 @@
       :worker-groups="adminAppsStore.workerGroups"
       :script-profiles="adminAppsStore.scriptProfiles"
       :initial-app="selectedApp"
-      :attachments="draftAttachments"
-      :attachments-loading="adminAppsStore.attachmentsLoading"
-      :attachment-binding-warning="attachmentBindingWarning"
       @close="closeDialog"
-      @pool-change="handlePoolChange"
       @submit="handleSubmit"
-      @update:attachments="draftAttachments = $event"
     />
   </section>
 </template>
@@ -74,8 +73,8 @@
 import { computed, onMounted, ref } from 'vue'
 
 import AdminAppFormDialog from '@/modules/admin/components/AdminAppFormDialog.vue'
-import { clonePoolAttachments, emptyPoolAttachments, useAdminAppsStore } from '@/modules/admin/stores/apps'
-import type { AdminAppFormPayload, AdminAppRecord, PoolAttachments } from '@/modules/admin/types/apps'
+import { useAdminAppsStore } from '@/modules/admin/stores/apps'
+import type { AdminAppFormPayload, AdminAppRecord } from '@/modules/admin/types/apps'
 import { useSessionStore } from '@/stores/session'
 
 const sessionStore = useSessionStore()
@@ -84,9 +83,6 @@ const adminAppsStore = useAdminAppsStore()
 const dialogOpen = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const selectedApp = ref<AdminAppRecord | null>(null)
-const draftAttachments = ref<PoolAttachments>(emptyPoolAttachments())
-const attachmentPoolId = ref<number | null>(null)
-const attachmentBindingWarning = ref('')
 
 const isAdmin = computed(() => Boolean(sessionStore.user?.is_admin))
 
@@ -96,61 +92,39 @@ function kindLabel(kind: string) {
   return '商业软件'
 }
 
+function launchKindLabel(kind: string | undefined) {
+  return kind === 'standalone_runtime' ? '独立运行' : '容量池成员'
+}
+
 function poolName(poolId: number | null) {
-  return adminAppsStore.pools.find((pool) => pool.id === poolId)?.name || '-'
+  return adminAppsStore.pools.find((pool) => pool.id === poolId)?.name || '独立运行'
 }
 
 function closeDialog() {
   dialogOpen.value = false
   selectedApp.value = null
-  draftAttachments.value = emptyPoolAttachments()
-  attachmentPoolId.value = null
-  attachmentBindingWarning.value = ''
 }
 
 function openCreate() {
   dialogMode.value = 'create'
   selectedApp.value = null
-  draftAttachments.value = emptyPoolAttachments()
-  attachmentPoolId.value = null
-  attachmentBindingWarning.value = ''
   dialogOpen.value = true
 }
 
-async function openEdit(app: AdminAppRecord) {
+function openEdit(app: AdminAppRecord) {
   dialogMode.value = 'edit'
   selectedApp.value = app
   dialogOpen.value = true
-  attachmentPoolId.value = app.pool_id
-  attachmentBindingWarning.value = ''
-  draftAttachments.value = clonePoolAttachments(await adminAppsStore.loadPoolAttachments(app.pool_id))
-}
-
-async function handlePoolChange(poolId: number | null) {
-  if (
-    dialogMode.value === 'edit' &&
-    selectedApp.value?.pool_id &&
-    poolId &&
-    poolId !== selectedApp.value.pool_id
-  ) {
-    attachmentBindingWarning.value = `你改了 App 的资源池选择，但共享附件仍绑定原资源池 #${selectedApp.value.pool_id}。先保存 App 后再改新池附件，别把别的池写脏。`
-    return
-  }
-  attachmentBindingWarning.value = ''
-  attachmentPoolId.value = poolId
-  draftAttachments.value = clonePoolAttachments(await adminAppsStore.loadPoolAttachments(poolId))
 }
 
 async function handleSubmit({
   appId,
   payload,
-  attachments,
 }: {
   appId: number | null
   payload: AdminAppFormPayload
-  attachments: PoolAttachments
 }) {
-  await adminAppsStore.saveApp(appId, payload, attachments, attachmentPoolId.value || payload.pool_id)
+  await adminAppsStore.saveApp(appId, payload)
   closeDialog()
 }
 

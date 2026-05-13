@@ -132,7 +132,7 @@ def _build_all_connections(user_id: int) -> dict:
 
 @router.get("/", response_model=List[ResourcePoolCardResponse])
 def list_apps(user: UserInfo = Depends(get_current_user)):
-    """获取当前用户可访问的资源池卡片列表"""
+    """获取当前用户可访问的启动卡片列表"""
     return pool_service.list_user_pools(user.user_id)
 
 
@@ -185,13 +185,14 @@ async def launch_app(
             status=str(decision["status"]),
             queue_id=int(decision.get("queue_id") or 0),
             position=int(decision.get("position") or 0),
-            pool_id=int(decision.get("pool_id") or 0),
+            pool_id=decision.get("pool_id"),
         )
 
     # 构建该用户所有可用成员的连接参数；token 继续按用户复用
     connection_name = str(decision["connection_name"])
     connections = _build_all_connections(user.user_id)
     if connection_name not in connections:
+        pool_service.mark_runtime_launch_failure(int(decision["member_app_id"]), "连接构建异常")
         if decision.get("queue_id"):
             pool_service.requeue_after_launch_failure(
                 queue_id=int(decision["queue_id"]),
@@ -217,6 +218,7 @@ async def launch_app(
             external_url=dynamic_external_url,
         )
     except Exception as exc:
+        pool_service.mark_runtime_launch_failure(int(decision["member_app_id"]), str(exc))
         if decision.get("queue_id"):
             pool_service.requeue_after_launch_failure(
                 queue_id=int(decision["queue_id"]),
@@ -250,13 +252,14 @@ async def launch_app(
                 "sid": session_id,
                 "uid": user.user_id,
                 "aid": int(decision["member_app_id"]),
-                "pid": int(decision["pool_id"]),
+                "pid": decision.get("session_pool_id"),
                 "qid": decision.get("queue_id"),
             },
         )
         if inserted <= 0:
             raise RuntimeError("active_session 未写入")
     except Exception as exc:
+        pool_service.mark_runtime_launch_failure(int(decision["member_app_id"]), str(exc))
         logger.warning("插入 active_session 失败", exc_info=True)
         if decision.get("queue_id"):
             pool_service.requeue_after_launch_failure(
@@ -267,6 +270,8 @@ async def launch_app(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="会话记录写入失败，请重试",
         )
+
+    pool_service.mark_runtime_launch_success(int(decision["member_app_id"]))
 
     if decision.get("queue_id"):
         pool_service.mark_queue_fulfilled(
@@ -279,6 +284,6 @@ async def launch_app(
         redirect_url=redirect_url,
         connection_name=connection_name,
         session_id=session_id,
-        pool_id=int(decision["pool_id"]),
+        pool_id=decision.get("pool_id"),
         queue_id=int(decision.get("queue_id") or 0),
     )

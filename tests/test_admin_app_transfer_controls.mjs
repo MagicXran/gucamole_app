@@ -187,7 +187,7 @@ test('saveApp sends tri-state transfer policy payload values', async () => {
     assert.equal(apiCalls[0].payload.disable_upload, entry.expected[1]);
     assert.equal(apiCalls[1].method, 'GET');
     assert.equal(apiCalls[1].targetPath, '/apps');
-    assert.equal(toasts[0].msg, '应用已更新');
+    assert.equal(toasts[0].msg, '运行实例已更新');
   }
 });
 

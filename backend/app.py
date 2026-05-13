@@ -54,6 +54,7 @@ async def _cleanup_loop(cleanup_interval_seconds: int):
         cleanup_stale_sessions,
         cleanup_idle_sessions,
         dispatch_ready_queue_entries,
+        probe_runtime_health,
     )
     from backend.worker_monitor import (
         reconcile_offline_workers,
@@ -67,6 +68,7 @@ async def _cleanup_loop(cleanup_interval_seconds: int):
             cleanup_idle_sessions()
             reconcile_offline_workers()
             reconcile_stalled_assigned_tasks()
+            probe_runtime_health()
             dispatch_ready_queue_entries()
         except Exception:
             logger.exception("资源池清理/放行异常")

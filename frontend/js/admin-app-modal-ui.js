@@ -143,12 +143,8 @@
         await ensurePoolsLoaded();
         await ensureWorkerGroupsLoaded();
         await ensureScriptProfilesLoaded();
-        if (!_pools.length) {
-            showToast('请先创建资源池，再创建应用', 'error');
-            return;
-        }
         var isEdit = !!app;
-        var title = isEdit ? '编辑应用' : '新建应用';
+        var title = isEdit ? '编辑运行实例' : '新建运行实例';
 
         var adv = {
             color_depth: app ? app.color_depth : null,
@@ -200,12 +196,9 @@
         });
         kbSelect += '</select></div>';
 
-        _pools.map(function(pool) {
-            var selected = app && pool.id === app.pool_id ? ' selected' : '';
-            return '<option value="' + pool.id + '"' + selected + '>' + escapeHtml(pool.name) + '</option>';
-        }).join('');
-        var defaultPoolId = app && app.pool_id ? app.pool_id : _pools[0].id;
-        var poolSelect = '<div class="form-group"><label>资源池</label><select id="app-pool-id">' +
+        var defaultPoolId = app && app.pool_id ? app.pool_id : '';
+        var poolSelect = '<div class="form-group"><label>容量池</label><select id="app-pool-id">' +
+            '<option value="">独立运行（不加入容量池）</option>' +
             _pools.map(function(pool) {
                 var selected = pool.id === defaultPoolId ? ' selected' : '';
                 return '<option value="' + pool.id + '"' + selected + '>' + escapeHtml(pool.name) + '</option>';
@@ -421,10 +414,6 @@
             showToast('名称和主机为必填项', 'error');
             return;
         }
-        if (!data.pool_id) {
-            showToast('请选择资源池', 'error');
-            return;
-        }
         if (data.script_enabled && (!data.script_executor_key || !data.script_worker_group_id)) {
             showToast('启用脚本模式时必须选择执行器和 Worker 组', 'error');
             return;
@@ -447,10 +436,10 @@
         try {
             if (appId) {
                 await api('PUT', '/apps/' + appId, data);
-                showToast('应用已更新');
+                showToast('运行实例已更新');
             } else {
                 await api('POST', '/apps', data);
-                showToast('应用已创建');
+                showToast('运行实例已创建');
             }
             closeModal();
             loadApps();

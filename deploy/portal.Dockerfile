@@ -28,6 +28,7 @@ COPY frontend/ ./frontend/
 COPY scripts/ ./scripts/
 COPY config/ ./config/
 COPY --from=viewer-builder /app/frontend/js/viewer.bundle.js ./frontend/js/viewer.bundle.js
+RUN rm -rf ./frontend/portal
 COPY --from=viewer-builder /app/frontend/portal ./frontend/portal
 
 EXPOSE 8000

@@ -14,6 +14,7 @@ REQUIRED_TABLES = [
     "active_session",
     "portal_user",
     "remote_app",
+    "remote_app_health",
     "catalog_app",
     "app_binding",
     "remote_app_script_profile",
@@ -38,6 +39,7 @@ REQUIRED_TABLES = [
 
 REQUIRED_COLUMNS = {
     "remote_app": {"app_kind", "pool_id", "member_max_concurrent", "disable_download", "disable_upload"},
+    "remote_app_health": {"health_status", "consecutive_failures", "cooldown_until", "last_failure_reason"},
     "launch_queue": {"request_mode", "platform_task_id"},
     "active_session": {"pool_id", "queue_id", "last_activity_at", "reclaim_reason"},
     "portal_user": {"quota_bytes", "department"},

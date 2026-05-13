@@ -19,9 +19,9 @@ const adminMenuTree = [
     key: 'admin',
     title: '系统管理',
     children: [
-      { key: 'admin-pools', title: '资源池', path: '/admin/pools' },
+      { key: 'admin-pools', title: '容量池', path: '/admin/pools' },
       { key: 'admin-analytics', title: '统计看板', path: '/admin/analytics' },
-      { key: 'admin-apps', title: 'App管理', path: '/admin/apps' },
+      { key: 'admin-apps', title: '运行实例管理', path: '/admin/apps' },
       { key: 'admin-users', title: '用户管理', path: '/admin/users' },
       { key: 'admin-acl', title: '权限管理', path: '/admin/acl' },
       { key: 'admin-queues', title: '任务调度', path: '/admin/queues' },
@@ -61,9 +61,9 @@ describe('admin navigation shell', () => {
 
     const navigationStore = useNavigationStore()
     expect(navigationStore.defaultPath).toBe('/compute/commercial')
-    expect(navigationStore.resolveBreadcrumb('/admin/pools')).toEqual(['系统管理', '资源池'])
+    expect(navigationStore.resolveBreadcrumb('/admin/pools')).toEqual(['系统管理', '容量池'])
     expect(navigationStore.resolveBreadcrumb('/admin/analytics')).toEqual(['系统管理', '统计看板'])
-    expect(navigationStore.resolveBreadcrumb('/admin/apps')).toEqual(['系统管理', 'App管理'])
+    expect(navigationStore.resolveBreadcrumb('/admin/apps')).toEqual(['系统管理', '运行实例管理'])
     expect(navigationStore.resolveBreadcrumb('/admin/users')).toEqual(['系统管理', '用户管理'])
     expect(navigationStore.resolveBreadcrumb('/admin/acl')).toEqual(['系统管理', '权限管理'])
     expect(navigationStore.resolveBreadcrumb('/admin/queues')).toEqual(['系统管理', '任务调度'])
@@ -80,9 +80,9 @@ describe('admin navigation shell', () => {
     })
 
     expect(wrapper.text()).toContain('系统管理')
-    expect(wrapper.find('a[href="/admin/pools"]').text()).toContain('资源池')
+    expect(wrapper.find('a[href="/admin/pools"]').text()).toContain('容量池')
     expect(wrapper.find('a[href="/admin/analytics"]').text()).toContain('统计看板')
-    expect(wrapper.find('a[href="/admin/apps"]').text()).toContain('App管理')
+    expect(wrapper.find('a[href="/admin/apps"]').text()).toContain('运行实例管理')
     expect(wrapper.find('a[href="/admin/users"]').text()).toContain('用户管理')
     expect(wrapper.find('a[href="/admin/acl"]').text()).toContain('权限管理')
     expect(wrapper.find('a[href="/admin/audit"]').text()).toContain('审计日志')
@@ -94,9 +94,9 @@ describe('admin navigation shell', () => {
         },
       },
     })
-    expect(dashboard.find('a[href="/admin/pools"]').text()).toContain('资源池')
+    expect(dashboard.find('a[href="/admin/pools"]').text()).toContain('容量池')
     expect(dashboard.find('a[href="/admin/analytics"]').text()).toContain('统计看板')
-    expect(dashboard.find('a[href="/admin/apps"]').text()).toContain('App管理')
+    expect(dashboard.find('a[href="/admin/apps"]').text()).toContain('运行实例管理')
     expect(dashboard.find('a[href="/admin/users"]').text()).toContain('用户管理')
     expect(dashboard.find('a[href="/admin/acl"]').text()).toContain('权限管理')
     expect(dashboard.find('a[href="/admin/queues"]').text()).toContain('任务调度')

@@ -206,12 +206,20 @@ function isViewerFile(name: string) {
 
 button,
 .file-browser__upload {
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  background: #fff;
-  color: #1e3a8a;
-  padding: 8px 12px;
+  min-height: 40px;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 999px;
+  background: var(--portal-color-surface);
+  color: var(--portal-color-ink);
+  padding: 0 14px;
   cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+button:hover,
+.file-browser__upload:hover {
+  border-color: var(--portal-color-primary);
+  color: var(--portal-color-primary);
 }
 
 .file-browser__upload input {
@@ -220,20 +228,35 @@ button,
 
 .file-browser__table {
   width: 100%;
-  border-collapse: collapse;
-  background: #fff;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 20px;
+  background: var(--portal-color-surface);
+  box-shadow: var(--portal-shadow-soft);
 }
 
 .file-browser__table th,
 .file-browser__table td {
   padding: 12px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--portal-color-border);
   text-align: left;
+}
+
+.file-browser__table th {
+  background: var(--portal-color-page);
+  color: var(--portal-color-muted);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .file-browser__entry {
   border: 0;
   padding: 0;
+  background: transparent;
+  border-radius: 0;
 }
 
 .file-browser__row-actions {
@@ -244,13 +267,13 @@ button,
 .file-browser__empty,
 .file-browser__error {
   padding: 24px;
-  border-radius: 14px;
-  background: #f8fafc;
-  color: #64748b;
+  border-radius: 18px;
+  background: var(--portal-color-surface-soft);
+  color: var(--portal-color-body);
 }
 
 .file-browser__error {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--portal-color-danger);
+  background: #fff5f7;
 }
 </style>

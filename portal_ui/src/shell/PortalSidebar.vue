@@ -43,8 +43,9 @@ const { menuTree } = storeToRefs(navigationStore)
 <style scoped>
 .sidebar {
   padding: 18px 14px;
-  background: #111827;
-  color: #cbd5e1;
+  background: var(--portal-color-sidebar);
+  color: #a8acb3;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .sidebar__brand {
@@ -53,7 +54,7 @@ const { menuTree } = storeToRefs(navigationStore)
   gap: 10px;
   padding: 8px 10px 18px;
   margin-bottom: 12px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .sidebar__logo {
@@ -62,7 +63,7 @@ const { menuTree } = storeToRefs(navigationStore)
   border-radius: 999px;
   display: grid;
   place-items: center;
-  background: #b91c1c;
+  background: var(--portal-color-primary);
   color: #fff;
   font-weight: 700;
 }
@@ -70,17 +71,19 @@ const { menuTree } = storeToRefs(navigationStore)
 .sidebar__brand-title {
   color: #fff;
   font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .sidebar__brand-subtitle {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--portal-color-muted);
 }
 
 .sidebar__group-title {
   padding: 10px 12px;
-  color: #f8fafc;
+  color: #fff;
   font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .sidebar__group-title--link {
@@ -90,21 +93,28 @@ const { menuTree } = storeToRefs(navigationStore)
 }
 
 .sidebar__group-title--active {
-  color: #93c5fd;
+  color: #7aa6ff;
 }
 
 .sidebar__item {
   display: block;
   margin-left: 14px;
   padding: 10px 12px;
-  border-left: 3px solid transparent;
+  border-left: 2px solid transparent;
+  border-radius: 12px;
   color: inherit;
   text-decoration: none;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.sidebar__item:hover {
+  background: var(--portal-color-sidebar-hover);
+  color: #f5f7fb;
 }
 
 .sidebar__item--active {
-  border-left-color: #60a5fa;
-  background: #183154;
-  color: #93c5fd;
+  border-left-color: var(--portal-color-primary);
+  background: rgba(0, 82, 255, 0.14);
+  color: #dce7ff;
 }
 </style>

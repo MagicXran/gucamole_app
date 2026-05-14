@@ -24,7 +24,7 @@ import PortalTopbar from './PortalTopbar.vue'
   min-height: 100vh;
   display: grid;
   grid-template-columns: 248px 1fr;
-  background: #eef3fb;
+  background: var(--portal-color-page);
 }
 
 .portal-shell__main {
@@ -33,6 +33,6 @@ import PortalTopbar from './PortalTopbar.vue'
 }
 
 .portal-shell__content {
-  padding: 24px;
+  padding: 28px;
 }
 </style>

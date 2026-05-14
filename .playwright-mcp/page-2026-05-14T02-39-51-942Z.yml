@@ -1,0 +1,126 @@
+- main [ref=e231]:
+  - complementary [ref=e232]:
+    - generic [ref=e233]:
+      - generic [ref=e234]: NG
+      - generic [ref=e235]:
+        - generic [ref=e236]: 南京钢铁
+        - generic [ref=e237]: NANJING STEEL
+    - link "门户首页" [ref=e239] [cursor=pointer]:
+      - /url: /portal/overview
+    - generic [ref=e240]:
+      - generic [ref=e241]: 计算资源
+      - link "商业软件" [ref=e242] [cursor=pointer]:
+        - /url: /portal/compute/commercial
+      - link "仿真APP" [ref=e243] [cursor=pointer]:
+        - /url: /portal/compute/simulation
+      - link "计算工具" [ref=e244] [cursor=pointer]:
+        - /url: /portal/compute/tools
+    - generic [ref=e245]:
+      - generic [ref=e246]: 我的
+      - link "个人空间" [ref=e247] [cursor=pointer]:
+        - /url: /portal/my/workspace
+      - link "App任务" [ref=e248] [cursor=pointer]:
+        - /url: /portal/my/tasks
+      - link "预约登记" [ref=e249] [cursor=pointer]:
+        - /url: /portal/my/bookings
+    - link "任务案例" [ref=e251] [cursor=pointer]:
+      - /url: /portal/cases
+    - generic [ref=e252]:
+      - generic [ref=e253]: SDK中心
+      - link "云平台SDK" [ref=e254] [cursor=pointer]:
+        - /url: /portal/sdk/cloud
+      - link "仿真AppSDK" [ref=e255] [cursor=pointer]:
+        - /url: /portal/sdk/simulation-app
+    - generic [ref=e256]:
+      - generic [ref=e257]: 系统管理
+      - link "容量池" [ref=e258] [cursor=pointer]:
+        - /url: /portal/admin/pools
+      - link "运行实例管理" [ref=e259] [cursor=pointer]:
+        - /url: /portal/admin/apps
+      - link "用户管理" [ref=e260] [cursor=pointer]:
+        - /url: /portal/admin/users
+      - link "权限管理" [ref=e261] [cursor=pointer]:
+        - /url: /portal/admin/acl
+      - link "任务调度" [ref=e262] [cursor=pointer]:
+        - /url: /portal/admin/queues
+      - link "资源监控" [ref=e263] [cursor=pointer]:
+        - /url: /portal/admin/monitor
+      - link "Worker状态" [ref=e264] [cursor=pointer]:
+        - /url: /portal/admin/workers
+      - link "统计看板" [ref=e265] [cursor=pointer]:
+        - /url: /portal/admin/analytics
+      - link "审计日志" [ref=e266] [cursor=pointer]:
+        - /url: /portal/admin/audit
+  - generic [ref=e267]:
+    - generic [ref=e268]:
+      - generic [ref=e269]: 南钢-仿真
+      - generic [ref=e270]:
+        - link "结果中心" [ref=e271] [cursor=pointer]:
+          - /url: /portal/my/workspace
+        - generic [ref=e272]: 管理员
+        - button "退出" [ref=e274] [cursor=pointer]
+    - navigation [ref=e275]: 计算资源/商业软件
+    - generic [ref=e277]:
+      - generic [ref=e278]:
+        - heading "可用软件列表" [level=1] [ref=e279]
+        - paragraph [ref=e280]: 展示当前账号可访问的商业软件资源池。
+      - generic [ref=e281]:
+        - generic [ref=e282]: 搜索
+        - searchbox "搜索" [ref=e283]
+      - generic [ref=e284]:
+        - 'button "vscode RDP · 容量池 #5 可用 运行 0/3 排队 0 查看详情" [ref=e285] [cursor=pointer]':
+          - generic [ref=e286]:
+            - generic [ref=e287]:
+              - heading "vscode" [level=2] [ref=e288]
+              - paragraph [ref=e289]: "RDP · 容量池 #5"
+            - generic [ref=e290]: 可用
+          - generic [ref=e291]:
+            - generic [ref=e292]: 运行 0/3
+            - generic [ref=e293]: 排队 0
+          - link "查看详情" [ref=e295]:
+            - /url: /portal/compute/pools/5
+        - 'button "验证池-桌面与脚本 RDP · 容量池 #4 可用 运行 0/1 排队 0 脚本模式 查看详情" [ref=e296] [cursor=pointer]':
+          - generic [ref=e297]:
+            - generic [ref=e298]:
+              - heading "验证池-桌面与脚本" [level=2] [ref=e299]
+              - paragraph [ref=e300]: "RDP · 容量池 #4"
+            - generic [ref=e301]: 可用
+          - generic [ref=e302]:
+            - generic [ref=e303]: 运行 0/1
+            - generic [ref=e304]: 排队 0
+            - generic [ref=e305]: 脚本模式
+          - link "查看详情" [ref=e307]:
+            - /url: /portal/compute/pools/4
+        - 'button "默认池-1-记事本 RDP · 容量池 #1 可用 运行 0/3 排队 0 查看详情" [ref=e308] [cursor=pointer]':
+          - generic [ref=e309]:
+            - generic [ref=e310]:
+              - heading "默认池-1-记事本" [level=2] [ref=e311]
+              - paragraph [ref=e312]: "RDP · 容量池 #1"
+            - generic [ref=e313]: 可用
+          - generic [ref=e314]:
+            - generic [ref=e315]: 运行 0/3
+            - generic [ref=e316]: 排队 0
+          - link "查看详情" [ref=e318]:
+            - /url: /portal/compute/pools/1
+        - 'button "默认池-2-计算器 RDP · 容量池 #2 可用 运行 0/3 排队 0 查看详情" [ref=e319] [cursor=pointer]':
+          - generic [ref=e320]:
+            - generic [ref=e321]:
+              - heading "默认池-2-计算器" [level=2] [ref=e322]
+              - paragraph [ref=e323]: "RDP · 容量池 #2"
+            - generic [ref=e324]: 可用
+          - generic [ref=e325]:
+            - generic [ref=e326]: 运行 0/3
+            - generic [ref=e327]: 排队 0
+          - link "查看详情" [ref=e329]:
+            - /url: /portal/compute/pools/2
+        - 'button "默认池-3-远程桌面 RDP · 容量池 #3 可用 运行 0/1 排队 0 查看详情" [ref=e330] [cursor=pointer]':
+          - generic [ref=e331]:
+            - generic [ref=e332]:
+              - heading "默认池-3-远程桌面" [level=2] [ref=e333]
+              - paragraph [ref=e334]: "RDP · 容量池 #3"
+            - generic [ref=e335]: 可用
+          - generic [ref=e336]:
+            - generic [ref=e337]: 运行 0/1
+            - generic [ref=e338]: 排队 0
+          - link "查看详情" [ref=e340]:
+            - /url: /portal/compute/pools/3

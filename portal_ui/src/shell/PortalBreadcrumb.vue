@@ -21,13 +21,14 @@ const breadcrumb = computed(() => navigationStore.resolveBreadcrumb(route.path))
 <style scoped>
 .breadcrumb {
   padding: 16px 24px;
-  color: #334155;
-  background: rgba(255, 255, 255, 0.72);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  color: var(--portal-color-body);
+  background: rgba(255, 255, 255, 0.78);
+  border-bottom: 1px solid var(--portal-color-border);
+  font-size: 14px;
 }
 
 .breadcrumb__sep {
   margin: 0 6px;
-  color: #94a3b8;
+  color: var(--portal-color-muted);
 }
 </style>

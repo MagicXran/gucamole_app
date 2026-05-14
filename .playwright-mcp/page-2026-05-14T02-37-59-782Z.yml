@@ -1,0 +1,260 @@
+- main [ref=e4]:
+  - generic [ref=e6]:
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: NG
+        - generic [ref=e10]:
+          - generic [ref=e11]: NANGANG PORTAL
+          - generic [ref=e12]: 统一软件与算力入口
+      - navigation "门户导航" [ref=e13]:
+        - link "商业软件" [ref=e14] [cursor=pointer]:
+          - /url: /portal/compute/commercial
+        - link "仿真APP" [ref=e15] [cursor=pointer]:
+          - /url: /portal/compute/simulation
+        - link "结果中心" [ref=e16] [cursor=pointer]:
+          - /url: /portal/my/workspace
+        - link "案例中心" [ref=e17] [cursor=pointer]:
+          - /url: /portal/cases
+      - generic [ref=e18]:
+        - link "系统管理" [ref=e19] [cursor=pointer]:
+          - /url: /portal/admin/apps
+        - generic [ref=e20]: 管理员
+        - button "退出" [ref=e22] [cursor=pointer]
+    - generic [ref=e24]:
+      - generic [ref=e25]:
+        - paragraph [ref=e26]: NANJING STEEL COMPUTE PORTAL
+        - heading "统一接入商业软件、仿真应用与计算工具" [level=1] [ref=e27]
+        - paragraph [ref=e28]: 一个入口完成远程 GUI、脚本调度、资源排队、结果回传和案例复用。把原来散着跑的页面收回来，但旧页面一个不删。
+        - generic [ref=e29]:
+          - link "进入商业软件" [ref=e30] [cursor=pointer]:
+            - /url: /portal/compute/commercial
+          - link "打开结果中心" [ref=e31] [cursor=pointer]:
+            - /url: /portal/my/workspace
+        - generic [ref=e32]:
+          - generic [ref=e33]: 目录总量 5
+          - generic [ref=e34]: 脚本就绪 0
+          - generic [ref=e35]: 当前排队 0
+      - generic "资源概览" [ref=e36]:
+        - article [ref=e37]:
+          - generic [ref=e38]:
+            - generic [ref=e39]:
+              - paragraph [ref=e40]: 实时目录
+              - heading "资源面" [level=2] [ref=e41]
+            - generic [ref=e42]: 在线
+          - generic [ref=e43]:
+            - generic [ref=e44]:
+              - strong [ref=e45]: "5"
+              - text: 可访问应用
+            - generic [ref=e46]:
+              - strong [ref=e47]: "5"
+              - text: 可直接启动
+            - generic [ref=e48]:
+              - strong [ref=e49]: "0"
+              - text: 运行中会话
+            - generic [ref=e50]:
+              - strong [ref=e51]: "0"
+              - text: 排队请求
+        - article [ref=e52]:
+          - generic [ref=e54]:
+            - paragraph [ref=e55]: 热门入口
+            - heading "优先目录" [level=2] [ref=e56]
+          - list [ref=e57]:
+            - listitem [ref=e58]:
+              - generic [ref=e59]:
+                - strong [ref=e60]: 默认池-1-记事本
+                - text: 商业软件 · 可用
+              - emphasis [ref=e61]: 0/3
+            - listitem [ref=e62]:
+              - generic [ref=e63]:
+                - strong [ref=e64]: 默认池-2-计算器
+                - text: 商业软件 · 可用
+              - emphasis [ref=e65]: 0/3
+            - listitem [ref=e66]:
+              - generic [ref=e67]:
+                - strong [ref=e68]: 默认池-3-远程桌面
+                - text: 商业软件 · 可用
+              - emphasis [ref=e69]: 0/1
+            - listitem [ref=e70]:
+              - generic [ref=e71]:
+                - strong [ref=e72]: 验证池-桌面与脚本
+                - text: 商业软件 · 可用
+              - emphasis [ref=e73]: 0/1
+        - article [ref=e74]:
+          - paragraph [ref=e75]: 调度视角
+          - strong [ref=e76]: "0"
+          - text: 个入口可直接走脚本模式
+    - generic [ref=e77]:
+      - generic [ref=e78]:
+        - generic [ref=e79]:
+          - paragraph [ref=e80]: 工作入口
+          - heading "先按工作方式进，再按软件细分" [level=2] [ref=e81]
+        - link "查看案例中心" [ref=e82] [cursor=pointer]:
+          - /url: /portal/cases
+      - generic [ref=e83]:
+        - article [ref=e84]:
+          - paragraph [ref=e85]: "5"
+          - heading "商业软件" [level=3] [ref=e86]
+          - paragraph [ref=e87]: 保留完整 GUI 交互，适合许可证重、交互深的软件环境。
+          - generic [ref=e88]: 5 个入口当前可直接启动
+          - link "进入目录" [ref=e89] [cursor=pointer]:
+            - /url: /portal/compute/commercial
+        - article [ref=e90]:
+          - paragraph [ref=e91]: "0"
+          - heading "仿真APP" [level=3] [ref=e92]
+          - paragraph [ref=e93]: 把脚本调度和图形入口绑在一起，适合模型封装与批处理。
+          - generic [ref=e94]: 0 个入口可走脚本
+          - link "进入目录" [ref=e95] [cursor=pointer]:
+            - /url: /portal/compute/simulation
+        - article [ref=e96]:
+          - paragraph [ref=e97]: "0"
+          - heading "计算工具" [level=3] [ref=e98]
+          - paragraph [ref=e99]: 轻量工具和辅助计算入口，适合快速试算与结果复核。
+          - generic [ref=e100]: 0 个工具当前空闲
+          - link "进入目录" [ref=e101] [cursor=pointer]:
+            - /url: /portal/compute/tools
+    - generic [ref=e102]:
+      - generic [ref=e103]:
+        - generic [ref=e104]:
+          - paragraph [ref=e105]: 应用总览
+          - heading "目录、状态和入口在一张表里说清" [level=2] [ref=e106]
+        - generic [ref=e107]:
+          - generic [ref=e108]: 关键字
+          - searchbox "关键字" [ref=e109]
+      - generic [ref=e110]:
+        - generic [ref=e111]:
+          - generic [ref=e112]: 应用
+          - generic [ref=e113]: 分类
+          - generic [ref=e114]: 状态
+          - generic [ref=e115]: 运行 / 排队
+          - generic [ref=e116]: 脚本模式
+          - generic [ref=e117]: 动作
+        - article [ref=e118]:
+          - generic [ref=e119]:
+            - generic [ref=e120]: 默认
+            - generic [ref=e121]:
+              - strong [ref=e122]: 默认池-1-记事本
+              - text: "RDP · 容量池 #1"
+          - generic [ref=e123]: 商业软件
+          - generic [ref=e125]: 可用
+          - generic [ref=e126]: 0/3 · 队列 0
+          - generic [ref=e127]: 仅 GUI
+          - link "查看详情" [ref=e129] [cursor=pointer]:
+            - /url: /portal/compute/pools/1
+        - article [ref=e130]:
+          - generic [ref=e131]:
+            - generic [ref=e132]: 默认
+            - generic [ref=e133]:
+              - strong [ref=e134]: 默认池-2-计算器
+              - text: "RDP · 容量池 #2"
+          - generic [ref=e135]: 商业软件
+          - generic [ref=e137]: 可用
+          - generic [ref=e138]: 0/3 · 队列 0
+          - generic [ref=e139]: 仅 GUI
+          - link "查看详情" [ref=e141] [cursor=pointer]:
+            - /url: /portal/compute/pools/2
+        - article [ref=e142]:
+          - generic [ref=e143]:
+            - generic [ref=e144]: 默认
+            - generic [ref=e145]:
+              - strong [ref=e146]: 默认池-3-远程桌面
+              - text: "RDP · 容量池 #3"
+          - generic [ref=e147]: 商业软件
+          - generic [ref=e149]: 可用
+          - generic [ref=e150]: 0/1 · 队列 0
+          - generic [ref=e151]: 仅 GUI
+          - link "查看详情" [ref=e153] [cursor=pointer]:
+            - /url: /portal/compute/pools/3
+        - article [ref=e154]:
+          - generic [ref=e155]:
+            - generic [ref=e156]: 验证
+            - generic [ref=e157]:
+              - strong [ref=e158]: 验证池-桌面与脚本
+              - text: "RDP · 容量池 #4"
+          - generic [ref=e159]: 商业软件
+          - generic [ref=e161]: 可用
+          - generic [ref=e162]: 0/1 · 队列 0
+          - generic [ref=e163]: 脚本受限
+          - link "查看详情" [ref=e165] [cursor=pointer]:
+            - /url: /portal/compute/pools/4
+        - article [ref=e166]:
+          - generic [ref=e167]:
+            - generic [ref=e168]: VS
+            - generic [ref=e169]:
+              - strong [ref=e170]: vscode
+              - text: "RDP · 容量池 #5"
+          - generic [ref=e171]: 商业软件
+          - generic [ref=e173]: 可用
+          - generic [ref=e174]: 0/3 · 队列 0
+          - generic [ref=e175]: 仅 GUI
+          - link "查看详情" [ref=e177] [cursor=pointer]:
+            - /url: /portal/compute/pools/5
+    - generic [ref=e178]:
+      - generic [ref=e180]:
+        - paragraph [ref=e181]: 闭环支撑
+        - heading "启动只是开始，结果、任务和资料都要跟上" [level=2] [ref=e182]
+      - generic [ref=e183]:
+        - article [ref=e184]:
+          - paragraph [ref=e185]: 结果中心
+          - heading "把 Output、下载和个人空间收成一个地方" [level=3] [ref=e186]
+          - paragraph [ref=e187]: 不再让用户自己去猜远程盘符。上传、下载、结果浏览都在同一条链路里闭环。
+          - link "打开个人空间" [ref=e188] [cursor=pointer]:
+            - /url: /portal/my/workspace
+        - article [ref=e189]:
+          - paragraph [ref=e190]: 任务与预约
+          - heading "脚本任务、预约登记、案例沉淀一起看" [level=3] [ref=e191]
+          - paragraph [ref=e192]: 适合那些既要抢 GUI，又要跑脚本，还要复盘结果的人。别再来回切旧页面了。
+          - generic [ref=e193]:
+            - link "查看 App 任务" [ref=e194] [cursor=pointer]:
+              - /url: /portal/my/tasks
+            - link "填写预约登记" [ref=e195] [cursor=pointer]:
+              - /url: /portal/my/bookings
+            - link "进入 SDK 中心" [ref=e196] [cursor=pointer]:
+              - /url: /portal/sdk/cloud
+    - generic [ref=e198]:
+      - paragraph [ref=e199]: 统一门户
+      - heading "把启动、排队、结果和案例收进同一个入口" [level=2] [ref=e200]
+      - paragraph [ref=e201]: 这页负责第一眼的秩序感，旧功能页继续干活。两边各司其职，别再把用户丢进原始菜单森林里。
+      - generic [ref=e202]:
+        - link "去软件目录" [ref=e203] [cursor=pointer]:
+          - /url: /portal/compute/commercial
+        - link "看任务状态" [ref=e204] [cursor=pointer]:
+          - /url: /portal/my/tasks
+    - generic [ref=e205]:
+      - generic [ref=e206]:
+        - generic [ref=e207]:
+          - heading "资源目录" [level=3] [ref=e208]
+          - link "门户首页" [ref=e209] [cursor=pointer]:
+            - /url: /portal/overview
+          - link "商业软件" [ref=e210] [cursor=pointer]:
+            - /url: /portal/compute/commercial
+          - link "仿真APP" [ref=e211] [cursor=pointer]:
+            - /url: /portal/compute/simulation
+          - link "计算工具" [ref=e212] [cursor=pointer]:
+            - /url: /portal/compute/tools
+        - generic [ref=e213]:
+          - heading "我的工作" [level=3] [ref=e214]
+          - link "个人空间" [ref=e215] [cursor=pointer]:
+            - /url: /portal/my/workspace
+          - link "App任务" [ref=e216] [cursor=pointer]:
+            - /url: /portal/my/tasks
+          - link "预约登记" [ref=e217] [cursor=pointer]:
+            - /url: /portal/my/bookings
+        - generic [ref=e218]:
+          - heading "知识与交付" [level=3] [ref=e219]
+          - link "案例中心" [ref=e220] [cursor=pointer]:
+            - /url: /portal/cases
+          - link "云平台SDK" [ref=e221] [cursor=pointer]:
+            - /url: /portal/sdk/cloud
+          - link "仿真AppSDK" [ref=e222] [cursor=pointer]:
+            - /url: /portal/sdk/simulation-app
+        - generic [ref=e223]:
+          - heading "管理入口" [level=3] [ref=e224]
+          - link "运行实例管理" [ref=e225] [cursor=pointer]:
+            - /url: /portal/admin/apps
+          - link "容量池" [ref=e226] [cursor=pointer]:
+            - /url: /portal/admin/pools
+          - link "Worker状态" [ref=e227] [cursor=pointer]:
+            - /url: /portal/admin/workers
+      - generic [ref=e228]:
+        - generic [ref=e229]: Portal overview surface for Nanjing Steel.
+        - generic [ref=e230]: 旧页面保留，新首页负责第一入口。

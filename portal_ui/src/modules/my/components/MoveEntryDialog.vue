@@ -317,8 +317,8 @@ function confirmMove() {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(15, 23, 42, 0.52);
-  backdrop-filter: blur(4px);
+  background: rgba(10, 11, 13, 0.52);
+  backdrop-filter: blur(8px);
 }
 
 .move-dialog {
@@ -328,10 +328,10 @@ function confirmMove() {
   gap: 16px;
   overflow: hidden;
   padding: 22px;
-  border: 1px solid #dbeafe;
-  border-radius: 22px;
-  background: #f8fafc;
-  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  border: 1px solid var(--portal-color-border);
+  border-radius: 24px;
+  background: var(--portal-color-surface);
+  box-shadow: 0 28px 90px rgba(10, 11, 13, 0.24);
 }
 
 .move-dialog__header,
@@ -351,14 +351,16 @@ function confirmMove() {
 
 .move-dialog__eyebrow {
   margin: 0 0 4px;
-  color: #2563eb;
+  color: var(--portal-color-primary);
   font-size: 13px;
   font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .move-dialog h2 {
   margin: 0;
-  color: #0f172a;
+  color: var(--portal-color-ink);
   font-size: 22px;
 }
 
@@ -373,10 +375,10 @@ function confirmMove() {
 
 .move-dialog__summary {
   padding: 12px 14px;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  background: #fff;
-  color: #475569;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 16px;
+  background: var(--portal-color-surface-soft);
+  color: var(--portal-color-body);
   font-size: 14px;
 }
 
@@ -385,9 +387,9 @@ function confirmMove() {
   max-height: 380px;
   overflow: auto;
   padding: 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  background: #fff;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 18px;
+  background: var(--portal-color-surface);
 }
 
 .move-tree-row {
@@ -402,8 +404,8 @@ function confirmMove() {
 }
 
 .move-tree-row__target--active {
-  border-color: #2563eb;
-  background: #eff6ff;
+  border-color: rgba(0, 82, 255, 0.24);
+  background: rgba(0, 82, 255, 0.08);
 }
 
 .move-tree-row__name {
@@ -413,7 +415,7 @@ function confirmMove() {
 }
 
 .move-tree-row__tag {
-  color: #b45309;
+  color: var(--portal-color-warning);
   font-size: 12px;
 }
 
@@ -429,13 +431,13 @@ function confirmMove() {
 }
 
 .move-dialog__status {
-  background: #eff6ff;
-  color: #1e3a8a;
+  background: rgba(0, 82, 255, 0.08);
+  color: var(--portal-color-primary);
 }
 
 .move-dialog__error {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: #fff5f7;
+  color: var(--portal-color-danger);
 }
 
 .move-dialog__actions {
@@ -443,8 +445,8 @@ function confirmMove() {
 }
 
 .move-dialog__confirm {
-  border-color: #1d4ed8;
-  background: #2563eb;
+  border-color: var(--portal-color-primary);
+  background: var(--portal-color-primary);
   color: #fff;
 }
 
@@ -456,12 +458,18 @@ function confirmMove() {
 }
 
 button {
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  background: #fff;
-  color: #1e3a8a;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 14px;
+  background: var(--portal-color-surface);
+  color: var(--portal-color-ink);
   padding: 8px 12px;
   cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--portal-color-primary);
+  color: var(--portal-color-primary);
 }
 
 @media (max-width: 640px) {

@@ -36,9 +36,10 @@ useComputeAutoRefresh(computeStore)
 <style scoped>
 .commercial-view {
   padding: 24px;
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  background: var(--portal-color-surface);
+  border: 1px solid var(--portal-color-border);
+  border-radius: 24px;
+  box-shadow: var(--portal-shadow-soft);
 }
 
 .commercial-view__grid {
@@ -50,24 +51,25 @@ useComputeAutoRefresh(computeStore)
 .commercial-view__empty,
 .commercial-view__error {
   padding: 32px;
-  border-radius: 14px;
-  background: #f8fafc;
-  color: #64748b;
+  border-radius: 18px;
+  background: var(--portal-color-surface-soft);
+  color: var(--portal-color-body);
 }
 
 .commercial-view__error {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--portal-color-danger);
+  background: #fff5f7;
 }
 
 h1 {
   margin: 0 0 12px;
   font-size: 32px;
-  color: #1e3a8a;
+  color: var(--portal-color-ink);
+  letter-spacing: -0.02em;
 }
 
 p {
   margin: 0;
-  color: #475569;
+  color: var(--portal-color-body);
 }
 </style>

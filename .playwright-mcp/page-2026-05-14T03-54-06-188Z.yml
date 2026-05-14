@@ -1,0 +1,139 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: NG
+      - generic [ref=e7]:
+        - generic [ref=e8]: 南京钢铁
+        - generic [ref=e9]: NANJING STEEL
+    - generic [ref=e10]:
+      - generic [ref=e11]: 计算资源
+      - link "商业软件" [ref=e12] [cursor=pointer]:
+        - /url: /portal/compute/commercial
+      - link "仿真APP" [ref=e13] [cursor=pointer]:
+        - /url: /portal/compute/simulation
+      - link "计算工具" [ref=e14] [cursor=pointer]:
+        - /url: /portal/compute/tools
+    - generic [ref=e15]:
+      - generic [ref=e16]: 我的
+      - link "个人空间" [ref=e17] [cursor=pointer]:
+        - /url: /portal/my/workspace
+      - link "App任务" [ref=e18] [cursor=pointer]:
+        - /url: /portal/my/tasks
+      - link "预约登记" [ref=e19] [cursor=pointer]:
+        - /url: /portal/my/bookings
+    - link "任务案例" [ref=e21] [cursor=pointer]:
+      - /url: /portal/cases
+    - generic [ref=e22]:
+      - generic [ref=e23]: SDK中心
+      - link "云平台SDK" [ref=e24] [cursor=pointer]:
+        - /url: /portal/sdk/cloud
+      - link "仿真AppSDK" [ref=e25] [cursor=pointer]:
+        - /url: /portal/sdk/simulation-app
+    - generic [ref=e26]:
+      - generic [ref=e27]: 系统管理
+      - link "容量池" [ref=e28] [cursor=pointer]:
+        - /url: /portal/admin/pools
+      - link "运行实例管理" [ref=e29] [cursor=pointer]:
+        - /url: /portal/admin/apps
+      - link "用户管理" [ref=e30] [cursor=pointer]:
+        - /url: /portal/admin/users
+      - link "权限管理" [ref=e31] [cursor=pointer]:
+        - /url: /portal/admin/acl
+      - link "任务调度" [ref=e32] [cursor=pointer]:
+        - /url: /portal/admin/queues
+      - link "资源监控" [ref=e33] [cursor=pointer]:
+        - /url: /portal/admin/monitor
+      - link "Worker状态" [ref=e34] [cursor=pointer]:
+        - /url: /portal/admin/workers
+      - link "统计看板" [ref=e35] [cursor=pointer]:
+        - /url: /portal/admin/analytics
+      - link "审计日志" [ref=e36] [cursor=pointer]:
+        - /url: /portal/admin/audit
+  - main [ref=e37]:
+    - generic [ref=e38]:
+      - generic [ref=e39]: 南钢-仿真
+      - generic [ref=e40]:
+        - link "结果中心" [ref=e41] [cursor=pointer]:
+          - /url: /portal/my/workspace
+        - generic [ref=e42]: 管理员
+        - button "退出" [ref=e44] [cursor=pointer]
+    - navigation [ref=e45]: 系统管理/运行实例管理
+    - generic [ref=e47]:
+      - generic [ref=e48]:
+        - generic [ref=e49]:
+          - heading "运行实例管理" [level=1] [ref=e50]
+          - paragraph [ref=e51]: 维护具体 RemoteApp/RDP 运行实例、脚本绑定和容量池归属。
+        - button "新建应用" [ref=e52] [cursor=pointer]
+      - table [ref=e54]:
+        - rowgroup [ref=e55]:
+          - row "ID 名称 形态 分类 主机 容量池 健康 状态 操作" [ref=e56]:
+            - columnheader "ID" [ref=e57]
+            - columnheader "名称" [ref=e58]
+            - columnheader "形态" [ref=e59]
+            - columnheader "分类" [ref=e60]
+            - columnheader "主机" [ref=e61]
+            - columnheader "容量池" [ref=e62]
+            - columnheader "健康" [ref=e63]
+            - columnheader "状态" [ref=e64]
+            - columnheader "操作" [ref=e65]
+        - rowgroup [ref=e66]:
+          - row "1 记事本 容量池成员 商业软件 192.168.56.6:3389 默认池-1-记事本 健康 启用 编辑 删除" [ref=e67]:
+            - cell "1" [ref=e68]
+            - cell "记事本" [ref=e69]
+            - cell "容量池成员" [ref=e70]
+            - cell "商业软件" [ref=e71]
+            - cell "192.168.56.6:3389" [ref=e72]
+            - cell "默认池-1-记事本" [ref=e73]
+            - cell "健康" [ref=e74]
+            - cell "启用" [ref=e75]
+            - cell "编辑 删除" [ref=e76]:
+              - button "编辑" [ref=e77] [cursor=pointer]
+              - button "删除" [ref=e78] [cursor=pointer]
+          - row "2 计算器 容量池成员 商业软件 192.168.56.6:3389 默认池-2-计算器 健康 启用 编辑 删除" [ref=e79]:
+            - cell "2" [ref=e80]
+            - cell "计算器" [ref=e81]
+            - cell "容量池成员" [ref=e82]
+            - cell "商业软件" [ref=e83]
+            - cell "192.168.56.6:3389" [ref=e84]
+            - cell "默认池-2-计算器" [ref=e85]
+            - cell "健康" [ref=e86]
+            - cell "启用" [ref=e87]
+            - cell "编辑 删除" [ref=e88]:
+              - button "编辑" [ref=e89] [cursor=pointer]
+              - button "删除" [ref=e90] [cursor=pointer]
+          - row "3 远程桌面 容量池成员 商业软件 192.168.56.6:3389 默认池-3-远程桌面 健康 启用 编辑 删除" [ref=e91]:
+            - cell "3" [ref=e92]
+            - cell "远程桌面" [ref=e93]
+            - cell "容量池成员" [ref=e94]
+            - cell "商业软件" [ref=e95]
+            - cell "192.168.56.6:3389" [ref=e96]
+            - cell "默认池-3-远程桌面" [ref=e97]
+            - cell "健康" [ref=e98]
+            - cell "启用" [ref=e99]
+            - cell "编辑 删除" [ref=e100]:
+              - button "编辑" [ref=e101] [cursor=pointer]
+              - button "删除" [ref=e102] [cursor=pointer]
+          - row "4 验证节点-桌面与脚本 容量池成员 商业软件 192.168.56.6:3389 验证池-桌面与脚本 健康 启用 编辑 删除" [ref=e103]:
+            - cell "4" [ref=e104]
+            - cell "验证节点-桌面与脚本" [ref=e105]
+            - cell "容量池成员" [ref=e106]
+            - cell "商业软件" [ref=e107]
+            - cell "192.168.56.6:3389" [ref=e108]
+            - cell "验证池-桌面与脚本" [ref=e109]
+            - cell "健康" [ref=e110]
+            - cell "启用" [ref=e111]
+            - cell "编辑 删除" [ref=e112]:
+              - button "编辑" [ref=e113] [cursor=pointer]
+              - button "删除" [ref=e114] [cursor=pointer]
+          - row "5 vscode 容量池成员 商业软件 192.168.56.6:3389 vscode 健康 启用 编辑 删除" [ref=e115]:
+            - cell "5" [ref=e116]
+            - cell "vscode" [ref=e117]
+            - cell "容量池成员" [ref=e118]
+            - cell "商业软件" [ref=e119]
+            - cell "192.168.56.6:3389" [ref=e120]
+            - cell "vscode" [ref=e121]
+            - cell "健康" [ref=e122]
+            - cell "启用" [ref=e123]
+            - cell "编辑 删除" [ref=e124]:
+              - button "编辑" [ref=e125] [cursor=pointer]
+              - button "删除" [ref=e126] [cursor=pointer]

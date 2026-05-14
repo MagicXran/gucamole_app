@@ -1,0 +1,12 @@
+- generic [ref=e2]:
+  - heading "RemoteApp 门户" [level=1] [ref=e3]
+  - paragraph [ref=e4]: 请登录以访问远程应用
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]: 用户名
+      - textbox "用户名" [ref=e8]: admin
+    - generic [ref=e9]:
+      - generic [ref=e10]: 密码
+      - textbox "密码" [ref=e11]: admin123
+    - generic [ref=e13]: 登录失败
+    - button "登录" [ref=e12] [cursor=pointer]

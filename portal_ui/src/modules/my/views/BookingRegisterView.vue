@@ -110,9 +110,10 @@ onMounted(async () => {
   display: grid;
   gap: 18px;
   padding: 24px;
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  background: var(--portal-color-surface);
+  border: 1px solid var(--portal-color-border);
+  border-radius: 24px;
+  box-shadow: var(--portal-shadow-soft);
 }
 
 .booking-view__header,
@@ -132,10 +133,10 @@ onMounted(async () => {
 .booking-card,
 .booking-view__detail,
 .booking-view__empty {
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 18px;
   padding: 16px;
-  background: #f8fafc;
+  background: var(--portal-color-page);
 }
 
 .booking-card {
@@ -151,35 +152,49 @@ dl {
 }
 
 dt {
-  color: #64748b;
+  color: var(--portal-color-muted);
   font-size: 12px;
 }
 
 dd {
   margin: 4px 0 0;
-  color: #0f172a;
+  color: var(--portal-color-ink);
 }
 
 button {
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  background: #fff;
-  color: #1e3a8a;
-  padding: 8px 12px;
+  min-height: 40px;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 999px;
+  background: var(--portal-color-surface);
+  color: var(--portal-color-ink);
+  padding: 0 14px;
   cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
 }
 
 .booking-view__header button,
 .booking-card button:last-child {
-  background: #1e3a8a;
+  background: var(--portal-color-primary);
   color: #fff;
-  border-color: #1e3a8a;
+  border-color: var(--portal-color-primary);
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--portal-color-primary);
+  color: var(--portal-color-primary);
+}
+
+.booking-view__header button:hover,
+.booking-card button:last-child:hover {
+  background: var(--portal-color-primary-strong);
+  color: #fff;
 }
 
 h1 {
   margin: 0 0 12px;
   font-size: 32px;
-  color: #1e3a8a;
+  color: var(--portal-color-ink);
+  letter-spacing: -0.02em;
 }
 
 h2,
@@ -188,10 +203,13 @@ p {
 }
 
 p {
-  color: #475569;
+  color: var(--portal-color-body);
 }
 
 .booking-view__error {
-  color: #b91c1c;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #fff5f7;
+  color: var(--portal-color-danger);
 }
 </style>

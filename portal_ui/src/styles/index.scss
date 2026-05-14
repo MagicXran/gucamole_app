@@ -1,7 +1,24 @@
 :root {
-  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
-  color: #111;
-  background-color: #f4f6fb;
+  --portal-color-primary: #0052ff;
+  --portal-color-primary-strong: #003ecc;
+  --portal-color-ink: #0a0b0d;
+  --portal-color-body: #5b616e;
+  --portal-color-muted: #7c828a;
+  --portal-color-page: #f7f7f7;
+  --portal-color-surface: #ffffff;
+  --portal-color-surface-soft: #eef0f3;
+  --portal-color-border: #dee1e6;
+  --portal-color-sidebar: #0a0b0d;
+  --portal-color-sidebar-hover: #16181c;
+  --portal-color-success: #05b169;
+  --portal-color-warning: #9a6700;
+  --portal-color-warning-surface: rgba(244, 176, 0, 0.12);
+  --portal-color-danger: #cf202f;
+  --portal-color-danger-surface: rgba(207, 32, 47, 0.1);
+  --portal-shadow-soft: 0 10px 24px rgba(10, 11, 13, 0.06);
+  font-family: 'Segoe UI Variable Text', 'Aptos', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  color: var(--portal-color-ink);
+  background-color: var(--portal-color-page);
 }
 
 * {
@@ -10,9 +27,17 @@
 
 body {
   margin: 0;
-  background-color: #f4f6fb;
+  background-color: var(--portal-color-page);
+  color: var(--portal-color-ink);
 }
 
 #app {
   min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }

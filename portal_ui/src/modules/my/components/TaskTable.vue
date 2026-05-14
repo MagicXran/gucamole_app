@@ -106,19 +106,34 @@ const cancellableStatuses = ['queued', 'submitted', 'assigned', 'preparing', 'ru
 .task-table__filters label {
   display: grid;
   gap: 6px;
-  color: #334155;
+  color: var(--portal-color-ink);
+  font-size: 14px;
 }
 
 .task-table__table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 20px;
+  overflow: hidden;
+  background: var(--portal-color-surface);
+  box-shadow: var(--portal-shadow-soft);
 }
 
 .task-table__table th,
 .task-table__table td {
   padding: 12px;
   text-align: left;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--portal-color-border);
+}
+
+.task-table__table th {
+  background: var(--portal-color-page);
+  color: var(--portal-color-muted);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .task-table__actions {
@@ -129,22 +144,47 @@ const cancellableStatuses = ['queued', 'submitted', 'assigned', 'preparing', 'ru
 .task-table__empty,
 .task-table__error {
   padding: 24px;
-  border-radius: 14px;
-  background: #f8fafc;
-  color: #64748b;
+  border-radius: 18px;
+  background: var(--portal-color-surface-soft);
+  color: var(--portal-color-body);
 }
 
 .task-table__error {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: #fff5f7;
+  color: var(--portal-color-danger);
 }
 
 button,
 select,
 input {
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  padding: 8px 12px;
-  background: #fff;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 0 14px;
+  background: var(--portal-color-surface);
+  color: var(--portal-color-ink);
+}
+
+input,
+select {
+  background: var(--portal-color-surface-soft);
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover,
+select:hover,
+input:hover,
+input:focus,
+select:focus {
+  border-color: var(--portal-color-primary);
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  background: var(--portal-color-surface);
 }
 </style>

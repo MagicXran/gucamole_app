@@ -2,9 +2,10 @@
   display: grid;
   gap: 18px;
   padding: 24px;
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  background: var(--portal-color-surface);
+  border: 1px solid var(--portal-color-border);
+  border-radius: 24px;
+  box-shadow: var(--portal-shadow-soft);
 }
 
 .admin-ops-view__header {
@@ -28,9 +29,9 @@
 .admin-ops-view__card,
 .admin-ops-view__state {
   padding: 16px;
-  border: 1px solid #dbe4f0;
-  border-radius: 12px;
-  background: #f8fafc;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 18px;
+  background: var(--portal-color-page);
 }
 
 .admin-ops-view__card {
@@ -40,26 +41,47 @@
 }
 
 .admin-ops-view__state--error {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: #fff5f7;
+  color: var(--portal-color-danger);
 }
 
 .admin-ops-view__table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 20px;
+  background: var(--portal-color-surface);
 }
 
 .admin-ops-view__table th,
 .admin-ops-view__table td {
   padding: 10px 12px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--portal-color-border);
   text-align: left;
 }
 
+.admin-ops-view__table th {
+  background: var(--portal-color-page);
+  color: var(--portal-color-muted);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 button {
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  background: #fff;
-  padding: 8px 10px;
+  min-height: 40px;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 999px;
+  background: var(--portal-color-surface);
+  color: var(--portal-color-ink);
+  padding: 0 14px;
   cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+button:hover {
+  border-color: var(--portal-color-primary);
+  color: var(--portal-color-primary);
 }

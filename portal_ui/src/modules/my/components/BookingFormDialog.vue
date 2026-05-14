@@ -121,17 +121,19 @@ watch(
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(15, 23, 42, 0.38);
+  background: rgba(10, 11, 13, 0.48);
+  backdrop-filter: blur(6px);
 }
 
 .booking-dialog__panel {
   width: min(560px, 100%);
   display: grid;
   gap: 16px;
-  padding: 22px;
-  border-radius: 18px;
-  background: #fff;
-  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  padding: 24px;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 24px;
+  background: var(--portal-color-surface);
+  box-shadow: 0 28px 90px rgba(10, 11, 13, 0.22);
 }
 
 .booking-dialog__header,
@@ -150,34 +152,56 @@ watch(
 label {
   display: grid;
   gap: 8px;
-  color: #334155;
+  color: var(--portal-color-ink);
   font-weight: 600;
+  font-size: 14px;
 }
 
 input,
 textarea {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  padding: 10px 12px;
-  color: #0f172a;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: var(--portal-color-surface-soft);
+  color: var(--portal-color-ink);
   font: inherit;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(0, 82, 255, 0.2);
+  background: var(--portal-color-surface);
 }
 
 button {
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  background: #fff;
-  color: #1e3a8a;
-  padding: 8px 12px;
+  min-height: 42px;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 999px;
+  background: var(--portal-color-surface);
+  color: var(--portal-color-ink);
+  padding: 0 16px;
   cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
 }
 
 button[type='submit'] {
-  background: #1e3a8a;
+  background: var(--portal-color-primary);
   color: #fff;
-  border-color: #1e3a8a;
+  border-color: var(--portal-color-primary);
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--portal-color-primary);
+  color: var(--portal-color-primary);
+}
+
+button[type='submit']:hover:not(:disabled) {
+  background: var(--portal-color-primary-strong);
+  color: #fff;
 }
 
 button:disabled {
@@ -191,10 +215,13 @@ p {
 }
 
 p {
-  color: #64748b;
+  color: var(--portal-color-body);
 }
 
 .booking-dialog__error {
-  color: #b91c1c;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #fff5f7;
+  color: var(--portal-color-danger);
 }
 </style>

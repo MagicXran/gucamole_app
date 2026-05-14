@@ -56,7 +56,7 @@ function renderWindow(popup: Window, title: string, body: string) {
   popup.document.write(
     '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">' +
       `<title>${escapeHtml(title)}</title>` +
-      '<style>*{margin:0;padding:0;box-sizing:border-box}body{display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;background:#0f172a;color:#fff;padding:1.5rem}.box{max-width:420px;background:rgba(255,255,255,.08);padding:1.5rem;border-radius:18px;text-align:center;backdrop-filter:blur(10px)}.spinner{width:40px;height:40px;margin:0 auto 1rem;border:4px solid rgba(255,255,255,0.2);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.meta{margin-top:.8rem;font-size:.92rem;color:rgba(255,255,255,.76)}</style></head><body>' +
+      '<style>*{margin:0;padding:0;box-sizing:border-box}body{display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:"Segoe UI Variable Text","Aptos","Segoe UI","Microsoft YaHei",sans-serif;background:radial-gradient(circle at top,#1b2230 0,#0a0b0d 58%);color:#fff;padding:24px}.box{width:min(460px,100%);display:grid;gap:14px;padding:28px;border:1px solid rgba(255,255,255,.08);border-radius:28px;background:rgba(22,24,28,.92);box-shadow:0 28px 90px rgba(0,0,0,.34);text-align:left;backdrop-filter:blur(12px)}.eyebrow{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#a8acb3}.headline{font-size:28px;line-height:1.08;font-weight:600}.meta{font-size:15px;line-height:1.65;color:#c4c9d1}.pill{display:inline-flex;align-items:center;min-height:32px;padding:4px 12px;border-radius:999px;background:rgba(0,82,255,.16);color:#8eb0ff;font-size:12px;font-weight:700;width:fit-content}.mono{font-family:Consolas,"JetBrains Mono",monospace;font-size:15px;color:#fff}.spinner{width:42px;height:42px;border:4px solid rgba(255,255,255,.14);border-top-color:#0052ff;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.error{color:#ffb4bd}.divider{height:1px;background:rgba(255,255,255,.08);margin:2px 0 4px}</style></head><body>' +
       `<div class="box">${body}</div>` +
       '</body></html>',
   )
@@ -67,7 +67,7 @@ function renderLoadingWindow(popup: Window, appName: string, message: string) {
   renderWindow(
     popup,
     `${appName} - 启动中`,
-    `<div class="spinner"></div><h1 style="font-size:1.15rem">${escapeHtml(appName)}</h1><p class="meta">${escapeHtml(message)}</p>`,
+    `<div class="spinner"></div><span class="eyebrow">Remote Launch</span><h1 class="headline">${escapeHtml(appName)}</h1><p class="meta">${escapeHtml(message)}</p><div class="pill">正在接入资源池</div>`,
   )
 }
 
@@ -81,7 +81,7 @@ function renderQueueWindow(popup: Window, appName: string, status: string, posit
   renderWindow(
     popup,
     `${appName} - 排队中`,
-    `<h1 style="font-size:1.15rem">${escapeHtml(appName)}</h1><p class="meta">${escapeHtml(message)}</p><p class="meta">当前位置：${position > 0 ? `#${position}` : '-'}</p>`,
+    `<span class="eyebrow">Queue Status</span><h1 class="headline">${escapeHtml(appName)}</h1><p class="meta">${escapeHtml(message)}</p><div class="divider"></div><span class="pill">当前位置</span><p class="mono">${position > 0 ? `#${position}` : '-'}</p>`,
   )
 }
 
@@ -89,7 +89,7 @@ function renderTerminalQueueWindow(popup: Window, appName: string, message: stri
   renderWindow(
     popup,
     `${appName} - 队列结束`,
-    `<h1 style="font-size:1.15rem">${escapeHtml(appName)}</h1><p class="meta">${escapeHtml(message)}</p>`,
+    `<span class="eyebrow">Queue Result</span><h1 class="headline">${escapeHtml(appName)}</h1><p class="meta">${escapeHtml(message)}</p>`,
   )
 }
 
@@ -97,7 +97,7 @@ function renderErrorWindow(popup: Window, appName: string, message: string) {
   renderWindow(
     popup,
     `${appName} - 启动失败`,
-    `<h1 style="font-size:1.15rem;color:#fca5a5">启动失败</h1><p class="meta">${escapeHtml(message)}</p>`,
+    `<span class="eyebrow error">Launch Failed</span><h1 class="headline error">启动失败</h1><p class="meta">${escapeHtml(message)}</p>`,
   )
 }
 

@@ -32,12 +32,15 @@ function logout() {
   align-items: center;
   justify-content: space-between;
   padding: 16px 24px;
-  background: #28539c;
-  color: #fff;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--portal-color-ink);
+  border-bottom: 1px solid var(--portal-color-border);
+  backdrop-filter: blur(10px);
 }
 
 .topbar__title {
   font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
 .topbar__actions {
@@ -47,16 +50,36 @@ function logout() {
 }
 
 .topbar__link {
-  color: #fff;
+  color: var(--portal-color-body);
   text-decoration: none;
+  font-weight: 500;
+}
+
+.topbar__link:hover {
+  color: var(--portal-color-primary);
+}
+
+.topbar__user {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--portal-color-surface-soft);
+  color: var(--portal-color-ink);
+  font-size: 14px;
 }
 
 .topbar__logout {
-  padding: 6px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--portal-color-border);
   border-radius: 999px;
-  background: transparent;
-  color: #fff;
+  background: var(--portal-color-surface);
+  color: var(--portal-color-ink);
   cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.topbar__logout:hover {
+  border-color: var(--portal-color-primary);
+  color: var(--portal-color-primary);
 }
 </style>

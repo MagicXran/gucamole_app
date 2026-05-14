@@ -498,7 +498,8 @@ function handleSubmit() {
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(10, 11, 13, 0.52);
+  backdrop-filter: blur(8px);
   z-index: 20;
 }
 
@@ -509,8 +510,10 @@ function handleSubmit() {
   display: grid;
   gap: 18px;
   padding: 24px;
-  border-radius: 18px;
-  background: #fff;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 24px;
+  background: var(--portal-color-surface);
+  box-shadow: 0 28px 90px rgba(10, 11, 13, 0.24);
 }
 
 .admin-app-dialog__header,
@@ -530,7 +533,7 @@ function handleSubmit() {
 
 .admin-app-dialog__header p,
 .admin-app-dialog__hint {
-  color: #64748b;
+  color: var(--portal-color-body);
 }
 
 .admin-app-dialog__section,
@@ -538,9 +541,9 @@ function handleSubmit() {
   display: grid;
   gap: 12px;
   padding: 16px;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  background: #f8fafc;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 18px;
+  background: var(--portal-color-page);
 }
 
 .admin-app-dialog__details summary {
@@ -558,8 +561,8 @@ function handleSubmit() {
   display: grid;
   gap: 10px;
   padding: 12px;
-  border-radius: 12px;
-  background: #fff;
+  border-radius: 16px;
+  background: var(--portal-color-surface);
 }
 
 .admin-app-dialog__grid {
@@ -586,35 +589,52 @@ function handleSubmit() {
 
 .admin-app-dialog__warning {
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: 14px;
   background: #fff7ed;
-  color: #9a3412;
+  color: var(--portal-color-warning);
 }
 
 .admin-app-dialog__preview {
   padding: 10px 12px;
-  border-radius: 10px;
-  background: #eef2ff;
-  color: #3730a3;
+  border-radius: 14px;
+  background: rgba(0, 82, 255, 0.08);
+  color: var(--portal-color-primary);
 }
 
 input,
 select,
 button {
-  border-radius: 10px;
+  border-radius: 14px;
 }
 
 input,
 select {
-  border: 1px solid #cbd5e1;
-  padding: 9px 10px;
+  border: 1px solid transparent;
+  padding: 10px 12px;
+  background: var(--portal-color-surface-soft);
+  color: var(--portal-color-ink);
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: rgba(0, 82, 255, 0.2);
+  background: var(--portal-color-surface);
 }
 
 button {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  padding: 9px 12px;
+  min-height: 42px;
+  border: 1px solid var(--portal-color-border);
+  background: var(--portal-color-surface);
+  color: var(--portal-color-ink);
+  padding: 0 16px;
   cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--portal-color-primary);
+  color: var(--portal-color-primary);
 }
 
 @media (max-width: 760px) {

@@ -242,9 +242,10 @@ watch(
   display: grid;
   gap: 18px;
   padding: 24px;
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  background: var(--portal-color-surface);
+  border: 1px solid var(--portal-color-border);
+  border-radius: 24px;
+  box-shadow: var(--portal-shadow-soft);
 }
 
 .workspace-view__header {
@@ -259,25 +260,25 @@ watch(
   gap: 8px;
   align-items: center;
   padding: 12px 14px;
-  border-radius: 14px;
-  background: #eff6ff;
-  color: #1e3a8a;
+  border-radius: 18px;
+  background: rgba(0, 82, 255, 0.08);
+  color: var(--portal-color-primary);
 }
 
 .workspace-view__path {
   padding: 12px 14px;
-  border-radius: 12px;
-  background: #f8fafc;
-  color: #475569;
+  border-radius: 16px;
+  background: var(--portal-color-surface-soft);
+  color: var(--portal-color-body);
 }
 
 .workspace-upload-panel {
   display: grid;
   gap: 12px;
   padding: 14px;
-  border: 1px solid #bfdbfe;
-  border-radius: 16px;
-  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+  border: 1px solid var(--portal-color-border);
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(0, 82, 255, 0.05) 0%, var(--portal-color-page) 100%);
 }
 
 .workspace-upload-panel__header,
@@ -290,13 +291,13 @@ watch(
 }
 
 .workspace-upload-panel__header {
-  color: #1e3a8a;
+  color: var(--portal-color-primary);
 }
 
 .workspace-upload-panel__header span,
 .workspace-upload-card__meta,
 .workspace-upload-card__topline span {
-  color: #64748b;
+  color: var(--portal-color-body);
   font-size: 13px;
 }
 
@@ -304,38 +305,38 @@ watch(
   display: grid;
   gap: 10px;
   padding: 12px;
-  border: 1px solid #dbeafe;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 8px 20px rgba(30, 58, 138, 0.08);
+  border: 1px solid var(--portal-color-border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 24px rgba(10, 11, 13, 0.06);
 }
 
 .workspace-upload-card--done {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
+  border-color: rgba(5, 177, 105, 0.24);
+  background: rgba(5, 177, 105, 0.06);
 }
 
 .workspace-upload-card--error {
-  border-color: #fecaca;
-  background: #fef2f2;
+  border-color: rgba(207, 32, 47, 0.18);
+  background: #fff5f7;
 }
 
 .workspace-upload-card--error .workspace-upload-card__topline span {
-  color: #b91c1c;
+  color: var(--portal-color-danger);
 }
 
 .workspace-upload-card__topline strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #0f172a;
+  color: var(--portal-color-ink);
 }
 
 .workspace-upload-card__bar {
   height: 10px;
   overflow: hidden;
   border-radius: 999px;
-  background: #dbeafe;
+  background: var(--portal-color-surface-soft);
 }
 
 .workspace-upload-card__fill {

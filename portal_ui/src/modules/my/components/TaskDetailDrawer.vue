@@ -116,9 +116,11 @@ function workspaceHref(artifact: TaskArtifactItem) {
 .task-detail-drawer {
   display: grid;
   gap: 16px;
-  padding: 20px;
-  border-radius: 16px;
-  background: #f8fafc;
+  padding: 22px;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 24px;
+  background: var(--portal-color-surface);
+  box-shadow: var(--portal-shadow-soft);
 }
 
 .task-detail-drawer__header {
@@ -131,6 +133,9 @@ function workspaceHref(artifact: TaskArtifactItem) {
 .task-detail-drawer__section {
   display: grid;
   gap: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  background: var(--portal-color-page);
 }
 
 .task-detail-drawer__section dl {
@@ -143,27 +148,66 @@ function workspaceHref(artifact: TaskArtifactItem) {
   gap: 4px;
 }
 
+.task-detail-drawer__section dt {
+  color: var(--portal-color-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.task-detail-drawer__section dd {
+  margin: 0;
+  color: var(--portal-color-ink);
+}
+
 .task-detail-drawer__list {
   display: grid;
   gap: 8px;
-  padding-left: 18px;
+  padding-left: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.task-detail-drawer__list li {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 16px;
+  background: var(--portal-color-surface);
 }
 
 .task-detail-drawer__empty,
 .task-detail-drawer__error {
   padding: 16px;
-  border-radius: 12px;
-  background: #fff;
-  color: #64748b;
+  border-radius: 16px;
+  background: var(--portal-color-surface-soft);
+  color: var(--portal-color-body);
 }
 
 .task-detail-drawer__error {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: #fff5f7;
+  color: var(--portal-color-danger);
 }
 
 button,
 a {
   width: fit-content;
+  min-height: 40px;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 999px;
+  background: var(--portal-color-surface);
+  color: var(--portal-color-ink);
+  padding: 0 14px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+button:hover,
+a:hover {
+  border-color: var(--portal-color-primary);
+  color: var(--portal-color-primary);
 }
 </style>

@@ -67,9 +67,10 @@ onMounted(async () => {
   display: grid;
   gap: 18px;
   padding: 24px;
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  background: var(--portal-color-surface);
+  border: 1px solid var(--portal-color-border);
+  border-radius: 24px;
+  box-shadow: var(--portal-shadow-soft);
 }
 
 .app-tasks-view__header {
@@ -82,20 +83,27 @@ onMounted(async () => {
 h1 {
   margin: 0 0 12px;
   font-size: 32px;
-  color: #1e3a8a;
+  color: var(--portal-color-ink);
+  letter-spacing: -0.02em;
 }
 
 p {
   margin: 0;
-  color: #475569;
+  color: var(--portal-color-body);
 }
 
 button {
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  background: #fff;
-  color: #1e3a8a;
-  padding: 8px 12px;
+  min-height: 42px;
+  border: 1px solid var(--portal-color-border);
+  border-radius: 999px;
+  background: var(--portal-color-surface);
+  color: var(--portal-color-ink);
+  padding: 0 16px;
   cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--portal-color-primary);
+  color: var(--portal-color-primary);
 }
 </style>

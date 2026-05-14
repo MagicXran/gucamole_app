@@ -79,11 +79,18 @@ async function handleLaunch() {
   display: grid;
   gap: 18px;
   padding: 20px;
-  border: 1px solid #dbe3ef;
-  border-radius: 18px;
-  background: #fff;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  border: 1px solid var(--portal-color-border);
+  border-radius: 24px;
+  background: var(--portal-color-surface);
+  box-shadow: var(--portal-shadow-soft);
   cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.app-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(0, 82, 255, 0.18);
+  box-shadow: 0 16px 36px rgba(10, 11, 13, 0.08);
 }
 
 .app-card__header {
@@ -95,58 +102,60 @@ async function handleLaunch() {
 h2 {
   margin: 0 0 8px;
   font-size: 20px;
-  color: #0f172a;
+  color: var(--portal-color-ink);
 }
 
 p {
   margin: 0;
-  color: #64748b;
+  color: var(--portal-color-body);
 }
 
 .app-card__status {
   align-self: start;
-  padding: 4px 10px;
+  min-height: 30px;
+  padding: 4px 12px;
   border-radius: 999px;
   font-size: 13px;
+  font-weight: 600;
 }
 
 .app-card__status--success {
-  background: #dcfce7;
-  color: #166534;
+  background: rgba(5, 177, 105, 0.1);
+  color: var(--portal-color-success);
 }
 
 .app-card__status--warning {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--portal-color-warning-surface);
+  color: var(--portal-color-warning);
 }
 
 .app-card__status--danger {
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--portal-color-danger-surface);
+  color: var(--portal-color-danger);
 }
 
 .app-card__status--info,
 .app-card__status--neutral {
-  background: #e2e8f0;
-  color: #334155;
+  background: var(--portal-color-surface-soft);
+  color: #38537a;
 }
 
 .app-card__meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  color: #475569;
+  color: var(--portal-color-body);
   font-size: 14px;
 }
 
 .app-card__meta span {
-  padding: 4px 9px;
+  padding: 5px 10px;
   border-radius: 999px;
-  background: #f1f5f9;
+  background: var(--portal-color-surface-soft);
 }
 
 .app-card__link {
-  color: #1d4ed8;
+  color: var(--portal-color-primary);
   text-decoration: none;
   font-weight: 600;
 }
@@ -159,13 +168,13 @@ p {
 }
 
 .app-card__launching {
-  color: #475569;
+  color: var(--portal-color-body);
   font-size: 14px;
 }
 
 .app-card__error {
   margin: 0;
-  color: #b91c1c;
+  color: var(--portal-color-danger);
   font-size: 14px;
 }
 </style>

@@ -34,6 +34,23 @@ export type UploadChunkResponse = {
   complete: boolean
 }
 
+export type WorkspaceUploadStatus = 'preparing' | 'uploading' | 'done' | 'error'
+
+export type WorkspaceUploadTask = {
+  id: string
+  uploadId: string
+  name: string
+  size: number
+  uploadedBytes: number
+  speedBytesPerSecond: number
+  status: WorkspaceUploadStatus
+  message: string
+  startedAt: number
+  updatedAt: number
+  lastProgressAt: number
+  lastProgressBytes: number
+}
+
 export type MoveEntryPayload = {
   sourcePath: string
   targetPath: string

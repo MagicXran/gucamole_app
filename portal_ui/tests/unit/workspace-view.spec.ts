@@ -44,7 +44,7 @@ const FileBrowserStub = defineComponent({
     const uploadFile = {
       name: 'upload.txt',
       size: 7,
-      slice: (start: number, end: number) => new Blob(['payload'].slice(start, end)),
+      slice: (start: number, end: number) => new Blob(['payload'.slice(start, end)]),
     } as File
 
     return {
@@ -55,6 +55,7 @@ const FileBrowserStub = defineComponent({
     <div>
       <div data-testid="browser-path">{{ currentPath }}</div>
       <div data-testid="browser-count">{{ items.length }}</div>
+      <div data-testid="browser-loading">{{ loading ? 'loading' : 'ready' }}</div>
       <div data-testid="browser-error">{{ errorMessage }}</div>
       <button data-testid="refresh" @click="$emit('refresh')" />
       <button data-testid="mkdir" @click="$emit('create-directory', 'reports')" />
@@ -134,15 +135,14 @@ describe('WorkspaceView', () => {
       data: { upload_id: 'upload-a', offset: 0, chunk_size: 4 },
       headers: {},
     } as never)
-    apiMocks.uploadChunk
-      .mockResolvedValueOnce({
-        data: { offset: 4, complete: false },
+    apiMocks.uploadChunk.mockImplementation((_uploadId, offset: number, chunk: Blob, onProgress?: (event: { loaded: number }) => void) => {
+      onProgress?.({ loaded: chunk.size })
+      const nextOffset = offset + chunk.size
+      return Promise.resolve({
+        data: { offset: nextOffset, complete: nextOffset >= 7 },
         headers: {},
       } as never)
-      .mockResolvedValueOnce({
-        data: { offset: 7, complete: true },
-        headers: {},
-      } as never)
+    })
     apiMocks.cancelUpload.mockResolvedValue({ data: { message: '已取消' }, headers: {} } as never)
     vi.stubGlobal('open', vi.fn())
   })
@@ -231,6 +231,7 @@ describe('WorkspaceView', () => {
     await flushPromises()
     expect(apiMocks.uploadInit).toHaveBeenCalledWith('workspace/upload.txt', 7)
     expect(apiMocks.uploadChunk).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-testid="workspace-upload-panel"]').text()).toContain('上传完成')
 
     await wrapper.get('[data-testid="navigate"]').trigger('click')
     await flushPromises()
@@ -241,6 +242,56 @@ describe('WorkspaceView', () => {
     await flushPromises()
     expect(apiMocks.listFiles).toHaveBeenLastCalledWith('nested/output/cases')
     expect(router.currentRoute.value.query.path).toBe('nested/output/cases')
+  })
+
+  it('renders in-flight upload progress without hiding the file browser', async () => {
+    let resolveFirstChunk!: (value: unknown) => void
+    apiMocks.uploadChunk
+      .mockImplementationOnce((_uploadId, offset: number, chunk: Blob, onProgress?: (event: { loaded: number }) => void) => {
+        onProgress?.({ loaded: 2 })
+        return new Promise((resolve) => {
+          resolveFirstChunk = resolve
+        })
+      })
+      .mockImplementationOnce((_uploadId, offset: number, chunk: Blob, onProgress?: (event: { loaded: number }) => void) => {
+        onProgress?.({ loaded: chunk.size })
+        const nextOffset = offset + chunk.size
+        return Promise.resolve({
+          data: { offset: nextOffset, complete: true },
+          headers: {},
+        } as never)
+      })
+
+    const router = buildRouter()
+    await router.push('/my/workspace?path=workspace')
+    await router.isReady()
+
+    const wrapper = mount(WorkspaceView, {
+      global: {
+        plugins: [createPinia(), router],
+        stubs: {
+          FileBrowser: FileBrowserStub,
+        },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="upload"]').trigger('click')
+    await flushPromises()
+
+    const panel = wrapper.get('[data-testid="workspace-upload-panel"]')
+    expect(panel.text()).toContain('上传队列')
+    expect(panel.text()).toContain('29%')
+    expect(panel.text()).toContain('2 B / 7 B')
+    expect(wrapper.get('[data-testid="browser-loading"]').text()).toBe('ready')
+
+    resolveFirstChunk({
+      data: { offset: 4, complete: false },
+      headers: {},
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="workspace-upload-panel"]').text()).toContain('上传完成')
   })
 
   it('shows operation errors instead of dropping rejected actions into the console', async () => {

@@ -303,6 +303,14 @@ class UserAdminResponse(BaseModel):
     is_active: bool
 
 
+class UserAdminListResponse(UserAdminResponse):
+    """管理端用户列表详情"""
+    quota_bytes: Optional[int] = None
+    used_bytes: int = 0
+    used_display: str = "0 B"
+    quota_display: str = ""
+
+
 class AclUpdateRequest(BaseModel):
     """权限覆盖更新"""
     app_ids: List[int]

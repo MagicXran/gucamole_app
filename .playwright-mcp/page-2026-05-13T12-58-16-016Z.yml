@@ -1,0 +1,11 @@
+- iframe [active] [ref=e2]:
+  - generic [active]:
+    - generic:
+      - generic [ref=f1e23]:
+        - heading [level=2]
+        - button "上传文件" [ref=f1e24]
+        - button "返回" [ref=f1e25]
+      - generic [ref=f1e29]:
+        - list
+    - textbox [ref=f1e30]
+    - textbox

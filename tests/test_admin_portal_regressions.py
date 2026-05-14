@@ -30,6 +30,18 @@ def _load_admin_router_module():
                 return {"id": 1} if fetch_one else [{"id": 1}]
             if "SELECT 1 FROM portal_user WHERE username = %(u)s" in query:
                 return None if fetch_one else []
+            if "SELECT id, username, display_name, department, is_admin, is_active, quota_bytes FROM portal_user ORDER BY id" in query:
+                return [
+                    {
+                        "id": 5,
+                        "username": "zhangsan",
+                        "display_name": "张三",
+                        "department": "技术中心",
+                        "is_admin": 0,
+                        "is_active": 1,
+                        "quota_bytes": None,
+                    }
+                ]
             if "SELECT * FROM remote_app WHERE name = %(name)s" in query:
                 return {
                     "id": 9,
@@ -128,6 +140,12 @@ def _load_admin_router_module():
         }
     )
     sys.modules["backend.script_profiles"] = fake_script_profiles
+
+    fake_drive_quota = types.ModuleType("backend.drive_quota")
+    fake_drive_quota.DEFAULT_QUOTA_BYTES = 10 * 1024 * 1024 * 1024
+    fake_drive_quota._get_usage_sync = lambda user_id: 1024
+    fake_drive_quota._format_bytes = lambda bytes_value: f"{bytes_value} B"
+    sys.modules["backend.drive_quota"] = fake_drive_quota
 
     sys.modules.pop("backend.admin_router", None)
     admin_module = importlib.import_module("backend.admin_router")
@@ -233,6 +251,18 @@ def test_admin_create_and_update_user_persist_department():
     update_req = admin_module.UserUpdateRequest(display_name="张三-新", department="数智中心")
     admin_module.update_user(user_id=5, req=update_req, request=request, admin=admin)
     assert fake_db.user_update_params["department"] == "数智中心"
+
+
+def test_admin_list_users_returns_boolean_flags_with_quota_fields():
+    admin_module, _fake_db = _load_admin_router_module()
+
+    users = admin_module.list_users(admin=admin_module.UserInfo(user_id=1, username="admin", display_name="管理员", is_admin=True))
+
+    assert users[0]["is_admin"] is False
+    assert users[0]["is_active"] is True
+    assert users[0]["used_bytes"] == 1024
+    assert users[0]["used_display"] == "1024 B"
+    assert users[0]["quota_display"] == f"{10 * 1024 * 1024 * 1024} B"
 
 
 def test_admin_pool_router_exposes_pool_attachment_management_routes():

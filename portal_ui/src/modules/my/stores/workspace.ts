@@ -12,7 +12,12 @@ import {
   uploadChunk,
   uploadInit,
 } from '@/modules/my/services/api/files'
-import type { MoveEntryPayload, WorkspaceFileItem, WorkspaceSpaceInfo } from '@/modules/my/types/files'
+import type {
+  MoveEntryPayload,
+  WorkspaceFileItem,
+  WorkspaceSpaceInfo,
+  WorkspaceUploadTask,
+} from '@/modules/my/types/files'
 
 function normalizePath(path: string) {
   return path.replace(/\\/g, '/').trim().replace(/^\/+/, '').replace(/\/+$/, '')
@@ -44,10 +49,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const quota = ref<WorkspaceSpaceInfo | null>(null)
   const quotaErrorMessage = ref('')
   const loading = ref(false)
-  const uploading = ref(false)
   const errorMessage = ref('')
+  const uploadTasks = ref<WorkspaceUploadTask[]>([])
 
   const isRoot = computed(() => !currentPath.value)
+  const uploading = computed(() =>
+    uploadTasks.value.some((task) => task.status === 'preparing' || task.status === 'uploading'),
+  )
 
   function toCurrentPath(nameOrPath: string) {
     const normalized = normalizePath(nameOrPath)
@@ -126,7 +134,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return
     }
 
-    uploading.value = true
     errorMessage.value = ''
 
     try {
@@ -136,8 +143,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       await refresh()
     } catch (error) {
       errorMessage.value = resolveErrorMessage(error)
-    } finally {
-      uploading.value = false
     }
   }
 
@@ -153,25 +158,112 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function uploadOneFile(file: File) {
     const targetPath = joinPath(currentPath.value, file.name)
-    const initResponse = await uploadInit(targetPath, file.size)
-    const uploadId = initResponse.data.upload_id
-    const chunkSize = Math.max(initResponse.data.chunk_size, 1)
-    let offset = initResponse.data.offset
+    const task = createUploadTask(file)
+    let uploadId = ''
 
     try {
+      const initResponse = await uploadInit(targetPath, file.size)
+      uploadId = initResponse.data.upload_id
+      const chunkSize = Math.max(initResponse.data.chunk_size, 1)
+      let offset = initResponse.data.offset
+      updateUploadTask(task.id, {
+        uploadId,
+        uploadedBytes: offset,
+        lastProgressBytes: offset,
+        status: 'uploading',
+        message: '正在上传',
+      })
+
       while (offset < file.size) {
         const nextChunk = file.slice(offset, Math.min(offset + chunkSize, file.size))
-        const chunkResponse = await uploadChunk(uploadId, offset, nextChunk)
+        const chunkOffset = offset
+        const chunkResponse = await uploadChunk(uploadId, offset, nextChunk, (event) => {
+          const loaded = Math.min(nextChunk.size, Math.max(event.loaded || 0, 0))
+          updateUploadProgress(task.id, chunkOffset + loaded, file.size)
+        })
         offset = chunkResponse.data.offset
+        updateUploadProgress(task.id, offset, file.size, true)
 
         if (chunkResponse.data.complete) {
           break
         }
       }
+      updateUploadTask(task.id, {
+        uploadedBytes: file.size,
+        status: 'done',
+        message: '上传完成',
+        speedBytesPerSecond: 0,
+      })
+      window.setTimeout(() => removeUploadTask(task.id), 8000)
     } catch (error) {
-      await cancelUpload(uploadId)
+      updateUploadTask(task.id, {
+        status: 'error',
+        message: resolveErrorMessage(error),
+        speedBytesPerSecond: 0,
+      })
+      if (uploadId) {
+        await cancelUpload(uploadId).catch(() => undefined)
+      }
       throw error
     }
+  }
+
+  function createUploadTask(file: File) {
+    const now = Date.now()
+    const task: WorkspaceUploadTask = {
+      id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
+      uploadId: '',
+      name: file.name,
+      size: file.size,
+      uploadedBytes: 0,
+      speedBytesPerSecond: 0,
+      status: 'preparing',
+      message: '正在准备上传',
+      startedAt: now,
+      updatedAt: now,
+      lastProgressAt: now,
+      lastProgressBytes: 0,
+    }
+    uploadTasks.value.unshift(task)
+    return task
+  }
+
+  function updateUploadTask(taskId: string, patch: Partial<WorkspaceUploadTask>) {
+    const task = uploadTasks.value.find((item) => item.id === taskId)
+    if (!task) {
+      return
+    }
+    Object.assign(task, patch, { updatedAt: Date.now() })
+  }
+
+  function updateUploadProgress(taskId: string, uploadedBytes: number, totalBytes: number, forceSpeed = false) {
+    const task = uploadTasks.value.find((item) => item.id === taskId)
+    if (!task) {
+      return
+    }
+
+    const now = Date.now()
+    const nextBytes = Math.min(Math.max(uploadedBytes, task.uploadedBytes), totalBytes)
+    const elapsedSeconds = Math.max((now - task.lastProgressAt) / 1000, 0.001)
+    const deltaBytes = nextBytes - task.lastProgressBytes
+
+    if ((forceSpeed || now - task.lastProgressAt >= 250) && deltaBytes >= 0) {
+      const instantSpeed = deltaBytes / elapsedSeconds
+      task.speedBytesPerSecond = task.speedBytesPerSecond > 0
+        ? task.speedBytesPerSecond * 0.65 + instantSpeed * 0.35
+        : instantSpeed
+      task.lastProgressAt = now
+      task.lastProgressBytes = nextBytes
+    }
+
+    task.uploadedBytes = nextBytes
+    task.status = 'uploading'
+    task.message = '正在上传'
+    task.updatedAt = now
+  }
+
+  function removeUploadTask(taskId: string) {
+    uploadTasks.value = uploadTasks.value.filter((task) => task.id !== taskId)
   }
 
   return {
@@ -181,6 +273,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     quotaErrorMessage,
     loading,
     uploading,
+    uploadTasks,
     errorMessage,
     isRoot,
     loadQuota,

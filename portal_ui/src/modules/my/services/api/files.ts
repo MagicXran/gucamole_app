@@ -1,4 +1,5 @@
 import http from '@/services/http'
+import type { AxiosProgressEvent } from 'axios'
 import type {
   DownloadTokenResponse,
   UploadChunkResponse,
@@ -50,7 +51,12 @@ export function uploadInit(path: string, size: number) {
   })
 }
 
-export function uploadChunk(uploadId: string, offset: number, chunk: Blob) {
+export function uploadChunk(
+  uploadId: string,
+  offset: number,
+  chunk: Blob,
+  onUploadProgress?: (event: AxiosProgressEvent) => void,
+) {
   const form = new FormData()
   form.append('upload_id', uploadId)
   form.append('offset', String(offset))
@@ -58,6 +64,7 @@ export function uploadChunk(uploadId: string, offset: number, chunk: Blob) {
 
   return http.post<UploadChunkResponse>('/api/files/upload/chunk', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress,
   })
 }
 

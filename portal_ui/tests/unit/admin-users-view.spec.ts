@@ -88,4 +88,41 @@ describe('AdminUsersView', () => {
       }),
     )
   })
+
+  it('checks edit dialog boolean fields when API returns numeric database flags', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.$patch({
+      authenticated: true,
+      user: { user_id: 1, username: 'admin', display_name: '管理员', is_admin: true },
+    })
+
+    vi.mocked(accessApi.listAdminUsers).mockResolvedValue({
+      data: [
+        {
+          id: 2,
+          username: 'test',
+          display_name: '测试用户',
+          department: '',
+          is_admin: 0,
+          is_active: 1,
+          quota_bytes: null,
+          used_bytes: 0,
+          used_display: '0 B',
+          quota_display: '10 GB',
+        },
+      ],
+      headers: {},
+    } as never)
+
+    const { default: AdminUsersView } = await import('@/modules/admin/views/AdminUsersView.vue')
+    const wrapper = mount(AdminUsersView)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('正常')
+    await wrapper.get('[data-testid="admin-user-edit-2"]').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.get('[data-testid="admin-user-is-active"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.get('[data-testid="admin-user-is-admin"]').element as HTMLInputElement).checked).toBe(false)
+  })
 })

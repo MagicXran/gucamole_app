@@ -18,7 +18,7 @@ from backend.script_profiles import get_script_profile, list_script_profiles, re
 from backend.models import (
     UserInfo,
     AppCreateRequest, AppUpdateRequest, AppAdminResponse,
-    UserCreateRequest, UserUpdateRequest, UserAdminResponse,
+    UserCreateRequest, UserUpdateRequest, UserAdminResponse, UserAdminListResponse,
     AclUpdateRequest, AuditLogResponse, PaginatedResponse,
 )
 
@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 pool_service = ResourcePoolService(db=db)
+
+
+def _coerce_bool_flag(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 def _ensure_pool_exists(pool_id: int | None, conn=None):
@@ -663,7 +669,7 @@ def delete_app(
 # 用户管理
 # ============================================
 
-@router.get("/users")
+@router.get("/users", response_model=list[UserAdminListResponse])
 def list_users(admin: UserInfo = Depends(require_admin)):
     """列出所有用户（含配额信息）"""
     rows = db.execute_query(
@@ -671,6 +677,8 @@ def list_users(admin: UserInfo = Depends(require_admin)):
     )
     from backend.drive_quota import _get_usage_sync, _format_bytes, DEFAULT_QUOTA_BYTES
     for row in rows:
+        row["is_admin"] = _coerce_bool_flag(row.get("is_admin"))
+        row["is_active"] = _coerce_bool_flag(row.get("is_active"))
         used = _get_usage_sync(row["id"])
         row["used_bytes"] = used
         row["used_display"] = _format_bytes(used)

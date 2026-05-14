@@ -118,6 +118,19 @@ function quotaLabelToGb(label: string) {
   return matched ? Number.parseInt(matched[1], 10) : 0
 }
 
+function normalizeFlag(value: unknown) {
+  if (typeof value === 'string') return value.toLowerCase() === 'true' || value === '1'
+  return value === true || value === 1
+}
+
+function normalizeUser(user: AdminUserRecord): AdminUserRecord {
+  return {
+    ...user,
+    is_admin: normalizeFlag(user.is_admin),
+    is_active: normalizeFlag(user.is_active),
+  }
+}
+
 function resetForm() {
   form.username = ''
   form.password = ''
@@ -159,7 +172,7 @@ async function loadUsers() {
   errorMessage.value = ''
   try {
     const response = await listAdminUsers()
-    users.value = response.data
+    users.value = response.data.map(normalizeUser)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '加载用户失败'
     users.value = []

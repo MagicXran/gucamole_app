@@ -52,6 +52,7 @@
       :items="workspace.items"
       :loading="workspace.loading"
       :error-message="workspace.errorMessage"
+      :directory-loader="workspace.listDirectoryItems"
       @refresh="handleRefresh"
       @navigate="handleNavigate"
       @open-directory="handleOpenDirectory"

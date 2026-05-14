@@ -95,6 +95,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  async function listDirectoryItems(path = '') {
+    const response = await listFiles(normalizePath(path))
+    return response.data.items
+  }
+
   async function refresh() {
     await Promise.all([loadQuota(true), loadDirectory(currentPath.value)])
   }
@@ -278,6 +283,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     isRoot,
     loadQuota,
     loadDirectory,
+    listDirectoryItems,
     refresh,
     createFolder,
     deleteEntry,

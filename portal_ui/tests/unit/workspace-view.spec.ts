@@ -28,6 +28,7 @@ const FileBrowserStub = defineComponent({
     items: { type: Array, default: () => [] },
     loading: { type: Boolean, default: false },
     errorMessage: { type: String, default: '' },
+    directoryLoader: { type: Function, required: false },
   },
   emits: [
     'refresh',

@@ -65,6 +65,11 @@ class MkdirRequest(BaseModel):
     path: str
 
 
+class MoveRequest(BaseModel):
+    source_path: str
+    target_path: str
+
+
 # ============================================
 # 工具函数
 # ============================================
@@ -539,6 +544,64 @@ def make_directory(
 
     target.mkdir(parents=True, exist_ok=True)
     return {"message": "已创建"}
+
+
+@router.post("/move")
+def move_file(
+    req: MoveRequest,
+    request: Request = None,
+    user: UserInfo = Depends(get_current_user),
+):
+    """移动文件或目录，不覆盖目标位置。"""
+    source_path = str(req.source_path or "").strip()
+    target_path = str(req.target_path or "").strip()
+    if not source_path or source_path in (".", "/"):
+        raise HTTPException(400, "不能移动根目录")
+    if not target_path or target_path in (".", "/"):
+        raise HTTPException(400, "目标路径无效")
+
+    source = _safe_resolve(user.user_id, source_path)
+    target = _safe_resolve(user.user_id, target_path)
+
+    if not source.exists():
+        raise HTTPException(404, "文件不存在")
+
+    target_name = target.name
+    _validate_filename(target_name)
+
+    if source == target:
+        raise HTTPException(409, "文件已在目标目录中")
+
+    target_parent = target.parent
+    if not target_parent.exists():
+        raise HTTPException(404, "目标目录不存在")
+    if not target_parent.is_dir():
+        raise HTTPException(400, "目标位置不是目录")
+
+    if source.is_dir() and (source == target or source in target.parents):
+        raise HTTPException(400, "不能将文件夹移动到自身或其子目录")
+
+    if target.exists():
+        raise HTTPException(409, "目标位置已存在同名文件或文件夹")
+
+    try:
+        shutil.move(str(source), str(target))
+    except PermissionError:
+        raise HTTPException(
+            423, f"'{source.name}' 正在被占用，请关闭远程应用中的文件后重试",
+        )
+    except OSError as e:
+        raise HTTPException(500, f"移动失败: {e}")
+
+    _invalidate_usage_cache(user.user_id)
+    client_ip = request.client.host if request and request.client else "unknown"
+    log_action(
+        user_id=user.user_id, username=user.username,
+        action="file_move", target_name=source_path,
+        detail={"target_path": target_path},
+        ip_address=client_ip,
+    )
+    return {"message": "已移动"}
 
 
 # ============================================

@@ -78,12 +78,21 @@
         </tr>
       </tbody>
     </table>
+
+    <MoveEntryDialog
+      :item="movingItem"
+      :current-path="currentPath"
+      :directory-loader="directoryLoader"
+      @close="movingItem = null"
+      @move-entry="handleMoveEntry"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
+import MoveEntryDialog from '@/modules/my/components/MoveEntryDialog.vue'
 import type { MoveEntryPayload, WorkspaceFileItem } from '@/modules/my/types/files'
 
 const props = defineProps<{
@@ -91,6 +100,7 @@ const props = defineProps<{
   items: WorkspaceFileItem[]
   loading: boolean
   errorMessage: string
+  directoryLoader: (path: string) => Promise<WorkspaceFileItem[]>
 }>()
 
 const emit = defineEmits<{
@@ -109,18 +119,7 @@ function normalizePath(path: string) {
   return path.replace(/\\/g, '/').trim().replace(/^\/+/, '').replace(/\/+$/, '')
 }
 
-function joinPath(base: string, name: string) {
-  const cleanedBase = normalizePath(base)
-  const cleanedName = normalizePath(name)
-
-  if (!cleanedBase) {
-    return cleanedName
-  }
-  if (!cleanedName) {
-    return cleanedBase
-  }
-  return `${cleanedBase}/${cleanedName}`
-}
+const movingItem = ref<WorkspaceFileItem | null>(null)
 
 const breadcrumbs = computed(() => {
   const parts = normalizePath(props.currentPath).split('/').filter(Boolean)
@@ -140,16 +139,12 @@ function handleCreateDirectory() {
 }
 
 function handleMove(item: WorkspaceFileItem) {
-  const sourcePath = joinPath(props.currentPath, item.name)
-  const targetPath = window.prompt('请输入目标路径', sourcePath)
-  const normalizedTarget = targetPath ? normalizePath(targetPath) : ''
+  movingItem.value = item
+}
 
-  if (normalizedTarget) {
-    emit('move-entry', {
-      sourcePath,
-      targetPath: normalizedTarget,
-    })
-  }
+function handleMoveEntry(payload: MoveEntryPayload) {
+  emit('move-entry', payload)
+  movingItem.value = null
 }
 
 function handleDelete(item: WorkspaceFileItem) {

@@ -260,6 +260,76 @@ def test_file_api_upload_download_and_delete_flow(tmp_path, monkeypatch):
     assert not final_path.exists()
 
 
+def test_file_api_move_file_into_existing_directory(tmp_path, monkeypatch):
+    app = _build_app(tmp_path, monkeypatch)
+    user_dir = tmp_path / "portal_u99"
+    source_dir = user_dir / "Documents"
+    target_dir = user_dir / "Archive"
+    source_dir.mkdir(parents=True)
+    target_dir.mkdir()
+    (source_dir / "test.txt").write_text("hello", encoding="utf-8")
+
+    moved = _request(
+        app,
+        "POST",
+        "/api/files/move",
+        json={"source_path": "Documents/test.txt", "target_path": "Archive/test.txt"},
+    )
+
+    assert moved.status_code == 200
+    assert not (source_dir / "test.txt").exists()
+    assert (target_dir / "test.txt").read_text(encoding="utf-8") == "hello"
+
+
+def test_file_api_move_rejects_same_path_and_existing_target(tmp_path, monkeypatch):
+    app = _build_app(tmp_path, monkeypatch)
+    user_dir = tmp_path / "portal_u99"
+    docs_dir = user_dir / "Documents"
+    archive_dir = user_dir / "Archive"
+    docs_dir.mkdir(parents=True)
+    archive_dir.mkdir()
+    (docs_dir / "test.txt").write_text("hello", encoding="utf-8")
+    (archive_dir / "test.txt").write_text("exists", encoding="utf-8")
+
+    same_path = _request(
+        app,
+        "POST",
+        "/api/files/move",
+        json={"source_path": "Documents/test.txt", "target_path": "Documents/test.txt"},
+    )
+    conflict = _request(
+        app,
+        "POST",
+        "/api/files/move",
+        json={"source_path": "Documents/test.txt", "target_path": "Archive/test.txt"},
+    )
+
+    assert same_path.status_code == 409
+    assert same_path.json()["detail"] == "文件已在目标目录中"
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == "目标位置已存在同名文件或文件夹"
+    assert (docs_dir / "test.txt").read_text(encoding="utf-8") == "hello"
+    assert (archive_dir / "test.txt").read_text(encoding="utf-8") == "exists"
+
+
+def test_file_api_move_rejects_directory_into_itself_or_child(tmp_path, monkeypatch):
+    app = _build_app(tmp_path, monkeypatch)
+    user_dir = tmp_path / "portal_u99"
+    nested = user_dir / "Projects" / "CaseA"
+    nested.mkdir(parents=True)
+
+    rejected = _request(
+        app,
+        "POST",
+        "/api/files/move",
+        json={"source_path": "Projects", "target_path": "Projects/CaseA/Projects"},
+    )
+
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "不能将文件夹移动到自身或其子目录"
+    assert (user_dir / "Projects").is_dir()
+
+
 def test_file_api_rejects_root_delete_and_path_traversal(tmp_path, monkeypatch):
     app = _build_app(tmp_path, monkeypatch)
 

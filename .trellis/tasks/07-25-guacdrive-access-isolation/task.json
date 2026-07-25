@@ -1,13 +1,13 @@
 {
   "id": "guacdrive-access-isolation",
   "name": "guacdrive-access-isolation",
-  "title": "RemoteApp GuacDrive 访问硬隔离",
-  "description": "",
+  "title": "RemoteApp GuacDrive 一般访问限制",
+  "description": "在共享低权限 Windows 账号下，通过 Portal、Guacamole、GPO、NTFS、AppLocker、Firewall 和会话清理限制普通用户正常流程只使用 GuacDrive。",
   "status": "planning",
   "dev_type": null,
-  "scope": "cross-layer-security",
+  "scope": "general-restriction-planning",
   "package": null,
-  "priority": "P2",
+  "priority": "P1",
   "creator": "ZDxia",
   "assignee": "ZDxia",
   "createdAt": "2026-07-25",
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "用户已选择一般限制；完整桌面、验证桌面和 VSCode 规划为管理员专用。规划前基线已由备份分支和 annotated tag 保存。",
   "meta": {}
 }

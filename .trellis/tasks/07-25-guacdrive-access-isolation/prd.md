@@ -1,92 +1,97 @@
-# RemoteApp GuacDrive 访问硬隔离
+# RemoteApp GuacDrive 一般访问限制
 
 ## Goal
 
-在保留现有每用户 GuacDrive 映射和 RemoteApp 启动方式的前提下，为普通门户用户建立“工作文件只能从自己的 `\\tsclient\GuacDrive` 进入和离开”的受限访问模式。
+在保留当前共享 Windows/RDP 账号和每用户 GuacDrive 映射的前提下，为普通门户用户建立“正常操作时只看到并使用自己的 `\\tsclient\GuacDrive`，常见本地盘、命令行、网络共享和文件传输绕过路径被阻断”的一般限制模式。
 
-这里的“只能访问 GuacDrive”定义为：用户不能通过文件对话框、完整桌面、命令行、脚本宿主、网络共享或其他应用主动浏览、打开、复制、修改 Windows 主机的本地数据盘、其他用户目录和网络共享；Windows 与目标应用运行所必需的系统文件仍可按最小权限读取和执行。
+本任务不宣称形成恶意代码不可突破的多租户硬隔离。允许的 RemoteApp 仍需读取 Windows 与应用运行依赖；共享账号的 profile、临时目录和审计身份仍是已知残余风险。
 
 ## Background
 
 ### Confirmed facts
 
-- `backend/router.py:81-114` 已把 Guacamole drive path 固定为 `/drive/portal_u{user_id}`，并为当前用户的所有连接复用同一批连接参数。
-- `backend/guacamole_crypto.py:215-225` 通过 RDPDR 把该目录映射为 `\\tsclient\GuacDrive`；Guacamole 官方文档说明虚拟驱动被限制在配置的 `drive-path` 内。
-- `backend/file_router.py:110-121` 通过 `resolve()` 和目录前缀校验限制 Portal 文件 API；该校验不约束 RemoteApp 直接访问 Windows 的 `C:\`、`D:\` 或 UNC 路径。
-- `config/config.json:23-31` 默认开启 GuacDrive，并关闭 Guacamole 浏览器上传/下载通道；这不等于 Windows 文件系统隔离。
-- `backend/models.py:99-114` 允许 `remote_app` 为空，剪贴板默认开放；`backend/guacamole_crypto.py:176-181` 仅在 `remote_app` 非空时发送 RemoteApp 参数，因此空值可能退化为完整桌面连接。
-- Windows 自带的“隐藏指定驱动器”和“防止从我的电脑访问驱动器”策略只影响 Explorer/公共对话框。`C:\Windows\PolicyDefinitions\zh-CN\WindowsExplorer.adml:134-143,258-267` 明确写明程序仍可访问这些驱动器，因此隐藏盘符不是安全边界。
-- 2026-07-25 本地运行库只读检查：5 个启用应用位于 1 台 RDP 主机，使用 1 个 RDP 账号，每个应用授权给 2 个门户用户；其中 2 个连接未配置 `remote_app`，另有 VSCode RemoteApp。当前账号模型和应用集合不满足硬隔离。
+- `backend/router.py:81-114` 已将每个门户用户的 Guacamole drive path 绑定为 `/drive/portal_u{user_id}`。
+- `backend/guacamole_crypto.py:215-225` 通过 RDPDR 将该目录映射为 `\\tsclient\GuacDrive`。
+- `backend/file_router.py:110-121` 保护 Portal 文件 API 不逃离用户目录，但不约束 RemoteApp 对 Windows 本地路径和 UNC 的直接访问。
+- `backend/models.py:99-114` 允许 `remote_app` 为空且剪贴板默认开放；`backend/guacamole_crypto.py:176-181` 对空 `remote_app` 不发送 RemoteApp 参数。
+- Windows 驱动器隐藏和“防止从我的电脑访问”策略只约束 Explorer/公共对话框，不能阻止程序 API 访问驱动器。证据：`C:\Windows\PolicyDefinitions\zh-CN\WindowsExplorer.adml:134-143,258-267`。
+- 2026-07-25 运行库只读快照：5 个启用应用位于 1 台 RDP 主机，使用 1 个 RDP 账号，每个应用授权给 2 个门户用户；其中 2 个完整桌面候选，另有 VSCode；仅记事本关闭了双向剪贴板。
 
-### Current risk statement
+### User decision
 
-现有形式可以继续作为 Portal/Guacamole 层的个人空间入口，但不能仅增加“隐藏 C 盘”就宣称用户只能访问 GuacDrive。真正的访问拒绝必须落到 Windows 身份、NTFS 权限、应用控制和网络策略。
+- 2026-07-25：本阶段采用“一般限制”，暂不改成每门户用户独立 Windows 账号或每会话独占 VM。
+- 现有代码已建立 Git 回滚锚点：分支 `codex/backup-general-restriction-20260725` 和标签 `backup-general-restriction-20260725-dcfd0c0`，均指向规划调整前提交 `dcfd0c0`。
 
 ## Requirements
 
-### R1. Preserve existing correct behavior
+### R1. Preserve GuacDrive and portal behavior
 
-- 保留 `/drive/portal_u{user_id}`、`\\tsclient\GuacDrive`、Portal 文件 API 路径约束和 Nginx `X-Accel-Redirect` 下载链路。
-- 保留同一门户用户的 Guacamole token/session 多标签复用与应用/ACL 变更后的缓存失效逻辑。
+- 保留 `/drive/portal_u{user_id}`、`\\tsclient\GuacDrive`、Portal 文件 API、Nginx 内部下载和 Guacamole per-user token/session 多标签复用。
+- 应用/ACL 变化后继续失效 Guacamole session cache。
 
-### R2. Add a fail-closed restricted workspace mode
+### R2. Separate ordinary and administrative connection domains
 
-- 普通用户使用的受限连接必须配置非空 `remote_app`；完整桌面连接不能进入该模式。
-- 受限模式必须拒绝文件管理器、终端、脚本宿主、通用编辑器/IDE、控制面板和可启动任意程序的 launcher。
-- `remote_app_args` 必须按应用模板生成或校验，不能成为任意命令/路径注入入口。
-- 当前“远程桌面”“验证节点-桌面与脚本”和 VSCode 不能作为受限模式应用直接保留。
+- 普通用户只允许受控 RemoteApp，不允许完整桌面、VSCode、文件管理器、终端、脚本宿主或通用 launcher。
+- 当前“远程桌面”“验证节点-桌面与脚本”和 VSCode 必须归入管理员连接域，不向普通用户授权。
+- 普通连接使用专门的共享低权限 Windows 账号；管理员桌面使用不同账号和资源池，不能继续共用同一个 Windows 身份。
 
-### R3. Establish a Windows identity boundary
+### R3. Add a fail-closed general-restriction mode
 
-- 受限模式不得继续依赖“所有门户用户共用一个 Windows/RDP 账号”来承诺硬隔离。
-- 目标模型应为每门户用户独立 Windows 账号，或每用户/每会话独占且可回收的 Windows VM/Worker。
-- Portal 连接构建必须按 `user_id + host/resource` 解析 Windows 身份，而不是只读取应用记录上的共享凭据。
-- 凭据不得继续扩散为更多数据库明文；实现阶段需采用凭据引用或受保护存储。
+- 一般限制模式必须配置非空 `remote_app`；保存和启动时均拒绝回退到完整桌面。
+- `remote_app_args` 必须由受控模板生成或校验，不能作为任意命令入口。
+- 管理端必须明确显示“一般限制 RemoteApp”和“管理员桌面”，并阻止不兼容配置授权给普通用户。
 
-### R4. Enforce access on the Windows host
+### R4. Minimize Guacamole/RDP channels
 
-- Explorer/GPO 负责隐藏盘符和减少误操作，但不作为安全判定。
-- NTFS ACL 只允许运行系统与目标应用所需的最小读取/执行权限，并阻止访问其他用户目录、业务数据盘和无关本地目录；不得对 `C:\` 根目录做会破坏系统和应用的粗暴全盘 Deny。
-- 采用 App Control for Business（WDAC）作为硬隔离应用白名单；AppLocker 仅用于审计试点或纵深防御。
-- 阻断不需要的 SMB/UNC、WebDAV、云盘和外联通道；只放行许可证服务器、数据库或目标应用确实需要的地址与端口。
-- 用户配置文件、临时目录和应用缓存必须最小化、隔离并在会话结束后清理或回收。
+- 一般限制模式强制 `disable-copy=true`、`disable-paste=true`、`disable-download=true`、`disable-upload=true`、`enable-printing=false`、`enable-audio-input=false`。
+- 音频输出默认关闭，确有业务需要时按应用开启。
+- 保持 RDP drive redirection，因为 GuacDrive 依赖 RDPDR；由 Guacamole 只发布唯一的 GuacDrive。
 
-### R5. Minimize Guacamole/RDP channels
+### R5. Apply Windows UX and permission restrictions
 
-- 受限模式强制 `disable-copy=true`、`disable-paste=true`、`disable-download=true`、`disable-upload=true`、`enable-printing=false`、`enable-audio-input=false`。
-- 音频输出按应用需要决定，默认关闭。
-- 不能启用 Windows 的“禁止驱动器重定向”总策略，因为 GuacDrive 本身依赖 RDPDR；应由 Guacamole 只发布唯一的 GuacDrive。
+- GPO 隐藏并从 Explorer/公共文件对话框限制 C、D 等本地盘。
+- 移除 Run、控制面板、任务管理器、映射网络驱动器等常见入口。
+- 使用标准用户权限和定向 NTFS ACL：系统/应用目录仅必要读取执行，禁止写入；阻止读取其他用户 profile、业务数据卷、备份和管理目录。
+- 不对整个 `C:\` 设置粗暴 Deny，避免破坏 Windows 与目标应用依赖。
 
-### R6. Make the policy observable and auditable
+### R6. Block common execution and network bypasses
 
-- 管理端必须明确显示连接是“受限工作区”“普通 RemoteApp”还是“完整桌面”，并阻止不兼容配置保存或授权给普通用户。
-- 启动前或巡检时要能确认目标主机、Windows 身份和安全策略版本符合要求。
-- 审计至少覆盖：用户、应用、Windows 身份/资源、会话、策略版本、GuacDrive 路径、策略阻断和文件出口。
+- AppLocker 先 Audit 后 Enforced，限制可执行文件、脚本、安装器和未授权子进程；WDAC 保留为未来硬隔离升级项。
+- 阻止 Explorer、cmd、PowerShell、wscript/cscript、mshta、mmc、安装器及未授权工具。
+- Windows Firewall 阻断 SMB 445/139、WebDAV、管理员共享及非必要网络目的地，只允许许可证服务器和业务依赖。
 
-### R7. Roll out without breaking current administrators
+### R7. Reduce shared-account residue
 
-- 现有完整桌面和 VSCode 如确有运维用途，应迁入独立的管理员/高权限安全域，不与普通受限用户共享账号、ACL 或资源池。
-- 生产入口继续使用 `deploy/docker-compose.yml`；旧根 `docker-compose.yml` 暴露 Guacamole 8080，不能作为受限模式部署入口。
+- 共享低权限账号不得保存业务文件到本地 profile、Desktop、Documents、Downloads 或 Temp。
+- 对 profile、Temp、Recent、应用缓存设置会话后清理；业务文件出口只能走 GuacDrive。
+- Portal 审计继续记录真实门户用户、应用、资源和会话，以补足 Windows 侧只能看到共享账号的问题。
+
+### R8. Keep limitations explicit
+
+- 产品和运维文档必须明确：该模式阻断正常操作和常见绕过，不承诺允许应用漏洞、宏、插件或任意文件 API 永远无法访问共享账号有权限读取的本地文件。
+- 高敏、多租户或外部不可信用户仍需升级为独立 Windows 账号或独占 VM/Worker。
 
 ## Acceptance Criteria
 
-- [ ] 普通用户启动受限应用后，标准打开/另存为对话框只展示 GuacDrive；手工输入 `C:\`、`D:\`、其他用户目录、管理员共享和普通 UNC 路径均访问失败。
-- [ ] `\\tsclient\GuacDrive` 可正常创建、读取、修改、重命名和删除当前用户文件，`..`、符号链接或构造路径不能逃离 `portal_u{user_id}`。
-- [ ] 用户 A 与用户 B 并发时不能看到对方 GuacDrive、Windows 配置文件、临时目录、进程工作区或历史文件。
-- [ ] 受限连接缺少 `remote_app` 时创建/更新/启动均 fail closed；完整桌面不会意外回退。
-- [ ] Explorer、cmd、PowerShell、wscript/cscript、mshta、控制面板、任务管理器、安装器和未授权程序启动失败，并产生 Windows 审计记录。
-- [ ] VSCode、通用 IDE 或其他具备终端/插件/任意文件访问能力的应用不会被标记为受限应用。
-- [ ] 浏览器到远端和远端到浏览器的剪贴板、Guacamole 上传/下载、打印机、音频输入及非必要设备重定向均按策略失败。
-- [ ] RDP 主机出站 SMB/UNC 和未授权网络目的地不可达；允许的许可证/业务依赖仍正常。
-- [ ] `gpresult`、NTFS ACL、App Control/WDAC、Windows 防火墙和 Portal 安全模式均有可重复的合规检查结果。
-- [ ] 现有 Portal ACL、session cache、多标签、文件 API、Nginx 内部下载和管理员专用连接未被破坏。
+- [ ] 普通用户应用列表不包含完整桌面、验证桌面或 VSCode。
+- [ ] 一般限制连接缺少 `remote_app` 时，创建、更新和启动均 fail closed。
+- [ ] 标准打开/另存为对话框仅明显展示 GuacDrive；输入 `C:\`、`D:\`、其他数据卷和其他用户目录时，常规访问被拒绝。
+- [ ] `\\tsclient\GuacDrive` 可正常打开、保存、覆盖、重命名、删除和处理大文件。
+- [ ] Explorer、Win+R、cmd、PowerShell、wscript/cscript、mshta、taskmgr、control、mmc、安装器和未授权程序无法启动并有审计记录。
+- [ ] 浏览器与远端双向剪贴板、Guacamole 上传/下载、打印、音频输入及非必要设备通道均不可用。
+- [ ] `\\HOST\share`、`\\HOST\C$`、SMB 和未授权网络目的地不可达；允许的许可证/业务依赖保持正常。
+- [ ] 共享 profile 的 Desktop、Documents、Downloads、Temp 和 Recent 不承载业务文件，并在会话结束后按策略清理。
+- [ ] Portal ACL、session cache、多标签、文件 API、Nginx 内部下载和管理员专用连接未被破坏。
+- [ ] 验收报告明确记录共享账号、允许应用能力和 Windows 程序 API 造成的残余风险，不使用“硬隔离”表述。
 
 ## Out of Scope
 
-- 不承诺 Windows 与目标应用无需读取/执行任何 `C:\Windows`、`C:\Program Files` 或应用依赖文件；该目标在应用仍运行于 Windows 主机时不成立。
-- 不把 CSS、隐藏 Guacamole 菜单、隐藏盘符或 Portal 文件列表过滤当成安全隔离。
-- 本规划阶段不实施 Windows GPO、数据库迁移或业务代码修改。
+- 每门户用户独立 Windows 账号。
+- 每用户或每会话独占 VM/Worker。
+- 抵御允许 RemoteApp 自身漏洞、恶意插件、宏或任意代码执行后的所有本地文件访问。
+- 承诺 Windows 和目标应用完全不读取 `C:\Windows`、`C:\Program Files` 或运行依赖。
+- 本规划阶段不修改业务代码、数据库和 Windows 主机策略。
 
 ## Open Question
 
-- 是否接受把当前“2 个门户用户共用 1 个 RDP 账号”的模式改为“每门户用户独立 Windows 账号”，或者“每用户/每会话独占 VM/Worker”？这是硬隔离与一般限制之间的决定性边界。
+- 是否将“一般限制”默认应用于全部普通门户用户，并明确把完整桌面、验证桌面和 VSCode 仅保留给管理员？推荐答案：是。

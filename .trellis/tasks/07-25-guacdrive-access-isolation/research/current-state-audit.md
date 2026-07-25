@@ -43,6 +43,12 @@ No credential values were read or recorded.
   - Microsoft describes AppLocker as defense-in-depth and recommends App Control for Business for robust protection.
 - Microsoft Application Control for Windows: https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/appcontrol
 
+## Planning decision, 2026-07-25
+
+- The user selected general restrictions instead of per-user Windows identities or per-session isolated workers for this phase.
+- General restrictions target normal workflows and common escape paths; they do not establish a hostile-code-resistant tenant boundary.
+- The pre-change Git baseline is preserved by branch `codex/backup-general-restriction-20260725` and annotated tag `backup-general-restriction-20260725-dcfd0c0`, both resolving to commit `dcfd0c0`.
+
 ## Conclusion
 
-The current per-user GuacDrive mapping is a valid component and should remain. The missing boundary is Windows-side identity and policy enforcement. Hiding drives alone cannot satisfy the requested security property.
+The current per-user GuacDrive mapping remains valid. This phase will combine Portal fail-closed rules, Guacamole channel restrictions, a separate shared low-privilege Windows account for ordinary users, GPO, targeted NTFS permissions, AppLocker, firewall rules, and session cleanup. The result is a practical general restriction, not hard isolation.

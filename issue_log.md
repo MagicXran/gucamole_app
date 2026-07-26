@@ -14,7 +14,7 @@
 
 ## ISSUE-001：VSCode `{user_id}` 启动参数未在实际代码中展开
 
-状态：代码与数据库迁移已修复，待真实 Windows RemoteApp 双用户验收
+状态：已完成真实 Windows RemoteApp 双用户验收
 
 发现日期：2026-07-26
 
@@ -46,7 +46,9 @@
 2. user-data/extensions 根目录必须是 Windows 本地绝对路径；工作区固定为 `\\tsclient\GuacDrive`。
 3. 未知占位符、危险 shell 字符、未知控制项和 `*` 通配均被拒绝。
 4. 单元测试验证用户 A/B 参数不同、最终参数不含 `{user_id}`、受限通道映射和白名单缺失 fail closed。
-5. 已在运行 Docker/MySQL 上执行 Schema 迁移和 API smoke；真实 Windows 双用户并发、扩展策略和 Electron 单实例仍需在目标主机验收。
+5. 已在运行 Docker/MySQL 上执行 Schema 迁移和 API smoke。
+6. 已在 `WIN-UGUPI2FHM86` 同时启动 Portal 用户 2、3 的 VSCode，最终进程参数分别使用 `C:\PortalProfiles\2` / `C:\PortalProfiles\3` 和独立 extensions 目录，且不含字面量 `{user_id}`。
+7. 已验证两个浏览器会话各自只看到自己的 GuacDrive；Electron 单实例未把两个门户用户合并到同一 user-data 目录。
 
 ### 防止重复犯错
 
@@ -62,7 +64,7 @@
 
 ## ISSUE-002：把盘符隐藏误当成 Windows 文件访问硬隔离
 
-状态：已通过分层设计约束，Windows 试点待实施
+状态：Windows 试点已部分实施，正式 RDS 与系统安全基线待完成
 
 发现日期：2026-07-25
 
@@ -78,8 +80,51 @@
 - 管理员桌面与普通 RemoteApp 在 ACL 和启动查询中分域。
 - 新增 Windows 基线导出脚本和实施手册，要求 GPO、NTFS、AppLocker、Firewall 和 VSCode 企业扩展策略共同落地。
 - AppLocker 必须先 Audit 后 Enforced；不得对整个 `C:\` 设置粗暴 Deny。
+- 试点主机已切换 AppLocker Enforced；交互任务验证 `cmd.exe` 和 `explorer.exe` 均产生 8004 阻断事件，记事本、计算器和 VSCode 仍可启动。
+- 真实浏览器已验证 GuacDrive 打开和覆盖保存，以及用户 A/B 的虚拟盘内容互不可见。
 
 ### 防止重复犯错
 
 - 产品和验收报告使用“一般限制”“正常流程和常见绕过受到限制”，不使用“硬隔离”或“任何情况下只能访问 GuacDrive”。
 - Portal JSON 白名单必须与 Windows 实际 AppLocker、Firewall 和 VSCode 企业策略逐项对账。
+
+## ISSUE-003：VSCode 首次打开 GuacDrive 被 UNC 和工作区信任提示阻断
+
+状态：已修复并完成真实浏览器复测
+
+发现日期：2026-07-26
+
+### 原因
+
+- VSCode 1.117 默认拒绝未登记的 UNC 主机；固定工作区 `\\tsclient\GuacDrive` 会触发 `security.allowedUNCHosts` 提示。
+- UNC 主机允许后，默认 Workspace Trust 仍会让受控开发能力进入 Restricted Mode。
+- 仅重建 Portal 容器不会让已缓存的 Guacamole token 自动获得新启动参数；运行中的 backend 内存缓存和浏览器旧会话都可能继续启动旧命令行。
+
+### 解决办法
+
+- 新增 `scripts/windows/set-vscode-guacdrive-profile-settings.ps1`，为指定 Portal 用户的独立 profile 写入 `security.allowedUNCHosts=["tsclient"]`，保留现有合法 JSON 设置并先备份。
+- `backend/vscode_policy_service.py` 固定加入 `--disable-workspace-trust`，因为该安全模式已通过工作区固定、工具链/扩展/AppLocker/Firewall 白名单控制执行范围。
+- 清空 `token_cache`、重启 `portal-backend`、结束旧 Windows 会话后重新启动，最终进程命令行才会生效。
+
+### 防止重复犯错
+
+- VSCode 启动参数变更必须同时检查 backend 生成值、Guacamole token 缓存和 Windows `Win32_Process.CommandLine`。
+- 新增 Portal 用户时必须初始化对应 `C:\PortalProfiles\{user_id}\User\settings.json`。
+
+## ISSUE-004：试点多会话依赖 RDP Wrapper，Defender 与累积更新不能安全收口
+
+状态：待确定正式 RDS 授权方案
+
+发现日期：2026-07-26
+
+### 现状与风险
+
+- Windows 未安装 `RDS-RD-Server`，`TermService\Parameters\ServiceDll` 指向 `C:\Program Files\RDP Wrapper\rdpwrap.dll`。
+- 本地策略设置 `DisableAntiSpyware=1` 和 `DisableRealtimeMonitoring=1`，Windows Defender 服务停止；恢复 Defender 可能隔离 RDP Wrapper 并中断 RemoteApp。
+- Windows Update 扫描发现 2026-07 Server 2019 累积更新、.NET 累积更新和恶意软件删除工具待安装；更新 `termsrv.dll` 可能使 RDP Wrapper 失效。
+
+### 下一步约束
+
+- 生产方案应安装正式 RDS Session Host，并提供 RDS Licensing Server / CAL 信息后移除 RDP Wrapper。
+- 在正式 RDS 或明确风险接受前，不自动安装上述累积更新，也不修改 Defender 禁用策略。
+- 任何切换前先保留 VM 快照、带外控制台、WinRM HTTPS 和当前安全基线导出。

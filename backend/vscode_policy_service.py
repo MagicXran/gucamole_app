@@ -368,7 +368,7 @@ def build_vscode_arguments(profile: dict[str, Any], user_id: int) -> str:
     return (
         f'--user-data-dir="{user_data_path}" '
         f'--extensions-dir="{extensions_path}" '
-        f'--disable-gpu "{workspace}"'
+        f'--disable-gpu --disable-workspace-trust "{workspace}"'
     )
 
 

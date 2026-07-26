@@ -1,6 +1,6 @@
 # Implementation Plan: RemoteApp GuacDrive 一般访问限制
 
-> 当前状态：规划已收敛。用户批准进入实施后才能运行 `task.py start`。
+> 当前状态：Portal、Windows 试点和真实浏览器验收已推进；正式 RDS、系统更新和真实业务应用仍待收口。
 
 ## Phase 0. Git rollback baseline
 
@@ -18,12 +18,12 @@ Rollback references:
 ## Phase 1. Inventory and application classification
 
 - [x] 确认一般限制默认适用于全部普通门户用户。
-- [ ] 将记事本作为首个 restricted pilot；计算器用于启动 smoke。
+- [x] 将记事本作为首个 restricted pilot；计算器用于启动 smoke。
 - [x] 将完整桌面和验证桌面标记为 admin-only。
 - [x] 将 VSCode 保留给普通用户，并规划为独立的 `restricted_vscode`。
 - [x] 确认 VSCode 采用受控开发模式，默认允许终端、Tasks、Run、Build、Debug 和全部已列权限。
 - [ ] 盘点真实仿真应用的可执行文件、DLL、脚本、工作目录、许可证端点和子进程。
-- [ ] 导出目标 Windows 主机现有 GPO、NTFS、AppLocker、Firewall 和 RDS 策略。
+- [x] 导出目标 Windows 主机现有 GPO、NTFS、AppLocker、Firewall 和 RDS 策略。
 
 Validation:
 
@@ -51,15 +51,15 @@ Rollback:
 
 ## Phase 3. Windows shared-account restriction pilot
 
-- [ ] 新建普通用户专用共享低权限 Windows 账号/组，与管理员账号分离。
+- [x] 新建普通用户专用共享低权限 Windows 账号/组，与管理员账号分离。
 - [ ] 在试点 OU 启用 loopback GPO：隐藏/限制本地盘，禁 Run、控制面板、任务管理器和网络驱动器映射。
 - [ ] 配置 NTFS 最小权限；阻止其他 profile、数据卷、备份和管理目录。
-- [ ] 设置 profile、Temp、Recent 和应用缓存清理。
-- [ ] 部署 AppLocker Audit，收集目标应用真实依赖。
+- [x] 设置 profile、Temp、Recent 和应用缓存清理。
+- [x] 部署 AppLocker Audit，收集记事本、计算器和 VSCode 试点依赖。
 - [ ] 单独采集 VSCode 的 Code.exe 子进程、扩展宿主、终端、Tasks、Debug 和批准工具链行为。
-- [ ] 规则收敛后切换 AppLocker Enforced。
+- [x] 规则收敛后切换 AppLocker Enforced。
 - [ ] Windows Firewall 阻断 SMB/WebDAV/非必要出口，放行许可证和业务依赖。
-- [ ] 保持 RDP drive redirection，使 GuacDrive 可用。
+- [x] 保持 RDP drive redirection，使 GuacDrive 可用。
 
 Validation matrix:
 
@@ -94,7 +94,7 @@ Rollback:
 - [x] `portal_ui` 新增独立 VSCode 策略管理页面、store/service/types 和应用 profile 选择器。
 - [x] 管理 UI 完整列出所有权限，默认全选，并提供全选/全不选/恢复默认、锁定基线、allowlist 编辑和 effective preview。
 - [x] 审计记录安全模式、门户用户、资源、共享 Windows 身份标识和阻断原因。
-- [ ] 部署 VSCode 企业 AllowedExtensions policy，并记录实际生效策略。
+- [x] 部署 VSCode 企业 AllowedExtensions policy，并记录实际生效策略。
 - [x] 更新 README、架构/安全文档及 `issue_log.md`。
 
 Tests:
@@ -117,11 +117,11 @@ Tests:
 
 ## Phase 5. Real end-to-end verification
 
-- [ ] 使用真实 Docker/MySQL、真实浏览器和真实 Windows RemoteApp 会话验证。
+- [x] 使用真实 Docker/MySQL、真实浏览器和真实 Windows RemoteApp 会话验证。
 - [ ] 先迁移记事本，再迁移一个真实业务/仿真应用。
 - [ ] 独立执行 VSCode A/B 用户并发、扩展策略、默认工作区和终端/任务能力验收。
 - [ ] 每次仅扩大一个应用、资源池或用户组。
-- [ ] 保存 Windows GPO、AppLocker、Firewall 和 Portal 审计证据。
+- [x] 保存 Windows GPO、AppLocker、Firewall 和 Portal 审计证据。
 - [ ] 验收报告列出残余风险，禁止写“硬隔离”或“绝对只能访问 GuacDrive”。
 
 Suggested repository checks:

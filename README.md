@@ -116,6 +116,7 @@ docker exec CONTAINER sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-cha
 - UI 支持全选、全不选、恢复默认、白名单编辑、锁定基线和最终生效预览。
 - 策略只有在必需白名单完整时才能启用或绑定。
 - 启动参数由固定根目录生成，不执行任意 `format()`，最终参数中不存在字面量 `{user_id}`。
+- Windows 主机需要为每个已知 Portal 用户初始化 `C:\PortalProfiles\{user_id}\User\settings.json`，只允许 UNC 主机 `tsclient`；启动参数固定加入 `--disable-workspace-trust`，使个人 GuacDrive 可直接作为受控开发工作区。
 
 ## 8. 一般限制的边界
 
@@ -124,6 +125,18 @@ Portal 和 Guacamole 可以约束 ACL、连接形态、虚拟盘和通道，但 
 共享 Windows 账号仍共享 HKCU、Temp、Recent、应用缓存和 Windows 审计身份。高敏、多租户或不可信代码场景应升级为独立 Windows 账号或独占 VM/Worker。
 
 Windows 试点步骤和验收矩阵见 `docs/2026-07-26-guacdrive-general-restriction-runbook.md`。
+
+当前试点主机 `WIN-UGUPI2FHM86`（Windows Server 2019，`192.168.56.6`）已完成低权限账号分域、RDPDR、AppLocker Enforced、VSCode 扩展策略、SMB/WebDAV 基础阻断和真实浏览器 A/B 会话验证。该主机仍使用 RDP Wrapper，Windows Defender 被策略关闭且存在待安装累积更新；在确定正式 RDS Session Host / RDS CAL 方案前，不应把它认定为生产完成状态。
+
+新增或恢复 Portal 用户后，在 Windows 主机执行：
+
+```powershell
+powershell -File scripts\windows\set-vscode-guacdrive-profile-settings.ps1 `
+  -PortalUserIds USER_ID `
+  -DiscoverExistingProfiles
+```
+
+修改 VSCode 启动参数后还必须清空 `token_cache` 并重启 `portal-backend`，否则运行进程可能继续使用旧 Guacamole token 中的连接参数。
 
 ## 9. 验证命令
 

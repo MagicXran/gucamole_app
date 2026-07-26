@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Portal、数据库、启动策略和 Vue 管理端已实现并迁移到本地 Docker/MySQL；完整桌面和验证桌面归 admin_desktop，VSCode 归 restricted_vscode。default-controlled 全部可授予控制项默认勾选，但白名单为空时保持 inactive/invalid。规划前 Git 基线与数据库迁移前 dump 已保存。剩余工作是目标 Windows 主机 GPO、NTFS、AppLocker、Firewall、VSCode 企业策略和真实双用户 RemoteApp 验收。",
+  "notes": "Portal、数据库、启动策略和 Vue 管理端已实现并迁移到本地 Docker/MySQL；Windows Server 2019 试点已完成低权限账号分域、RDPDR、AppLocker Enforced、VSCode AllowedExtensions、UNC profile 初始化和真实浏览器 A/B RemoteApp 验收。剩余工作是正式 RDS Session Host/RDS CAL、移除 RDP Wrapper、恢复 Defender、安装系统更新、收紧出站 allowlist、补齐 GPO/NTFS 完整逃逸矩阵并迁移真实业务应用。",
   "meta": {}
 }

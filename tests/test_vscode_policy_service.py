@@ -105,6 +105,7 @@ def test_vscode_arguments_are_different_per_portal_user():
     assert r"C:\PortalExtensions\11" in user_a
     assert "{user_id}" not in user_a
     assert r"\\tsclient\GuacDrive" in user_a
+    assert "--disable-workspace-trust" in user_a
 
 
 def test_restricted_argument_validation_allows_only_fixed_user_id_token():

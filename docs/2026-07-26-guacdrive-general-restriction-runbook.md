@@ -6,6 +6,17 @@
 
 ## 2. 实施顺序
 
+### 当前试点快照（2026-07-26）
+
+- 主机：`WIN-UGUPI2FHM86` / Windows Server 2019 Standard / `192.168.56.6`。
+- 已创建 `GuacRemoteApp`、`GuacVscode` 两个标准账号及对应本地组，管理员账号保持独立。
+- 已启用 RDP drive redirection 和同账号多会话；记事本、计算器、VSCode 已发布为 RemoteApp。
+- AppLocker 的 EXE/Script/MSI 已从 AuditOnly 切换为 Enforced，DLL 仍保持 AuditOnly；实际负向测试已阻止 `cmd.exe` 和 `explorer.exe`。
+- `security.allowedUNCHosts=["tsclient"]` 已写入 Portal 用户 1、2、3 的独立 VSCode profile，Portal 启动参数加入 `--disable-workspace-trust`。
+- 真实浏览器已验证用户 A/B 同时运行 VSCode，分别使用 `C:\PortalProfiles\2` / `C:\PortalProfiles\3` 与独立 extensions 目录，并只显示各自 GuacDrive。
+- 未完成项：正式 RDS Session Host/RDS CAL、Defender 恢复、2026-07 累积更新、精确出站 allowlist、真实仿真应用依赖和完整逃逸矩阵。
+- 当前 `TermService` 的 `ServiceDll` 指向 RDP Wrapper。它不是正式 RDS 授权方案，并可能在 Windows 累积更新或 Defender 恢复后失效。
+
 ### 阶段 A：Portal 和数据库
 
 1. 保存 Git 分支/tag 回滚锚点。
@@ -18,6 +29,7 @@
 5. 在管理端补齐 `default-controlled` 的 shell、工具链、调试器、扩展和网络目标白名单。
 6. 策略有效后启用并绑定 VSCode。
 7. 修改应用、ACL 或策略后确认 Guacamole token cache 已失效。
+8. 修改 VSCode 启动参数代码后，清空数据库 `token_cache` 并重启 `portal-backend`，同时结束旧 Windows 会话后再验收最终命令行。
 
 ### 阶段 B：Windows 只读盘点
 
@@ -55,6 +67,7 @@ pwsh -File scripts\windows\export-guacdrive-security-baseline.ps1
 - 许可证、数据库、Git、包仓库、AI/MCP 和业务服务按 HOST/PORT 或受控域名放行。
 - 不使用 `*` 作为任意网络目标。
 - VSCode 部署 AllowedExtensions / `extensions.allowed` 企业策略，只放行管理端登记并审核的扩展。
+- 对已知 Portal 用户运行 `scripts\windows\set-vscode-guacdrive-profile-settings.ps1`，将 `tsclient` 写入各自 `security.allowedUNCHosts`；新增用户必须同步执行。
 - profile 的允许项必须与 AppLocker、Firewall 和企业策略实际配置一致；Portal 的 JSON 不是 Windows 策略替代品。
 
 ## 3. 验收矩阵
@@ -67,12 +80,14 @@ pwsh -File scripts\windows\export-guacdrive-security-baseline.ps1
 - VSCode 默认打开 GuacDrive 工作区。
 - 允许的终端、Tasks、Run、Build、Debug、Git、包管理和扩展正常。
 - 管理员桌面仍通过独立账号和资源域可用。
+- AppLocker Enforced 下允许的记事本、计算器和 VSCode 仍能启动。
 
 ### 阻断场景
 
 - 文件对话框输入 `C:\`、`D:\`、`C:\Users`、其他数据卷和其他用户目录。
 - 输入 `\\HOST\share`、`\\HOST\C$` 或映射网络驱动器。
 - 启动 Explorer、Win+R、cmd、PowerShell、wscript/cscript、mshta、taskmgr、control、mmc、安装器。
+- AppLocker 事件日志出现对应 8004 阻断事件，而不是只依赖窗口未出现。
 - 普通业务 RemoteApp 使用剪贴板、浏览器上传/下载、打印或麦克风。
 - VSCode 启动未登记 shell、工具链、调试器、扩展或访问未登记网络目标。
 - 普通用户通过旧 ACL 或直接 API 请求访问 `admin_desktop`。
@@ -97,3 +112,4 @@ pwsh -File scripts\windows\export-guacdrive-security-baseline.ps1
 - 允许的 VSCode、宏、插件、扩展或应用漏洞可能访问该共享账号仍有权限读取的路径。
 - “全部权限默认勾选”会扩大受控 VSCode 能力，但不会解除程序、扩展、路径和网络白名单。
 - 高敏和不可信执行场景应升级为独立 Windows 账号、独占 VM 或 Worker。
+- 当前试点依赖 RDP Wrapper 提供多会话，且 Defender 被本地策略关闭、Windows Update 仍有 3 项待安装；正式上线前必须改为有许可证的 RDS Session Host，或由负责人明确接受该支持和更新风险。

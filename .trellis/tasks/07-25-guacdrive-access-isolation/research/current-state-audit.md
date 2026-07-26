@@ -49,6 +49,15 @@ No credential values were read or recorded.
 - General restrictions target normal workflows and common escape paths; they do not establish a hostile-code-resistant tenant boundary.
 - The pre-change Git baseline is preserved by branch `codex/backup-general-restriction-20260725` and annotated tag `backup-general-restriction-20260725-dcfd0c0`, both resolving to commit `dcfd0c0`.
 
+## VSCode decision and current gap, 2026-07-26
+
+- The user confirmed that general restrictions apply to all ordinary portal users, but VSCode remains an ordinary-user application. Full desktop and validation desktop remain administrator-only.
+- The live VSCode record uses `||Visual Studio Code` with `--user-data-dir=C:\PortalProfiles\{user_id} --extensions-dir=C:\PortalExtensions\{user_id} --disable-gpu`.
+- `backend/router.py:106-108` currently passes `remote_app_args` unchanged. No code path expands `{user_id}`.
+- `docs/debug-notebook.md:1650-1705` describes a proposed replacement, but the proposed code is absent from the current implementation. The live configuration therefore risks using a literal shared `{user_id}` directory.
+- Official VSCode CLI documentation confirms that `--user-data-dir` and `--extensions-dir` create separate user-data and extension roots: https://code.visualstudio.com/docs/configure/command-line
+- Official VSCode enterprise documentation supports centrally enforced `AllowedExtensions` / `extensions.allowed` policies: https://code.visualstudio.com/docs/enterprise/policies and https://code.visualstudio.com/docs/enterprise/extensions
+
 ## Conclusion
 
 The current per-user GuacDrive mapping remains valid. This phase will combine Portal fail-closed rules, Guacamole channel restrictions, a separate shared low-privilege Windows account for ordinary users, GPO, targeted NTFS permissions, AppLocker, firewall rules, and session cleanup. The result is a practical general restriction, not hard isolation.

@@ -17,9 +17,11 @@ Rollback references:
 
 ## Phase 1. Inventory and application classification
 
-- [ ] 确认一般限制默认适用于全部普通门户用户。
+- [x] 确认一般限制默认适用于全部普通门户用户。
 - [ ] 将记事本作为首个 restricted pilot；计算器用于启动 smoke。
-- [ ] 将完整桌面、验证桌面和 VSCode 标记为 admin-only。
+- [x] 将完整桌面和验证桌面标记为 admin-only。
+- [x] 将 VSCode 保留给普通用户，并规划为独立的 `restricted_vscode`。
+- [ ] 确认 VSCode 是否需要内置终端和 Tasks 执行能力。
 - [ ] 盘点真实仿真应用的可执行文件、DLL、脚本、工作目录、许可证端点和子进程。
 - [ ] 导出目标 Windows 主机现有 GPO、NTFS、AppLocker、Firewall 和 RDS 策略。
 
@@ -30,10 +32,11 @@ Validation:
 
 ## Phase 2. Immediate portal/config containment
 
-- [ ] 从普通用户 ACL 移除完整桌面、验证桌面和 VSCode。
+- [ ] 从普通用户 ACL 移除完整桌面和验证桌面；保留 VSCode ACL 但切换到 `restricted_vscode`。
 - [ ] 普通应用统一关闭 copy/paste、browser upload/download、printing 和 audio input。
 - [ ] 人工发布规则要求 `remote_app` 非空。
 - [ ] 管理员连接改用独立 Windows 账号和资源池。
+- [ ] VSCode 强制使用每门户用户独立的 user-data/extensions 启动参数和扩展 allowlist。
 - [ ] 禁止使用根 `docker-compose.yml` 对外暴露 Guacamole 8080，只使用正式部署入口。
 
 Validation:
@@ -53,6 +56,7 @@ Rollback:
 - [ ] 配置 NTFS 最小权限；阻止其他 profile、数据卷、备份和管理目录。
 - [ ] 设置 profile、Temp、Recent 和应用缓存清理。
 - [ ] 部署 AppLocker Audit，收集目标应用真实依赖。
+- [ ] 单独采集 VSCode 的 Code.exe 子进程、扩展宿主、终端、Tasks、Debug 和批准工具链行为。
 - [ ] 规则收敛后切换 AppLocker Enforced。
 - [ ] Windows Firewall 阻断 SMB/WebDAV/非必要出口，放行许可证和业务依赖。
 - [ ] 保持 RDP drive redirection，使 GuacDrive 可用。
@@ -74,18 +78,25 @@ Rollback:
 ## Phase 4. Portal fail-closed implementation
 
 - [ ] 数据库/模型增加 `restricted_remoteapp` 与 `admin_desktop` 安全模式。
+- [ ] 数据库/模型增加 `restricted_vscode` 安全模式。
 - [ ] `backend/models.py`：受限模式要求 `remote_app` 非空。
 - [ ] `backend/admin_router.py`：拒绝不兼容模式、通道和应用类型；保留 session cache invalidation。
 - [ ] `backend/router.py`：受限配置不完整时拒绝启动，不允许回退桌面。
+- [ ] `backend/router.py`：仅展开允许的 `{user_id}` 占位符，并校验 VSCode user-data/extensions 路径位于固定根目录。
 - [ ] `backend/guacamole_crypto.py`：集中生成不可放宽的一般限制参数。
 - [ ] 管理 UI 显示安全模式、最终生效参数和不兼容原因。
 - [ ] 审计记录安全模式、门户用户、资源、共享 Windows 身份标识和阻断原因。
+- [ ] 部署 VSCode 企业 AllowedExtensions policy，并记录实际生效策略。
 - [ ] 更新 README、架构/安全文档及 `issue_log.md`。
 
 Tests:
 
 - restricted create/update 对空 `remote_app` 返回 400。
 - restricted launch 不会回退完整桌面。
+- VSCode 参数中的 `{user_id}` 被安全展开；未知占位符或危险参数被拒绝。
+- 用户 A/B 的 VSCode user-data/extensions 参数不同，且 Guacamole token 中不存在字面量 `{user_id}`。
+- 未审核扩展不能安装或运行。
+- VSCode 终端、Tasks、Debug 和子进程符合用户最终批准的能力范围。
 - 应用级 override 不能开启 copy/paste、browser transfer、printing 或 audio input。
 - 普通 ACL 不接受 admin_desktop 应用。
 - 管理员连接保持可用但使用独立身份/资源池。
@@ -95,6 +106,7 @@ Tests:
 
 - [ ] 使用真实 Docker/MySQL、真实浏览器和真实 Windows RemoteApp 会话验证。
 - [ ] 先迁移记事本，再迁移一个真实业务/仿真应用。
+- [ ] 独立执行 VSCode A/B 用户并发、扩展策略、默认工作区和终端/任务能力验收。
 - [ ] 每次仅扩大一个应用、资源池或用户组。
 - [ ] 保存 Windows GPO、AppLocker、Firewall 和 Portal 审计证据。
 - [ ] 验收报告列出残余风险，禁止写“硬隔离”或“绝对只能访问 GuacDrive”。
@@ -108,7 +120,7 @@ Suggested repository checks:
 
 ## Review gates
 
-1. 用户确认普通用户与管理员应用边界。
+1. 用户确认 VSCode 内置终端和 Tasks 的能力范围。
 2. 试点主机 AppLocker Audit 证明应用依赖已收敛。
 3. 常见逃逸矩阵失败，GuacDrive 正向操作成功。
 4. Portal fail-closed 测试与真实浏览器验证通过。

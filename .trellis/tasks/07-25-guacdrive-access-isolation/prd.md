@@ -21,6 +21,7 @@
 
 - 2026-07-25：本阶段采用“一般限制”，暂不改成每门户用户独立 Windows 账号或每会话独占 VM。
 - 现有代码已建立 Git 回滚锚点：分支 `codex/backup-general-restriction-20260725` 和标签 `backup-general-restriction-20260725-dcfd0c0`，均指向规划调整前提交 `dcfd0c0`。
+- 2026-07-26：一般限制默认覆盖全部普通门户用户；完整桌面和“验证节点-桌面与脚本”仅保留给管理员；VSCode 仍属于普通用户应用，但必须使用独立的受限 VSCode profile。
 
 ## Requirements
 
@@ -31,15 +32,16 @@
 
 ### R2. Separate ordinary and administrative connection domains
 
-- 普通用户只允许受控 RemoteApp，不允许完整桌面、VSCode、文件管理器、终端、脚本宿主或通用 launcher。
-- 当前“远程桌面”“验证节点-桌面与脚本”和 VSCode 必须归入管理员连接域，不向普通用户授权。
+- 普通用户只允许受控 RemoteApp，不允许完整桌面、文件管理器或通用 launcher；VSCode 作为明确例外，进入专用的 `restricted_vscode` 模式。
+- 当前“远程桌面”和“验证节点-桌面与脚本”必须归入管理员连接域，不向普通用户授权。
+- VSCode 保持普通用户可见，但不能与普通业务 RemoteApp 使用完全相同的 AppLocker、扩展和进程策略。
 - 普通连接使用专门的共享低权限 Windows 账号；管理员桌面使用不同账号和资源池，不能继续共用同一个 Windows 身份。
 
 ### R3. Add a fail-closed general-restriction mode
 
 - 一般限制模式必须配置非空 `remote_app`；保存和启动时均拒绝回退到完整桌面。
 - `remote_app_args` 必须由受控模板生成或校验，不能作为任意命令入口。
-- 管理端必须明确显示“一般限制 RemoteApp”和“管理员桌面”，并阻止不兼容配置授权给普通用户。
+- 管理端必须明确显示“一般限制 RemoteApp”“受限 VSCode”和“管理员桌面”，并阻止不兼容配置授权给普通用户。
 
 ### R4. Minimize Guacamole/RDP channels
 
@@ -71,9 +73,19 @@
 - 产品和运维文档必须明确：该模式阻断正常操作和常见绕过，不承诺允许应用漏洞、宏、插件或任意文件 API 永远无法访问共享账号有权限读取的本地文件。
 - 高敏、多租户或外部不可信用户仍需升级为独立 Windows 账号或独占 VM/Worker。
 
+### R9. Add a dedicated ordinary-user VSCode profile
+
+- 当前运行库中的 VSCode 参数为 `--user-data-dir=C:\PortalProfiles\{user_id} --extensions-dir=C:\PortalExtensions\{user_id} --disable-gpu`。
+- 当前 `backend/router.py:106-108` 直接传递 `remote_app_args`，没有实现 `{user_id}` 替换；实施时必须只允许受控占位符并安全展开，不能继续把 `{user_id}` 字面量传给 Windows。
+- 每个门户用户必须得到不同的实际 `--user-data-dir` 和 `--extensions-dir`，避免 Electron 单实例锁、设置和扩展目录相互覆盖。
+- 使用 VSCode 企业 `AllowedExtensions` / `extensions.allowed` 策略，只允许管理员审核的扩展；普通用户不能任意安装或启用扩展。
+- VSCode 启动后默认打开 GuacDrive 工作区；不得把本地 Desktop、Documents、Temp 或其他本地目录作为业务工作区。
+- VSCode 仍强制关闭 Guacamole copy/paste、browser upload/download、printing 和 audio input。
+- VSCode 内置终端、Tasks、Debug 和允许的编译/解释器进程范围由单独决策确定；默认建议禁用终端并由 AppLocker 阻断 shell。
+
 ## Acceptance Criteria
 
-- [ ] 普通用户应用列表不包含完整桌面、验证桌面或 VSCode。
+- [ ] 普通用户应用列表包含受限 VSCode，但不包含完整桌面或验证桌面。
 - [ ] 一般限制连接缺少 `remote_app` 时，创建、更新和启动均 fail closed。
 - [ ] 标准打开/另存为对话框仅明显展示 GuacDrive；输入 `C:\`、`D:\`、其他数据卷和其他用户目录时，常规访问被拒绝。
 - [ ] `\\tsclient\GuacDrive` 可正常打开、保存、覆盖、重命名、删除和处理大文件。
@@ -81,6 +93,9 @@
 - [ ] 浏览器与远端双向剪贴板、Guacamole 上传/下载、打印、音频输入及非必要设备通道均不可用。
 - [ ] `\\HOST\share`、`\\HOST\C$`、SMB 和未授权网络目的地不可达；允许的许可证/业务依赖保持正常。
 - [ ] 共享 profile 的 Desktop、Documents、Downloads、Temp 和 Recent 不承载业务文件，并在会话结束后按策略清理。
+- [ ] 用户 A/B 启动 VSCode 时，最终生成的 `--user-data-dir` 和 `--extensions-dir` 不同，且连接参数中不存在未展开的 `{user_id}`。
+- [ ] VSCode 默认工作区指向当前用户 GuacDrive，未审核扩展不能安装或运行。
+- [ ] VSCode 终端、Tasks、Debug 和子进程行为符合最终批准的 VSCode 能力范围，并纳入 AppLocker 与真实会话验收。
 - [ ] Portal ACL、session cache、多标签、文件 API、Nginx 内部下载和管理员专用连接未被破坏。
 - [ ] 验收报告明确记录共享账号、允许应用能力和 Windows 程序 API 造成的残余风险，不使用“硬隔离”表述。
 
@@ -94,4 +109,4 @@
 
 ## Open Question
 
-- 是否将“一般限制”默认应用于全部普通门户用户，并明确把完整桌面、验证桌面和 VSCode 仅保留给管理员？推荐答案：是。
+- 普通用户的 VSCode 是否必须保留内置终端和 Tasks 执行能力？推荐答案：不保留，先做编辑器 + 白名单扩展模式；如业务确实需要，再为指定编译器/解释器和受控 shell 单独设计 allowlist。

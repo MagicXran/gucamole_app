@@ -58,6 +58,13 @@ No credential values were read or recorded.
 - Official VSCode CLI documentation confirms that `--user-data-dir` and `--extensions-dir` create separate user-data and extension roots: https://code.visualstudio.com/docs/configure/command-line
 - Official VSCode enterprise documentation supports centrally enforced `AllowedExtensions` / `extensions.allowed` policies: https://code.visualstudio.com/docs/enterprise/policies and https://code.visualstudio.com/docs/enterprise/extensions
 
+## Controlled-development default decision, 2026-07-26
+
+- The user selected controlled development mode and requested every implemented permission control to be visible and selected by default.
+- The agreed interpretation is: all grantable booleans default to allowed, while program, extension, path, and network allowlists remain mandatory and cannot use unrestricted wildcards.
+- The current production admin entry is the built Vue `portal_ui`: `backend/app.py:178-198` mounts `frontend/portal`, and `deploy/portal.Dockerfile:12-16,31-32` builds/copies `portal_ui`. The legacy plain-JS admin is not the primary implementation target.
+- Existing reusable patterns include stable columns plus JSON policies in `remote_app_script_profile` / `app_binding`, script profile normalization in `backend/script_profiles.py`, app CRUD/session invalidation in `backend/admin_router.py`, and the Vue admin service/store/type/component split.
+
 ## Conclusion
 
 The current per-user GuacDrive mapping remains valid. This phase will combine Portal fail-closed rules, Guacamole channel restrictions, a separate shared low-privilege Windows account for ordinary users, GPO, targeted NTFS permissions, AppLocker, firewall rules, and session cleanup. The result is a practical general restriction, not hard isolation.

@@ -8,6 +8,7 @@
 - Guacamole 通过 RDPDR 将该目录映射为 Windows 会话中的 `\\tsclient\GuacDrive`。
 - `remote_app_args` 当前从数据库读取后直接传给 `GuacamoleCrypto.build_rdp_connection()`，没有通用模板展开步骤。
 - 当前阶段规划采用“一般限制”：完整桌面和验证桌面仅管理员使用，VSCode 保留给普通用户并采用专用受限 profile。
+- VSCode 采用受控开发模式：全部可授予权限默认勾选，但只对已登记的程序、扩展和网络目标生效；强制安全基线不能取消。
 
 ## ISSUE-001：VSCode `{user_id}` 启动参数未在实际代码中展开
 

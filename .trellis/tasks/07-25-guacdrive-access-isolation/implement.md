@@ -1,6 +1,6 @@
 # Implementation Plan: RemoteApp GuacDrive 一般访问限制
 
-> 当前状态：仅规划。用户确认应用范围后才能运行 `task.py start`。
+> 当前状态：规划已收敛。用户批准进入实施后才能运行 `task.py start`。
 
 ## Phase 0. Git rollback baseline
 
@@ -21,7 +21,7 @@ Rollback references:
 - [ ] 将记事本作为首个 restricted pilot；计算器用于启动 smoke。
 - [x] 将完整桌面和验证桌面标记为 admin-only。
 - [x] 将 VSCode 保留给普通用户，并规划为独立的 `restricted_vscode`。
-- [ ] 确认 VSCode 是否需要内置终端和 Tasks 执行能力。
+- [x] 确认 VSCode 采用受控开发模式，默认允许终端、Tasks、Run、Build、Debug 和全部已列权限。
 - [ ] 盘点真实仿真应用的可执行文件、DLL、脚本、工作目录、许可证端点和子进程。
 - [ ] 导出目标 Windows 主机现有 GPO、NTFS、AppLocker、Firewall 和 RDS 策略。
 
@@ -33,7 +33,7 @@ Validation:
 ## Phase 2. Immediate portal/config containment
 
 - [ ] 从普通用户 ACL 移除完整桌面和验证桌面；保留 VSCode ACL 但切换到 `restricted_vscode`。
-- [ ] 普通应用统一关闭 copy/paste、browser upload/download、printing 和 audio input。
+- [ ] 普通 `restricted_remoteapp` 统一关闭 copy/paste、browser upload/download、printing 和 audio input；`restricted_vscode` 改由 control profile 管理并默认允许全部列出的通道权限。
 - [ ] 人工发布规则要求 `remote_app` 非空。
 - [ ] 管理员连接改用独立 Windows 账号和资源池。
 - [ ] VSCode 强制使用每门户用户独立的 user-data/extensions 启动参数和扩展 allowlist。
@@ -42,7 +42,7 @@ Validation:
 Validation:
 
 - 普通用户只看到受控 RemoteApp。
-- 每个普通连接生成强制的 disable 参数。
+- `restricted_remoteapp` 生成强制 disable 参数；`restricted_vscode` 根据默认全选 profile 生成允许参数。
 - Portal `/guacamole/` 正常，直接 8080 不可达。
 
 Rollback:
@@ -77,14 +77,22 @@ Rollback:
 
 ## Phase 4. Portal fail-closed implementation
 
-- [ ] 数据库/模型增加 `restricted_remoteapp` 与 `admin_desktop` 安全模式。
-- [ ] 数据库/模型增加 `restricted_vscode` 安全模式。
+- [ ] 子任务 A：数据库、Backend profile/service/Admin API 和单元测试。
+- [ ] 子任务 B：`portal_ui` VSCode 策略页面、应用绑定和前端测试。
+- [ ] 子任务 C：启动时 effective policy、Guacamole 参数、`{user_id}` 展开和缓存失效。
+- [ ] 子任务 D：Windows GPO/AppLocker/Firewall 试点脚本、操作文档和真实验收。
+- [ ] 数据库/模型增加 `restricted_remoteapp`、`restricted_vscode` 与 `admin_desktop` 安全模式。
+- [ ] 新增 `vscode_control_profile` 表和 `remote_app.vscode_control_profile_id`。
+- [ ] 新增 `backend/vscode_policy_service.py`，维护唯一 control catalog、默认全部允许、profile 校验和 effective policy。
+- [ ] 新建 `default-controlled` profile，全部可授予权限为 true；必需 allowlist 未配置时保持 invalid，禁止启动。
 - [ ] `backend/models.py`：受限模式要求 `remote_app` 非空。
-- [ ] `backend/admin_router.py`：拒绝不兼容模式、通道和应用类型；保留 session cache invalidation。
+- [ ] `backend/models.py`：增加 profile CRUD、permissions、allowlists 和 effective response schema。
+- [ ] `backend/admin_router.py`：增加 profile/catalog/effective API，拒绝未知 control、空必需 allowlist 和不兼容应用模式；保留 session cache invalidation。
 - [ ] `backend/router.py`：受限配置不完整时拒绝启动，不允许回退桌面。
 - [ ] `backend/router.py`：仅展开允许的 `{user_id}` 占位符，并校验 VSCode user-data/extensions 路径位于固定根目录。
-- [ ] `backend/guacamole_crypto.py`：集中生成不可放宽的一般限制参数。
-- [ ] 管理 UI 显示安全模式、最终生效参数和不兼容原因。
+- [ ] `backend/router.py`：将 profile 的 data-channel 权限映射为最终 Guacamole 参数，覆盖 VSCode 应用旧字段。
+- [ ] `portal_ui` 新增独立 VSCode 策略管理页面、store/service/types 和应用 profile 选择器。
+- [ ] 管理 UI 完整列出所有权限，默认全选，并提供全选/全不选/恢复默认、锁定基线、allowlist 编辑和 effective preview。
 - [ ] 审计记录安全模式、门户用户、资源、共享 Windows 身份标识和阻断原因。
 - [ ] 部署 VSCode 企业 AllowedExtensions policy，并记录实际生效策略。
 - [ ] 更新 README、架构/安全文档及 `issue_log.md`。
@@ -96,8 +104,13 @@ Tests:
 - VSCode 参数中的 `{user_id}` 被安全展开；未知占位符或危险参数被拒绝。
 - 用户 A/B 的 VSCode user-data/extensions 参数不同，且 Guacamole token 中不存在字面量 `{user_id}`。
 - 未审核扩展不能安装或运行。
-- VSCode 终端、Tasks、Debug 和子进程符合用户最终批准的能力范围。
-- 应用级 override 不能开启 copy/paste、browser transfer、printing 或 audio input。
+- 默认 profile 的全部 control code 为 true，UI 全部勾选。
+- 全选/全不选/恢复默认均有前后端契约测试。
+- true 权限缺少必需 allowlist 时 profile 无法激活或绑定。
+- 终端、Tasks、Run、Build、Debug 只能启动 allowlist 中的 shell、工具链和调试器。
+- AI/Agent/MCP、浏览器、端口转发、远程开发和网络权限均有独立字段、执行层和测试。
+- VSCode data-channel 权限正确映射 disable-copy/paste/download/upload、printing 和 audio 参数。
+- `restricted_remoteapp` 的应用级 override 不能开启 copy/paste、browser transfer、printing 或 audio input；`restricted_vscode` 只能通过 profile 改变这些权限。
 - 普通 ACL 不接受 admin_desktop 应用。
 - 管理员连接保持可用但使用独立身份/资源池。
 - `_build_all_connections()` 保留 per-user token 多标签和缓存失效行为。
@@ -120,7 +133,7 @@ Suggested repository checks:
 
 ## Review gates
 
-1. 用户确认 VSCode 内置终端和 Tasks 的能力范围。
+1. 用户批准本次收敛后的 PRD、完整控制目录和默认全选语义，并允许 `task.py start`。
 2. 试点主机 AppLocker Audit 证明应用依赖已收敛。
 3. 常见逃逸矩阵失败，GuacDrive 正向操作成功。
 4. Portal fail-closed 测试与真实浏览器验证通过。

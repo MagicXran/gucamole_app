@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "用户已选择一般限制并确认覆盖全部普通用户；完整桌面和验证桌面为管理员专用，VSCode 保留给普通用户并采用 restricted_vscode。规划前基线已由备份分支和 annotated tag 保存。",
+  "notes": "用户已选择一般限制并确认覆盖全部普通用户；完整桌面和验证桌面为管理员专用；VSCode 采用 restricted_vscode 受控开发模式，全部可授予控制项默认勾选，但程序、扩展、路径和网络白名单为不可绕过边界。规划前基线已由备份分支和 annotated tag 保存。",
   "meta": {}
 }

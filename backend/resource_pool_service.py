@@ -447,6 +447,13 @@ class ResourcePoolService:
             JOIN remote_app_acl acl ON acl.app_id = a.id AND acl.user_id = %(user_id)s
             WHERE a.pool_id = %(pool_id)s
               AND a.is_active = 1
+              AND (
+                  a.security_mode <> 'admin_desktop'
+                  OR EXISTS (
+                      SELECT 1 FROM portal_user pu
+                      WHERE pu.id = %(user_id)s AND pu.is_admin = 1
+                  )
+              )
               AND (h.cooldown_until IS NULL OR h.cooldown_until <= NOW())
               AND COALESCE(h.health_status, 'unknown') NOT IN ('cooldown', 'unreachable')
             HAVING active_count < a.member_max_concurrent
@@ -540,6 +547,13 @@ class ResourcePoolService:
               ON h.remote_app_id = a.id
             WHERE a.pool_id IS NULL
               AND a.is_active = 1
+              AND (
+                  a.security_mode <> 'admin_desktop'
+                  OR EXISTS (
+                      SELECT 1 FROM portal_user pu
+                      WHERE pu.id = %(user_id)s AND pu.is_admin = 1
+                  )
+              )
             GROUP BY a.id, a.name, a.icon, a.app_kind, a.protocol, a.member_max_concurrent,
                      sp.is_enabled, h.health_status, h.consecutive_failures, h.cooldown_until, h.last_failure_reason
             ORDER BY a.name ASC, a.id ASC
@@ -635,6 +649,13 @@ class ResourcePoolService:
             JOIN remote_app_acl acl ON acl.app_id = a.id AND acl.user_id = %(user_id)s
             WHERE a.pool_id = %(pool_id)s
               AND a.is_active = 1
+              AND (
+                  a.security_mode <> 'admin_desktop'
+                  OR EXISTS (
+                      SELECT 1 FROM portal_user pu
+                      WHERE pu.id = %(user_id)s AND pu.is_admin = 1
+                  )
+              )
             LIMIT 1
             """,
             {"user_id": user_id, "pool_id": pool_id},
@@ -678,6 +699,13 @@ class ResourcePoolService:
               ON q.pool_id = p.id
              AND q.status IN ('queued', 'ready', 'launching')
             WHERE p.is_active = 1
+              AND (
+                  a.security_mode <> 'admin_desktop'
+                  OR EXISTS (
+                      SELECT 1 FROM portal_user pu
+                      WHERE pu.id = %(user_id)s AND pu.is_admin = 1
+                  )
+              )
             GROUP BY p.id, p.name, p.icon, p.max_concurrent
             ORDER BY p.name ASC, p.id ASC
             """,
@@ -900,6 +928,13 @@ class ResourcePoolService:
               ON p.id = a.pool_id
             WHERE a.id = %(app_id)s
               AND a.is_active = 1
+              AND (
+                  a.security_mode <> 'admin_desktop'
+                  OR EXISTS (
+                      SELECT 1 FROM portal_user pu
+                      WHERE pu.id = %(user_id)s AND pu.is_admin = 1
+                  )
+              )
             LIMIT 1
             """,
             {"user_id": user_id, "app_id": requested_app_id},
@@ -948,6 +983,13 @@ class ResourcePoolService:
                     JOIN remote_app_acl acl ON acl.app_id = a.id AND acl.user_id = %(user_id)s
                     WHERE a.id = %(member_app_id)s
                       AND a.is_active = 1
+                      AND (
+                          a.security_mode <> 'admin_desktop'
+                          OR EXISTS (
+                              SELECT 1 FROM portal_user pu
+                              WHERE pu.id = %(user_id)s AND pu.is_admin = 1
+                          )
+                      )
                     LIMIT 1
                     """,
                     {"member_app_id": int(entry["assigned_app_id"]), "user_id": user_id},
@@ -1534,6 +1576,13 @@ class ResourcePoolService:
                   ON p.id = a.pool_id
                 WHERE a.id = %(app_id)s
                   AND a.is_active = 1
+                  AND (
+                      a.security_mode <> 'admin_desktop'
+                      OR EXISTS (
+                          SELECT 1 FROM portal_user pu
+                          WHERE pu.id = %(user_id)s AND pu.is_admin = 1
+                      )
+                  )
                 LIMIT 1
                 """,
                 {"user_id": q_user_id, "app_id": int(row["requested_app_id"])},
@@ -1552,6 +1601,13 @@ class ResourcePoolService:
                     JOIN remote_app_acl acl ON acl.app_id = a.id AND acl.user_id = %(user_id)s
                     WHERE a.id = %(member_app_id)s
                       AND a.is_active = 1
+                      AND (
+                          a.security_mode <> 'admin_desktop'
+                          OR EXISTS (
+                              SELECT 1 FROM portal_user pu
+                              WHERE pu.id = %(user_id)s AND pu.is_admin = 1
+                          )
+                      )
                     LIMIT 1
                     """,
                     {"member_app_id": int(row["assigned_app_id"]), "user_id": q_user_id},

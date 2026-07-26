@@ -15,6 +15,7 @@ REQUIRED_TABLES = [
     "portal_user",
     "remote_app",
     "remote_app_health",
+    "vscode_control_profile",
     "catalog_app",
     "app_binding",
     "remote_app_script_profile",
@@ -38,8 +39,17 @@ REQUIRED_TABLES = [
 ]
 
 REQUIRED_COLUMNS = {
-    "remote_app": {"app_kind", "pool_id", "member_max_concurrent", "disable_download", "disable_upload"},
+    "remote_app": {
+        "app_kind", "pool_id", "member_max_concurrent", "disable_download", "disable_upload",
+        "security_mode", "vscode_control_profile_id",
+    },
     "remote_app_health": {"health_status", "consecutive_failures", "cooldown_until", "last_failure_reason"},
+    "vscode_control_profile": {
+        "profile_key", "policy_version", "permissions_json", "allowed_shells_json",
+        "allowed_tools_json", "allowed_debuggers_json", "allowed_extensions_json",
+        "allowed_network_targets_json", "user_data_root", "extensions_root",
+        "default_workspace_template", "revision",
+    },
     "launch_queue": {"request_mode", "platform_task_id"},
     "active_session": {"pool_id", "queue_id", "last_activity_at", "reclaim_reason"},
     "portal_user": {"quota_bytes", "department"},
@@ -67,6 +77,17 @@ REQUIRED_NULL_DEFAULT_COLUMNS = {
     ("remote_app", "disable_download"),
     ("remote_app", "disable_upload"),
 }
+REQUIRED_NOT_NULL_DEFAULT_COLUMNS = {
+    ("remote_app", "security_mode"): "restricted_remoteapp",
+}
+REQUIRED_DATA_TYPES = {
+    ("vscode_control_profile", "permissions_json"): "json",
+    ("vscode_control_profile", "allowed_shells_json"): "json",
+    ("vscode_control_profile", "allowed_tools_json"): "json",
+    ("vscode_control_profile", "allowed_debuggers_json"): "json",
+    ("vscode_control_profile", "allowed_extensions_json"): "json",
+    ("vscode_control_profile", "allowed_network_targets_json"): "json",
+}
 SCHEMA_CONNECT_TIMEOUT_SECONDS = 5
 
 
@@ -82,7 +103,7 @@ def verify_schema(cursor) -> list[str]:
 
     cursor.execute(
         """
-        SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE, COLUMN_DEFAULT
+        SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE, COLUMN_DEFAULT, DATA_TYPE
         FROM information_schema.COLUMNS
         WHERE TABLE_SCHEMA = DATABASE()
         """
@@ -97,6 +118,7 @@ def verify_schema(cursor) -> list[str]:
             column_attrs[(table_name, column_name)] = {
                 "is_nullable": str(row[2]).upper() == "YES",
                 "column_default": row[3],
+                "data_type": str(row[4]).lower() if len(row) >= 5 else None,
             }
 
     problems = []
@@ -117,6 +139,20 @@ def verify_schema(cursor) -> list[str]:
             problems.append(f"column should be nullable: {table_name}.{column_name}")
         if attrs["column_default"] is not None:
             problems.append(f"column default should be NULL: {table_name}.{column_name}")
+
+    for (table_name, column_name), expected_default in sorted(REQUIRED_NOT_NULL_DEFAULT_COLUMNS.items()):
+        attrs = column_attrs.get((table_name, column_name))
+        if not attrs:
+            continue
+        if attrs["is_nullable"]:
+            problems.append(f"column should be NOT NULL: {table_name}.{column_name}")
+        if str(attrs["column_default"]) != expected_default:
+            problems.append(f"column default should be {expected_default}: {table_name}.{column_name}")
+
+    for (table_name, column_name), expected_type in sorted(REQUIRED_DATA_TYPES.items()):
+        attrs = column_attrs.get((table_name, column_name))
+        if attrs and attrs.get("data_type") and attrs["data_type"] != expected_type:
+            problems.append(f"column type should be {expected_type}: {table_name}.{column_name}")
 
     return problems
 

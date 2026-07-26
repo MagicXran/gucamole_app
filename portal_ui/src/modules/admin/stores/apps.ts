@@ -10,6 +10,7 @@ import {
   listAdminWorkerGroups,
   updateAdminApp,
 } from '@/modules/admin/services/api/apps'
+import { listVscodeControlProfiles } from '@/modules/admin/services/api/vscodePolicies'
 import type {
   AdminAppFormPayload,
   AdminAppRecord,
@@ -18,6 +19,7 @@ import type {
   AdminWorkerGroup,
   PoolAttachments,
 } from '@/modules/admin/types/apps'
+import type { VscodeControlProfile } from '@/modules/admin/types/vscodePolicies'
 
 export function emptyPoolAttachments(poolId = 0): PoolAttachments {
   return {
@@ -42,6 +44,7 @@ export const useAdminAppsStore = defineStore('admin-apps', () => {
   const pools = ref<AdminPoolRecord[]>([])
   const workerGroups = ref<AdminWorkerGroup[]>([])
   const scriptProfiles = ref<AdminScriptProfile[]>([])
+  const vscodeControlProfiles = ref<VscodeControlProfile[]>([])
   const loading = ref(false)
   const saving = ref(false)
   const errorMessage = ref('')
@@ -87,8 +90,17 @@ export const useAdminAppsStore = defineStore('admin-apps', () => {
     }
   }
 
+  async function loadVscodeControlProfiles() {
+    try {
+      const response = await listVscodeControlProfiles()
+      vscodeControlProfiles.value = response.data.items
+    } catch {
+      vscodeControlProfiles.value = []
+    }
+  }
+
   async function bootstrap() {
-    await Promise.all([loadApps(), loadPools(), loadWorkerGroups(), loadScriptProfiles()])
+    await Promise.all([loadApps(), loadPools(), loadWorkerGroups(), loadScriptProfiles(), loadVscodeControlProfiles()])
   }
 
   async function saveApp(appId: number | null, payload: AdminAppFormPayload) {
@@ -127,6 +139,7 @@ export const useAdminAppsStore = defineStore('admin-apps', () => {
     pools,
     workerGroups,
     scriptProfiles,
+    vscodeControlProfiles,
     loading,
     saving,
     errorMessage,
@@ -134,6 +147,7 @@ export const useAdminAppsStore = defineStore('admin-apps', () => {
     loadApps,
     loadWorkerGroups,
     loadScriptProfiles,
+    loadVscodeControlProfiles,
     saveApp,
     removeApp,
   }

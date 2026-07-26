@@ -14,12 +14,26 @@ vi.mock('@/modules/admin/services/api/apps', () => ({
   updateAdminApp: vi.fn(),
 }))
 
+vi.mock('@/modules/admin/services/api/vscodePolicies', () => ({
+  createVscodeControlProfile: vi.fn(),
+  deleteVscodeControlProfile: vi.fn(),
+  getVscodeControlCatalog: vi.fn(),
+  getVscodeControlProfileEffective: vi.fn(),
+  listVscodeControlProfiles: vi.fn(),
+  updateVscodeControlProfile: vi.fn(),
+}))
+
 const appsApi = await import('@/modules/admin/services/api/apps')
+const vscodePoliciesApi = await import('@/modules/admin/services/api/vscodePolicies')
 
 describe('AdminAppsView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.restoreAllMocks()
+    vi.mocked(vscodePoliciesApi.listVscodeControlProfiles).mockResolvedValue({
+      data: { items: [] },
+      headers: {},
+    } as never)
   })
 
   it('loads runtimes and saves app_kind changes through the Vue admin workbench', async () => {
@@ -375,5 +389,113 @@ describe('AdminAppsView', () => {
       }),
     })
     expect(submitPayload).not.toHaveProperty('attachments')
+  })
+
+  it('binds restricted VSCode to a ready control profile', async () => {
+    const { default: AdminAppFormDialog } = await import('@/modules/admin/components/AdminAppFormDialog.vue')
+    const wrapper = mount(AdminAppFormDialog, {
+      props: {
+        open: true,
+        mode: 'create',
+        saving: false,
+        pools: [],
+        workerGroups: [],
+        scriptProfiles: [],
+        vscodeControlProfiles: [
+          {
+            id: 3,
+            profile_key: 'default-controlled',
+            display_name: '默认受控开发模式',
+            description: '',
+            policy_version: 1,
+            revision: 2,
+            is_active: true,
+            valid: true,
+            validation_errors: [],
+            permissions: {},
+            allowed_shells: [],
+            allowed_tools: [],
+            allowed_debuggers: [],
+            allowed_extensions: [],
+            allowed_network_targets: [],
+            user_data_root: 'C:\\PortalProfiles',
+            extensions_root: 'C:\\PortalExtensions',
+            default_workspace_template: '\\\\tsclient\\GuacDrive',
+          },
+        ],
+        initialApp: null,
+      },
+    })
+
+    await wrapper.get('[data-testid="admin-app-name"]').setValue('VSCode')
+    await wrapper.get('[data-testid="admin-app-hostname"]').setValue('rdp.example.local')
+    await wrapper.get('[data-testid="admin-app-security-mode"]').setValue('restricted_vscode')
+    await wrapper.get('[data-testid="admin-app-remote-app"]').setValue('||Visual Studio Code')
+    await wrapper.get('[data-testid="admin-app-vscode-profile"]').setValue('3')
+    await wrapper.get('[data-testid="admin-app-submit"]').trigger('click')
+
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({
+      payload: expect.objectContaining({
+        security_mode: 'restricted_vscode',
+        vscode_control_profile_id: 3,
+      }),
+    })
+  })
+
+  it('rejects an inactive or invalid VSCode control profile before API submit', async () => {
+    const { default: AdminAppFormDialog } = await import('@/modules/admin/components/AdminAppFormDialog.vue')
+    const invalidProfile = {
+      id: 4,
+      profile_key: 'invalid-policy',
+      display_name: '未就绪策略',
+      description: '',
+      policy_version: 1,
+      revision: 1,
+      is_active: false,
+      valid: false,
+      validation_errors: ['allowed_shells 为空'],
+      permissions: {},
+      allowed_shells: [],
+      allowed_tools: [],
+      allowed_debuggers: [],
+      allowed_extensions: [],
+      allowed_network_targets: [],
+      user_data_root: 'C:\\PortalProfiles',
+      extensions_root: 'C:\\PortalExtensions',
+      default_workspace_template: '\\\\tsclient\\GuacDrive',
+    }
+    const wrapper = mount(AdminAppFormDialog, {
+      props: {
+        open: true,
+        mode: 'edit',
+        saving: false,
+        pools: [],
+        workerGroups: [],
+        scriptProfiles: [],
+        vscodeControlProfiles: [invalidProfile],
+        initialApp: {
+          id: 5,
+          name: 'VSCode',
+          icon: 'desktop',
+          app_kind: 'commercial_software',
+          protocol: 'rdp',
+          hostname: 'rdp.example.local',
+          port: 3389,
+          remote_app: '||Visual Studio Code',
+          security_mode: 'restricted_vscode',
+          vscode_control_profile_id: 4,
+          pool_id: null,
+          member_max_concurrent: 1,
+          is_active: true,
+        },
+      },
+    })
+
+    const option = wrapper.get('[data-testid="admin-app-vscode-profile"] option[value="4"]')
+    expect((option.element as HTMLOptionElement).disabled).toBe(true)
+    await wrapper.get('[data-testid="admin-app-submit"]').trigger('click')
+
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.text()).toContain('只能绑定已启用且有效的控制策略')
   })
 })

@@ -4,6 +4,9 @@ import types
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
+
+from backend.vscode_policy_service import DEFAULT_PERMISSIONS
 
 
 def _load_router_module(
@@ -11,6 +14,7 @@ def _load_router_module(
     app_disable_upload,
     global_disable_download=True,
     global_disable_upload=True,
+    row_overrides=None,
 ):
     fake_database = types.ModuleType("backend.database")
 
@@ -20,7 +24,7 @@ def _load_router_module(
 
         def execute_query(self, query, params):
             self.last_query = query
-            return [{
+            row = {
                 "id": 1,
                 "hostname": "rdp.example.local",
                 "port": 3389,
@@ -32,6 +36,8 @@ def _load_router_module(
                 "remote_app": "",
                 "remote_app_dir": "",
                 "remote_app_args": "",
+                "security_mode": "admin_desktop",
+                "vscode_control_profile_id": None,
                 "color_depth": None,
                 "disable_gfx": 1,
                 "resize_method": "display-update",
@@ -46,7 +52,9 @@ def _load_router_module(
                 "keyboard_layout": None,
                 "disable_download": app_disable_download,
                 "disable_upload": app_disable_upload,
-            }]
+            }
+            row.update(row_overrides or {})
+            return [row]
 
     fake_database.db = FakeDb()
     fake_database.CONFIG = {
@@ -135,6 +143,75 @@ def test_build_all_connections_enforces_per_app_disable_override():
     assert params["disable-upload"] == "true"
 
 
+def test_restricted_remoteapp_forces_strict_channels():
+    router_module = _load_router_module(
+        0,
+        0,
+        global_disable_download=False,
+        global_disable_upload=False,
+        row_overrides={
+            "security_mode": "restricted_remoteapp",
+            "remote_app": "||notepad",
+            "disable_copy": 0,
+            "disable_paste": 0,
+            "enable_printing": 1,
+            "enable_audio_input": 1,
+        },
+    )
+
+    params = router_module._build_all_connections(7)["app_1"]["parameters"]
+
+    assert params["disable-copy"] == "true"
+    assert params["disable-paste"] == "true"
+    assert params["disable-download"] == "true"
+    assert params["disable-upload"] == "true"
+    assert "enable-printing" not in params
+    assert "enable-audio-input" not in params
+
+
+def test_restricted_vscode_expands_user_paths_and_uses_profile_channels():
+    router_module = _load_router_module(
+        1,
+        1,
+        row_overrides={
+            "security_mode": "restricted_vscode",
+            "remote_app": "||Visual Studio Code",
+            "remote_app_args": "--user-data-dir=C:\\PortalProfiles\\{user_id}",
+            "vscode_control_profile_id": 3,
+            "vcp_id": 3,
+            "vcp_profile_key": "default-controlled",
+            "vcp_display_name": "默认受控开发模式",
+            "vcp_description": "",
+            "vcp_policy_version": 1,
+            "vcp_is_active": 1,
+            "vcp_revision": 1,
+            "vcp_permissions_json": DEFAULT_PERMISSIONS,
+            "vcp_allowed_shells_json": [r"C:\\Windows\\System32\\cmd.exe"],
+            "vcp_allowed_tools_json": [r"C:\\Program Files\\Git\\cmd\\git.exe"],
+            "vcp_allowed_debuggers_json": [r"C:\\Tools\\debugger.exe"],
+            "vcp_allowed_extensions_json": ["ms-python.python"],
+            "vcp_allowed_network_targets_json": ["https://packages.example.local"],
+            "vcp_user_data_root": r"C:\\PortalProfiles",
+            "vcp_extensions_root": r"C:\\PortalExtensions",
+            "vcp_default_workspace_template": r"\\tsclient\GuacDrive",
+            "vcp_created_at": None,
+            "vcp_updated_at": None,
+        },
+    )
+
+    params = router_module._build_all_connections(7)["app_1"]["parameters"]
+
+    assert "{user_id}" not in params["remote-app-args"]
+    assert r"C:\PortalProfiles\7" in params["remote-app-args"]
+    assert r"C:\PortalExtensions\7" in params["remote-app-args"]
+    assert "disable-copy" not in params
+    assert "disable-paste" not in params
+    assert "disable-download" not in params
+    assert "disable-upload" not in params
+    assert params["enable-printing"] == "true"
+    assert params["enable-audio-input"] == "true"
+
+
 def _load_admin_router_module():
     fake_database = types.ModuleType("backend.database")
 
@@ -157,12 +234,27 @@ def _load_admin_router_module():
         def execute_query(self, query, params=None, fetch_one=False, conn=None):
             if "FROM resource_pool" in query:
                 return {"id": 1} if fetch_one else [{"id": 1}]
+            if "FROM portal_user" in query:
+                return {"id": params["id"], "username": "ordinary", "is_admin": 0}
+            if "WHERE id IN" in query and "FROM remote_app" in query:
+                return [{
+                    "id": 3,
+                    "name": "管理员桌面",
+                    "remote_app": None,
+                    "remote_app_args": None,
+                    "security_mode": "admin_desktop",
+                    "vscode_control_profile_id": None,
+                }]
             if "SELECT * FROM remote_app WHERE name = %(name)s" in query:
                 return {
                     "id": 9,
                     "name": params["name"],
                     "pool_id": 1,
                     "is_active": 1,
+                    "security_mode": "admin_desktop",
+                    "vscode_control_profile_id": None,
+                    "remote_app": None,
+                    "remote_app_args": None,
                 }
             if "SELECT * FROM remote_app WHERE id = %(id)s" in query:
                 return {
@@ -170,6 +262,10 @@ def _load_admin_router_module():
                     "name": "demo-app",
                     "pool_id": 1,
                     "is_active": 1,
+                    "security_mode": "admin_desktop",
+                    "vscode_control_profile_id": None,
+                    "remote_app": None,
+                    "remote_app_args": None,
                 }
             return {"id": 1} if fetch_one else []
 
@@ -249,6 +345,7 @@ def test_admin_create_app_preserves_transfer_policy_values(policy_value):
         name=f"tri-state-create-{policy_value}",
         hostname="rdp.example.local",
         pool_id=1,
+        security_mode="admin_desktop",
         disable_download=policy_value,
         disable_upload=policy_value,
     )
@@ -288,3 +385,47 @@ def test_admin_update_app_preserves_transfer_policy_values(policy_value):
     assert fake_db.update_params is not None
     assert fake_db.update_params["disable_download"] == policy_value
     assert fake_db.update_params["disable_upload"] == policy_value
+
+
+def test_admin_acl_rejects_admin_desktop_for_ordinary_user():
+    admin_module, _ = _load_admin_router_module()
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    admin = admin_module.UserInfo(
+        user_id=1,
+        username="admin",
+        display_name="管理员",
+        is_admin=True,
+    )
+
+    with pytest.raises(HTTPException, match="普通用户不能授权管理员桌面") as exc_info:
+        admin_module.update_user_acl(
+            user_id=7,
+            req=admin_module.AclUpdateRequest(app_ids=[3]),
+            request=request,
+            admin=admin,
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+def test_admin_create_restricted_app_rejects_empty_remote_app_with_400():
+    admin_module, _ = _load_admin_router_module()
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    admin = admin_module.UserInfo(
+        user_id=1,
+        username="admin",
+        display_name="管理员",
+        is_admin=True,
+    )
+
+    with pytest.raises(HTTPException, match="必须配置非空 remote_app") as exc_info:
+        admin_module.create_app(
+            req=admin_module.AppCreateRequest(
+                name="invalid-restricted-app",
+                hostname="rdp.example.local",
+            ),
+            request=request,
+            admin=admin,
+        )
+
+    assert exc_info.value.status_code == 400

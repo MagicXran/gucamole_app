@@ -41,3 +41,4 @@ deploy/backups/
 node_modules/
 output/
 frontend/portal/
+.pytest-tmp/

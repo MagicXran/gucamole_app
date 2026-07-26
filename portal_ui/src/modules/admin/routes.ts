@@ -9,6 +9,7 @@ import AdminMonitorView from '@/modules/admin/views/AdminMonitorView.vue'
 import AdminPoolsView from '@/modules/admin/views/AdminPoolsView.vue'
 import AdminQueuesView from '@/modules/admin/views/AdminQueuesView.vue'
 import AdminUsersView from '@/modules/admin/views/AdminUsersView.vue'
+import AdminVscodePoliciesView from '@/modules/admin/views/AdminVscodePoliciesView.vue'
 import AdminWorkersView from '@/modules/admin/views/AdminWorkersView.vue'
 
 export const adminRoutes: RouteRecordRaw[] = [
@@ -36,6 +37,13 @@ export const adminRoutes: RouteRecordRaw[] = [
   {
     path: '/admin/apps',
     component: AdminAppsView,
+    meta: {
+      requiresAdmin: true,
+    },
+  },
+  {
+    path: '/admin/vscode-policies',
+    component: AdminVscodePoliciesView,
     meta: {
       requiresAdmin: true,
     },

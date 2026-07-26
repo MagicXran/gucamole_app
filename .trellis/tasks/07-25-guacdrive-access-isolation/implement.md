@@ -7,7 +7,7 @@
 - [x] 确认规划前工作区干净，基线提交为 `dcfd0c0`。
 - [x] 创建备份分支 `codex/backup-general-restriction-20260725`。
 - [x] 创建 annotated tag `backup-general-restriction-20260725-dcfd0c0`。
-- [ ] 实施开始前再次确认 `main` 无用户未提交改动。
+- [x] 实施开始前再次确认 `main` 无用户未提交改动。
 
 Rollback references:
 
@@ -32,11 +32,11 @@ Validation:
 
 ## Phase 2. Immediate portal/config containment
 
-- [ ] 从普通用户 ACL 移除完整桌面和验证桌面；保留 VSCode ACL 但切换到 `restricted_vscode`。
-- [ ] 普通 `restricted_remoteapp` 统一关闭 copy/paste、browser upload/download、printing 和 audio input；`restricted_vscode` 改由 control profile 管理并默认允许全部列出的通道权限。
-- [ ] 人工发布规则要求 `remote_app` 非空。
+- [x] 从普通用户 ACL 移除完整桌面和验证桌面；保留 VSCode ACL 但切换到 `restricted_vscode`。
+- [x] 普通 `restricted_remoteapp` 统一关闭 copy/paste、browser upload/download、printing 和 audio input；`restricted_vscode` 改由 control profile 管理并默认允许全部列出的通道权限。
+- [x] 人工发布规则要求 `remote_app` 非空。
 - [ ] 管理员连接改用独立 Windows 账号和资源池。
-- [ ] VSCode 强制使用每门户用户独立的 user-data/extensions 启动参数和扩展 allowlist。
+- [x] VSCode 强制使用每门户用户独立的 user-data/extensions 启动参数和扩展 allowlist。
 - [ ] 禁止使用根 `docker-compose.yml` 对外暴露 Guacamole 8080，只使用正式部署入口。
 
 Validation:
@@ -77,25 +77,25 @@ Rollback:
 
 ## Phase 4. Portal fail-closed implementation
 
-- [ ] 子任务 A：数据库、Backend profile/service/Admin API 和单元测试。
-- [ ] 子任务 B：`portal_ui` VSCode 策略页面、应用绑定和前端测试。
-- [ ] 子任务 C：启动时 effective policy、Guacamole 参数、`{user_id}` 展开和缓存失效。
-- [ ] 子任务 D：Windows GPO/AppLocker/Firewall 试点脚本、操作文档和真实验收。
-- [ ] 数据库/模型增加 `restricted_remoteapp`、`restricted_vscode` 与 `admin_desktop` 安全模式。
-- [ ] 新增 `vscode_control_profile` 表和 `remote_app.vscode_control_profile_id`。
-- [ ] 新增 `backend/vscode_policy_service.py`，维护唯一 control catalog、默认全部允许、profile 校验和 effective policy。
-- [ ] 新建 `default-controlled` profile，全部可授予权限为 true；必需 allowlist 未配置时保持 invalid，禁止启动。
-- [ ] `backend/models.py`：受限模式要求 `remote_app` 非空。
-- [ ] `backend/models.py`：增加 profile CRUD、permissions、allowlists 和 effective response schema。
-- [ ] `backend/admin_router.py`：增加 profile/catalog/effective API，拒绝未知 control、空必需 allowlist 和不兼容应用模式；保留 session cache invalidation。
-- [ ] `backend/router.py`：受限配置不完整时拒绝启动，不允许回退桌面。
-- [ ] `backend/router.py`：仅展开允许的 `{user_id}` 占位符，并校验 VSCode user-data/extensions 路径位于固定根目录。
-- [ ] `backend/router.py`：将 profile 的 data-channel 权限映射为最终 Guacamole 参数，覆盖 VSCode 应用旧字段。
-- [ ] `portal_ui` 新增独立 VSCode 策略管理页面、store/service/types 和应用 profile 选择器。
-- [ ] 管理 UI 完整列出所有权限，默认全选，并提供全选/全不选/恢复默认、锁定基线、allowlist 编辑和 effective preview。
-- [ ] 审计记录安全模式、门户用户、资源、共享 Windows 身份标识和阻断原因。
+- [x] 子任务 A：数据库、Backend profile/service/Admin API 和单元测试。
+- [x] 子任务 B：`portal_ui` VSCode 策略页面、应用绑定和前端测试。
+- [x] 子任务 C：启动时 effective policy、Guacamole 参数、`{user_id}` 展开和缓存失效。
+- [ ] 子任务 D：Windows GPO/AppLocker/Firewall 试点脚本、操作文档和真实验收。（脚本/文档已完成，真实主机策略与验收未完成）
+- [x] 数据库/模型增加 `restricted_remoteapp`、`restricted_vscode` 与 `admin_desktop` 安全模式。
+- [x] 新增 `vscode_control_profile` 表和 `remote_app.vscode_control_profile_id`。
+- [x] 新增 `backend/vscode_policy_service.py`，维护唯一 control catalog、默认全部允许、profile 校验和 effective policy。
+- [x] 新建 `default-controlled` profile，全部可授予权限为 true；必需 allowlist 未配置时保持 invalid，禁止启动。
+- [x] `backend/models.py` / `backend/admin_router.py`：定义安全模式字段，并在保存入口要求受限模式 `remote_app` 非空。
+- [x] `backend/models.py`：增加 profile CRUD、permissions、allowlists 和 effective response schema。
+- [x] `backend/admin_router.py`：增加 profile/catalog/effective API，拒绝未知 control、空必需 allowlist 和不兼容应用模式；保留 session cache invalidation。
+- [x] `backend/router.py`：受限配置不完整时拒绝启动，不允许回退桌面。
+- [x] `backend/router.py`：仅展开允许的 `{user_id}` 占位符，并校验 VSCode user-data/extensions 路径位于固定根目录。
+- [x] `backend/router.py`：将 profile 的 data-channel 权限映射为最终 Guacamole 参数，覆盖 VSCode 应用旧字段。
+- [x] `portal_ui` 新增独立 VSCode 策略管理页面、store/service/types 和应用 profile 选择器。
+- [x] 管理 UI 完整列出所有权限，默认全选，并提供全选/全不选/恢复默认、锁定基线、allowlist 编辑和 effective preview。
+- [x] 审计记录安全模式、门户用户、资源、共享 Windows 身份标识和阻断原因。
 - [ ] 部署 VSCode 企业 AllowedExtensions policy，并记录实际生效策略。
-- [ ] 更新 README、架构/安全文档及 `issue_log.md`。
+- [x] 更新 README、架构/安全文档及 `issue_log.md`。
 
 Tests:
 

@@ -22,6 +22,7 @@ const adminMenuTree = [
       { key: 'admin-pools', title: '容量池', path: '/admin/pools' },
       { key: 'admin-analytics', title: '统计看板', path: '/admin/analytics' },
       { key: 'admin-apps', title: '运行实例管理', path: '/admin/apps' },
+      { key: 'admin-vscode-policies', title: 'VSCode 策略', path: '/admin/vscode-policies' },
       { key: 'admin-users', title: '用户管理', path: '/admin/users' },
       { key: 'admin-acl', title: '权限管理', path: '/admin/acl' },
       { key: 'admin-queues', title: '任务调度', path: '/admin/queues' },
@@ -64,6 +65,7 @@ describe('admin navigation shell', () => {
     expect(navigationStore.resolveBreadcrumb('/admin/pools')).toEqual(['系统管理', '容量池'])
     expect(navigationStore.resolveBreadcrumb('/admin/analytics')).toEqual(['系统管理', '统计看板'])
     expect(navigationStore.resolveBreadcrumb('/admin/apps')).toEqual(['系统管理', '运行实例管理'])
+    expect(navigationStore.resolveBreadcrumb('/admin/vscode-policies')).toEqual(['系统管理', 'VSCode 策略'])
     expect(navigationStore.resolveBreadcrumb('/admin/users')).toEqual(['系统管理', '用户管理'])
     expect(navigationStore.resolveBreadcrumb('/admin/acl')).toEqual(['系统管理', '权限管理'])
     expect(navigationStore.resolveBreadcrumb('/admin/queues')).toEqual(['系统管理', '任务调度'])
@@ -83,6 +85,7 @@ describe('admin navigation shell', () => {
     expect(wrapper.find('a[href="/admin/pools"]').text()).toContain('容量池')
     expect(wrapper.find('a[href="/admin/analytics"]').text()).toContain('统计看板')
     expect(wrapper.find('a[href="/admin/apps"]').text()).toContain('运行实例管理')
+    expect(wrapper.find('a[href="/admin/vscode-policies"]').text()).toContain('VSCode 策略')
     expect(wrapper.find('a[href="/admin/users"]').text()).toContain('用户管理')
     expect(wrapper.find('a[href="/admin/acl"]').text()).toContain('权限管理')
     expect(wrapper.find('a[href="/admin/audit"]').text()).toContain('审计日志')
@@ -97,6 +100,7 @@ describe('admin navigation shell', () => {
     expect(dashboard.find('a[href="/admin/pools"]').text()).toContain('容量池')
     expect(dashboard.find('a[href="/admin/analytics"]').text()).toContain('统计看板')
     expect(dashboard.find('a[href="/admin/apps"]').text()).toContain('运行实例管理')
+    expect(dashboard.find('a[href="/admin/vscode-policies"]').text()).toContain('VSCode 策略')
     expect(dashboard.find('a[href="/admin/users"]').text()).toContain('用户管理')
     expect(dashboard.find('a[href="/admin/acl"]').text()).toContain('权限管理')
     expect(dashboard.find('a[href="/admin/queues"]').text()).toContain('任务调度')
@@ -114,6 +118,10 @@ describe('admin navigation shell', () => {
 
     await router.push('/admin/apps')
     expect(router.currentRoute.value.path).toBe('/admin/apps')
+    expect(router.currentRoute.value.matched).toHaveLength(2)
+
+    await router.push('/admin/vscode-policies')
+    expect(router.currentRoute.value.path).toBe('/admin/vscode-policies')
     expect(router.currentRoute.value.matched).toHaveLength(2)
 
     await router.push('/admin/users')
@@ -165,6 +173,7 @@ describe('admin navigation shell', () => {
     expect(wrapper.text()).not.toContain('系统管理')
     expect(wrapper.find('a[href="/admin/analytics"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/admin/apps"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="/admin/vscode-policies"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/admin/pools"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/admin/users"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/admin/acl"]').exists()).toBe(false)

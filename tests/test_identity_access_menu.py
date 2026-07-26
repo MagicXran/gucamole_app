@@ -6,6 +6,7 @@ def test_admin_menu_restores_all_admin_pages():
 
     assert "/admin/pools" in paths
     assert "/admin/apps" in paths
+    assert "/admin/vscode-policies" in paths
     assert "/admin/users" in paths
     assert "/admin/acl" in paths
     assert "/admin/queues" in paths

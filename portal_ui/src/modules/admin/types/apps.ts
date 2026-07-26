@@ -2,6 +2,7 @@ export type AppKind = 'commercial_software' | 'simulation_app' | 'compute_tool'
 export type ScriptExecutorKey = 'python_api' | 'command_statusfile'
 export type TransferPolicy = 0 | 1 | null
 export type ColorDepth = 8 | 16 | 24 | null
+export type SecurityMode = 'restricted_remoteapp' | 'restricted_vscode' | 'admin_desktop'
 
 export type AdminAppRecord = {
   id: number
@@ -20,6 +21,10 @@ export type AdminAppRecord = {
   remote_app: string | null
   remote_app_dir?: string | null
   remote_app_args?: string | null
+  security_mode?: SecurityMode
+  vscode_control_profile_id?: number | null
+  vscode_control_profile_key?: string | null
+  vscode_control_profile_name?: string | null
   color_depth?: ColorDepth
   disable_gfx?: boolean
   resize_method?: string
@@ -68,6 +73,8 @@ export type AdminAppFormPayload = {
   remote_app: string
   remote_app_dir: string
   remote_app_args: string
+  security_mode: SecurityMode
+  vscode_control_profile_id: number | null
   color_depth: ColorDepth
   disable_gfx: boolean
   resize_method: string

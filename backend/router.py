@@ -19,6 +19,12 @@ from backend.models import (
 from backend.guacamole_crypto import GuacamoleCrypto
 from backend.guacamole_service import GuacamoleService
 from backend.resource_pool_service import ResourcePoolService
+from backend.vscode_policy_service import (
+    VscodePolicyError,
+    build_vscode_arguments,
+    profile_from_row,
+    validate_restricted_arguments,
+)
 from backend.auth import get_current_user
 from backend.audit import log_action
 
@@ -56,7 +62,7 @@ def _resolve_transfer_policy(override_value, global_value: bool) -> bool:
     return bool(override_value)
 
 
-def _build_all_connections(user_id: int) -> dict:
+def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, str]]:
     """查询该用户所有可用应用，构建完整的 connections dict。
 
     将所有应用打包到一个 token 中，确保同一用户的所有标签
@@ -71,10 +77,33 @@ def _build_all_connections(user_id: int) -> dict:
                a.disable_copy, a.disable_paste,
                a.enable_audio, a.enable_audio_input,
                a.enable_printing, a.disable_download, a.disable_upload,
-               a.timezone, a.keyboard_layout
+               a.timezone, a.keyboard_layout,
+               a.security_mode, a.vscode_control_profile_id,
+               vcp.id AS vcp_id,
+               vcp.profile_key AS vcp_profile_key,
+               vcp.display_name AS vcp_display_name,
+               vcp.description AS vcp_description,
+               vcp.policy_version AS vcp_policy_version,
+               vcp.is_active AS vcp_is_active,
+               vcp.revision AS vcp_revision,
+               vcp.permissions_json AS vcp_permissions_json,
+               vcp.allowed_shells_json AS vcp_allowed_shells_json,
+               vcp.allowed_tools_json AS vcp_allowed_tools_json,
+               vcp.allowed_debuggers_json AS vcp_allowed_debuggers_json,
+               vcp.allowed_extensions_json AS vcp_allowed_extensions_json,
+               vcp.allowed_network_targets_json AS vcp_allowed_network_targets_json,
+               vcp.user_data_root AS vcp_user_data_root,
+               vcp.extensions_root AS vcp_extensions_root,
+               vcp.default_workspace_template AS vcp_default_workspace_template,
+               vcp.created_at AS vcp_created_at,
+               vcp.updated_at AS vcp_updated_at
         FROM remote_app a
         JOIN remote_app_acl acl ON a.id = acl.app_id
-        WHERE acl.user_id = %(user_id)s AND a.is_active = 1
+        JOIN portal_user u ON u.id = acl.user_id
+        LEFT JOIN vscode_control_profile vcp ON vcp.id = a.vscode_control_profile_id
+        WHERE acl.user_id = %(user_id)s
+          AND a.is_active = 1
+          AND (a.security_mode <> 'admin_desktop' OR u.is_admin = 1)
     """
     apps = db.execute_query(query, {"user_id": user_id})
 
@@ -88,45 +117,91 @@ def _build_all_connections(user_id: int) -> dict:
     drive_disable_upload = bool(drive_cfg.get("disable_upload", False))
 
     connections = {}
+    errors: dict[str, str] = {}
     for app in apps:
+        connection_name = f"app_{app['id']}"
         # Per-user 隔离: /drive/portal_u{user_id}
         user_drive_path = f"{drive_base}/portal_u{user_id}" if drive_enabled else ""
-        app_disable_download = _resolve_transfer_policy(app.get("disable_download"), drive_disable_download)
-        app_disable_upload = _resolve_transfer_policy(app.get("disable_upload"), drive_disable_upload)
+        try:
+            security_mode = str(app.get("security_mode") or "restricted_remoteapp")
+            remote_app = str(app.get("remote_app") or "").strip()
+            remote_app_args = str(app.get("remote_app_args") or "")
+            if security_mode in {"restricted_remoteapp", "restricted_vscode"} and not remote_app:
+                raise VscodePolicyError("受限模式缺少 remote_app，已阻止完整桌面回退")
 
-        conn = GuacamoleCrypto.build_rdp_connection(
-            name=f"app_{app['id']}",
-            hostname=app["hostname"],
-            port=app["port"],
-            username=app.get("rdp_username") or "",
-            password=app.get("rdp_password") or "",
-            domain=app.get("domain") or "",
-            security=app.get("security") or "nla",
-            ignore_cert=bool(app.get("ignore_cert", True)),
-            remote_app=app.get("remote_app") or "",
-            remote_app_dir=app.get("remote_app_dir") or "",
-            remote_app_args=app.get("remote_app_args") or "",
-            enable_drive=drive_enabled,
-            drive_name=drive_name,
-            drive_path=user_drive_path,
-            create_drive_path=drive_create,
-            disable_download=app_disable_download,
-            disable_upload=app_disable_upload,
-            # RDP 高级参数
-            color_depth=app.get("color_depth"),
-            disable_gfx=bool(app.get("disable_gfx", 1)),
-            resize_method=app.get("resize_method") or "display-update",
-            enable_wallpaper=bool(app.get("enable_wallpaper", 0)),
-            enable_font_smoothing=bool(app.get("enable_font_smoothing", 1)),
-            disable_copy=bool(app.get("disable_copy", 0)),
-            disable_paste=bool(app.get("disable_paste", 0)),
-            enable_audio=bool(app.get("enable_audio", 1)),
-            enable_audio_input=bool(app.get("enable_audio_input", 0)),
-            enable_printing=bool(app.get("enable_printing", 0)),
-            timezone=app.get("timezone") or None,
-            keyboard_layout=app.get("keyboard_layout") or None,
-        )
-        connections.update(conn)
+            app_disable_download = _resolve_transfer_policy(app.get("disable_download"), drive_disable_download)
+            app_disable_upload = _resolve_transfer_policy(app.get("disable_upload"), drive_disable_upload)
+            disable_copy = bool(app.get("disable_copy", 0))
+            disable_paste = bool(app.get("disable_paste", 0))
+            enable_audio = bool(app.get("enable_audio", 1))
+            enable_audio_input = bool(app.get("enable_audio_input", 0))
+            enable_printing = bool(app.get("enable_printing", 0))
+
+            if security_mode == "restricted_remoteapp":
+                remote_app_args = validate_restricted_arguments(remote_app_args)
+                disable_copy = True
+                disable_paste = True
+                app_disable_download = True
+                app_disable_upload = True
+                enable_audio_input = False
+                enable_printing = False
+            elif security_mode == "restricted_vscode":
+                if not app.get("vcp_id"):
+                    raise VscodePolicyError("受限 VSCode 未绑定控制策略")
+                validate_restricted_arguments(remote_app_args, allow_user_id=True)
+                profile = profile_from_row(app, prefix="vcp_")
+                remote_app_args = build_vscode_arguments(profile, user_id)
+                permissions = profile["permissions"]
+                disable_copy = not permissions["copy_remote_to_local"]
+                disable_paste = not permissions["paste_local_to_remote"]
+                app_disable_upload = not permissions["browser_upload"]
+                app_disable_download = not permissions["browser_download"]
+                enable_printing = permissions["printing"]
+                enable_audio = permissions["audio_output"]
+                enable_audio_input = permissions["audio_input"]
+            elif security_mode != "admin_desktop":
+                raise VscodePolicyError("未知安全模式")
+
+            conn = GuacamoleCrypto.build_rdp_connection(
+                name=connection_name,
+                hostname=app["hostname"],
+                port=app["port"],
+                username=app.get("rdp_username") or "",
+                password=app.get("rdp_password") or "",
+                domain=app.get("domain") or "",
+                security=app.get("security") or "nla",
+                ignore_cert=bool(app.get("ignore_cert", True)),
+                remote_app=remote_app,
+                remote_app_dir=app.get("remote_app_dir") or "",
+                remote_app_args=remote_app_args,
+                enable_drive=drive_enabled,
+                drive_name=drive_name,
+                drive_path=user_drive_path,
+                create_drive_path=drive_create,
+                disable_download=app_disable_download,
+                disable_upload=app_disable_upload,
+                color_depth=app.get("color_depth"),
+                disable_gfx=bool(app.get("disable_gfx", 1)),
+                resize_method=app.get("resize_method") or "display-update",
+                enable_wallpaper=bool(app.get("enable_wallpaper", 0)),
+                enable_font_smoothing=bool(app.get("enable_font_smoothing", 1)),
+                disable_copy=disable_copy,
+                disable_paste=disable_paste,
+                enable_audio=enable_audio,
+                enable_audio_input=enable_audio_input,
+                enable_printing=enable_printing,
+                timezone=app.get("timezone") or None,
+                keyboard_layout=app.get("keyboard_layout") or None,
+            )
+            connections.update(conn)
+        except (VscodePolicyError, ValueError, TypeError, KeyError, UnicodeError) as exc:
+            errors[connection_name] = str(exc)
+            logger.warning("跳过无效受限连接: app_id=%s reason=%s", app.get("id"), exc)
+    return connections, errors
+
+
+def _build_all_connections(user_id: int) -> dict:
+    connections, _ = _build_all_connections_with_errors(user_id)
     return connections
 
 
@@ -190,17 +265,29 @@ async def launch_app(
 
     # 构建该用户所有可用成员的连接参数；token 继续按用户复用
     connection_name = str(decision["connection_name"])
-    connections = _build_all_connections(user.user_id)
+    connections, connection_errors = _build_all_connections_with_errors(user.user_id)
     if connection_name not in connections:
-        pool_service.mark_runtime_launch_failure(int(decision["member_app_id"]), "连接构建异常")
+        failure_reason = connection_errors.get(connection_name, "连接构建异常")
+        pool_service.mark_runtime_launch_failure(int(decision["member_app_id"]), failure_reason)
         if decision.get("queue_id"):
             pool_service.requeue_after_launch_failure(
                 queue_id=int(decision["queue_id"]),
-                last_error="连接构建异常",
+                last_error=failure_reason,
             )
+        client_ip = request.client.host if request.client else "unknown"
+        log_action(
+            user_id=user.user_id,
+            username=user.username,
+            action="launch_blocked_by_security_policy",
+            target_type="app",
+            target_id=int(decision["member_app_id"]),
+            target_name=str(decision["requested_app_name"]),
+            detail={"reason": failure_reason},
+            ip_address=client_ip,
+        )
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="连接构建异常",
+            status_code=status.HTTP_409_CONFLICT,
+            detail=failure_reason,
         )
 
     # 4. 复用或创建 session → 拿 URL

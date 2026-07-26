@@ -23,6 +23,28 @@
               <option value="compute_tool">计算工具</option>
             </select>
           </label>
+          <label>
+            <span>访问安全模式</span>
+            <select v-model="form.security_mode" data-testid="admin-app-security-mode">
+              <option value="restricted_remoteapp">一般限制 RemoteApp</option>
+              <option value="restricted_vscode">受限 VSCode</option>
+              <option value="admin_desktop">管理员桌面</option>
+            </select>
+          </label>
+          <label v-if="form.security_mode === 'restricted_vscode'">
+            <span>VSCode 控制策略</span>
+            <select v-model="form.vscode_control_profile_id" data-testid="admin-app-vscode-profile">
+              <option :value="null">未选择</option>
+              <option
+                v-for="profile in vscodeControlProfiles"
+                :key="profile.id"
+                :value="profile.id"
+                :disabled="!(profile.is_active && profile.valid)"
+              >
+                {{ profile.display_name }}（{{ profile.is_active && profile.valid ? '可绑定' : '未就绪' }}）
+              </option>
+            </select>
+          </label>
           <label><span>图标</span><input v-model="form.icon" data-testid="admin-app-icon"></label>
           <label>
             <span>协议</span>
@@ -76,6 +98,9 @@
           <label><span>工作目录</span><input v-model="form.remote_app_dir" data-testid="admin-app-remote-dir"></label>
           <label class="admin-app-dialog__wide"><span>命令参数</span><input v-model="form.remote_app_args" data-testid="admin-app-remote-args"></label>
         </div>
+        <p class="admin-app-dialog__hint">
+          受限模式必须填写 RemoteApp；一般限制会强制关闭剪贴板、浏览器传输、打印和麦克风，受限 VSCode 则只采用绑定策略的最终权限。
+        </p>
       </section>
 
       <details class="admin-app-dialog__details" :open="form.script_enabled">
@@ -243,16 +268,20 @@ import type {
   ScriptExecutorKey,
   TransferPolicy,
 } from '@/modules/admin/types/apps'
+import type { VscodeControlProfile } from '@/modules/admin/types/vscodePolicies'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   open: boolean
   mode: 'create' | 'edit'
   saving: boolean
   pools: AdminPoolRecord[]
   workerGroups: AdminWorkerGroup[]
   scriptProfiles: AdminScriptProfile[]
+  vscodeControlProfiles?: VscodeControlProfile[]
   initialApp: AdminAppRecord | null
-}>()
+}>(), {
+  vscodeControlProfiles: () => [],
+})
 
 const emit = defineEmits<{
   close: []
@@ -278,6 +307,8 @@ function defaultForm(): AdminAppFormPayload {
     remote_app: '',
     remote_app_dir: '',
     remote_app_args: '',
+    security_mode: 'restricted_remoteapp',
+    vscode_control_profile_id: null,
     color_depth: null,
     disable_gfx: true,
     resize_method: 'display-update',
@@ -381,6 +412,8 @@ function hydrateForm(app: AdminAppRecord | null) {
     remote_app: app?.remote_app || '',
     remote_app_dir: app?.remote_app_dir || '',
     remote_app_args: app?.remote_app_args || '',
+    security_mode: app?.security_mode || 'restricted_remoteapp',
+    vscode_control_profile_id: app?.vscode_control_profile_id ?? null,
     color_depth: normalizeColorDepth(app?.color_depth),
     disable_gfx: app?.disable_gfx ?? true,
     resize_method: app?.resize_method || 'display-update',
@@ -419,6 +452,13 @@ watch(
   { immediate: true },
 )
 
+watch(
+  () => form.security_mode,
+  (mode) => {
+    if (mode !== 'restricted_vscode') form.vscode_control_profile_id = null
+  },
+)
+
 function applySelectedScriptProfile() {
   const profile = selectedScriptProfile.value
   if (!profile) return
@@ -443,6 +483,21 @@ function handleSubmit() {
   if (!trimText(form.name) || !trimText(form.hostname)) {
     localError.value = '名称和主机为必填项'
     return
+  }
+  if (form.security_mode !== 'admin_desktop' && !trimText(form.remote_app)) {
+    localError.value = '一般限制 RemoteApp 和受限 VSCode 必须填写 RemoteApp'
+    return
+  }
+  if (form.security_mode === 'restricted_vscode' && !normalizePositiveId(form.vscode_control_profile_id)) {
+    localError.value = '受限 VSCode 必须选择已就绪的控制策略'
+    return
+  }
+  if (form.security_mode === 'restricted_vscode') {
+    const selectedProfile = props.vscodeControlProfiles.find((profile) => profile.id === normalizePositiveId(form.vscode_control_profile_id))
+    if (!selectedProfile?.is_active || !selectedProfile.valid) {
+      localError.value = '受限 VSCode 只能绑定已启用且有效的控制策略'
+      return
+    }
   }
   if (form.script_enabled && (!form.script_executor_key || !form.script_worker_group_id)) {
     localError.value = '启用脚本模式时必须选择执行器和 Worker 组'
@@ -473,6 +528,7 @@ function handleSubmit() {
       remote_app: trimText(form.remote_app),
       remote_app_dir: trimText(form.remote_app_dir),
       remote_app_args: trimText(form.remote_app_args),
+      vscode_control_profile_id: normalizePositiveId(form.vscode_control_profile_id),
       color_depth: normalizeColorDepth(form.color_depth),
       resize_method: form.resize_method === 'reconnect' ? 'reconnect' : 'display-update',
       disable_download: normalizeTransferPolicy(form.disable_download),

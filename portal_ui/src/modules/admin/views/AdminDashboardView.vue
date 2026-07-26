@@ -42,6 +42,9 @@ function adminSummary(path?: string) {
   if (path === '/admin/apps') {
     return '运行实例配置、脚本绑定、健康状态和容量池归属。'
   }
+  if (path === '/admin/vscode-policies') {
+    return '受控开发权限、程序/扩展/网络白名单和最终生效状态。'
+  }
   if (path === '/admin/users') {
     return '账号、改密、配额、管理员权限。'
   }

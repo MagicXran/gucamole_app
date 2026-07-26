@@ -1,4 +1,4 @@
-﻿"""
+"""
 Guacamole Encrypted JSON Auth 加密模块
 
 加密规范 (Apache Guacamole 1.6.0 官方):
@@ -199,8 +199,8 @@ class GuacamoleCrypto:
         # 音频
         if enable_audio:
             params["enable-audio"] = "true"
-            if enable_audio_input:
-                params["enable-audio-input"] = "true"
+        if enable_audio_input:
+            params["enable-audio-input"] = "true"
 
         # 设备
         if enable_printing:

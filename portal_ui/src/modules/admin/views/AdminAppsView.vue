@@ -26,6 +26,7 @@
           <th>ID</th>
           <th>名称</th>
           <th>形态</th>
+          <th>安全模式</th>
           <th>分类</th>
           <th>主机</th>
           <th>容量池</th>
@@ -36,12 +37,13 @@
       </thead>
       <tbody>
         <tr v-if="adminAppsStore.items.length === 0">
-          <td colspan="8">暂无运行实例</td>
+          <td colspan="10">暂无运行实例</td>
         </tr>
         <tr v-for="app in adminAppsStore.items" :key="app.id">
           <td>{{ app.id }}</td>
           <td>{{ app.name }}</td>
           <td>{{ launchKindLabel(app.launch_target_kind) }}</td>
+          <td>{{ securityModeLabel(app.security_mode) }}</td>
           <td>{{ kindLabel(app.app_kind) }}</td>
           <td>{{ app.hostname }}:{{ app.port }}</td>
           <td>{{ poolName(app.pool_id) }}</td>
@@ -62,6 +64,7 @@
       :pools="adminAppsStore.pools"
       :worker-groups="adminAppsStore.workerGroups"
       :script-profiles="adminAppsStore.scriptProfiles"
+      :vscode-control-profiles="adminAppsStore.vscodeControlProfiles"
       :initial-app="selectedApp"
       @close="closeDialog"
       @submit="handleSubmit"
@@ -94,6 +97,12 @@ function kindLabel(kind: string) {
 
 function launchKindLabel(kind: string | undefined) {
   return kind === 'standalone_runtime' ? '独立运行' : '容量池成员'
+}
+
+function securityModeLabel(mode: string | undefined) {
+  if (mode === 'restricted_vscode') return '受限 VSCode'
+  if (mode === 'admin_desktop') return '管理员桌面'
+  return '一般限制 RemoteApp'
 }
 
 function poolName(poolId: number | null) {

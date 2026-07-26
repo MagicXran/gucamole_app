@@ -45,6 +45,7 @@ BASE_MENU_TREE = [
 ADMIN_MENU_ITEMS = [
     {"key": "admin-pools", "title": "容量池", "path": "/admin/pools"},
     {"key": "admin-apps", "title": "运行实例管理", "path": "/admin/apps"},
+    {"key": "admin-vscode-policies", "title": "VSCode 策略", "path": "/admin/vscode-policies"},
     {"key": "admin-users", "title": "用户管理", "path": "/admin/users"},
     {"key": "admin-acl", "title": "权限管理", "path": "/admin/acl"},
     {"key": "admin-queues", "title": "任务调度", "path": "/admin/queues"},

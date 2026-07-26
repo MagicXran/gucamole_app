@@ -123,6 +123,24 @@ def test_verify_schema_reports_nullable_default_violations():
     assert "column default should be NULL: remote_app.disable_upload" in problems
 
 
+def test_verify_schema_reports_security_mode_and_policy_json_type_violations():
+    columns = []
+    for table_name, cols in REQUIRED_COLUMNS.items():
+        for col in cols:
+            if (table_name, col) == ("remote_app", "security_mode"):
+                columns.append((table_name, col, "YES", None, "varchar"))
+            elif (table_name, col) == ("vscode_control_profile", "permissions_json"):
+                columns.append((table_name, col, "NO", None, "longtext"))
+            else:
+                columns.append((table_name, col))
+
+    problems = verify_schema(FakeCursor(tables=REQUIRED_TABLES, columns=columns))
+
+    assert "column should be NOT NULL: remote_app.security_mode" in problems
+    assert "column default should be restricted_remoteapp: remote_app.security_mode" in problems
+    assert "column type should be json: vscode_control_profile.permissions_json" in problems
+
+
 def test_check_live_schema_redacts_connection_error_details():
     result = check_live_schema(connect_fn=lambda: (_ for _ in ()).throw(RuntimeError("root password leaked")))
 

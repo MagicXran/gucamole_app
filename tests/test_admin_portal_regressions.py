@@ -225,6 +225,7 @@ def test_admin_create_app_persists_app_kind():
         hostname="rdp.example.local",
         pool_id=1,
         app_kind="simulation_app",
+        remote_app="||simulation-app",
     )
     request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
     admin = admin_module.UserInfo(user_id=1, username="admin", display_name="管理员", is_admin=True)

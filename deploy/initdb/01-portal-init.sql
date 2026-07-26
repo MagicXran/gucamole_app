@@ -17,6 +17,29 @@ CREATE DATABASE IF NOT EXISTS guacamole_portal_db
 
 USE guacamole_portal_db;
 
+CREATE TABLE IF NOT EXISTS vscode_control_profile (
+    id                           BIGINT PRIMARY KEY AUTO_INCREMENT,
+    profile_key                  VARCHAR(100) NOT NULL,
+    display_name                 VARCHAR(200) NOT NULL,
+    description                  VARCHAR(1000) NOT NULL DEFAULT '',
+    policy_version               INT NOT NULL DEFAULT 1,
+    is_active                    TINYINT(1) NOT NULL DEFAULT 0,
+    revision                     INT NOT NULL DEFAULT 1,
+    permissions_json             JSON NOT NULL,
+    allowed_shells_json          JSON NOT NULL,
+    allowed_tools_json           JSON NOT NULL,
+    allowed_debuggers_json       JSON NOT NULL,
+    allowed_extensions_json      JSON NOT NULL,
+    allowed_network_targets_json JSON NOT NULL,
+    user_data_root               VARCHAR(500) NOT NULL,
+    extensions_root              VARCHAR(500) NOT NULL,
+    default_workspace_template   VARCHAR(500) NOT NULL,
+    created_at                   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_vscode_control_profile_key (profile_key),
+    INDEX idx_vscode_control_profile_active (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- RemoteApp 应用配置表
 CREATE TABLE IF NOT EXISTS remote_app (
     id                    BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -34,6 +57,8 @@ CREATE TABLE IF NOT EXISTS remote_app (
     remote_app            VARCHAR(200)                       COMMENT 'RemoteApp，如 ||notepad',
     remote_app_dir        VARCHAR(500)                       COMMENT 'RemoteApp 工作目录',
     remote_app_args       VARCHAR(500)                       COMMENT 'RemoteApp 命令行参数',
+    security_mode         VARCHAR(40)   NOT NULL DEFAULT 'restricted_remoteapp' COMMENT 'restricted_remoteapp/restricted_vscode/admin_desktop',
+    vscode_control_profile_id BIGINT    DEFAULT NULL         COMMENT '受限 VSCode 控制策略',
     color_depth           INT           DEFAULT NULL         COMMENT '色深: 8/16/24, NULL=自动',
     disable_gfx           TINYINT(1)    DEFAULT 1            COMMENT '禁用 GFX Pipeline',
     resize_method         VARCHAR(20)   DEFAULT 'display-update' COMMENT 'display-update/reconnect',
@@ -54,7 +79,10 @@ CREATE TABLE IF NOT EXISTS remote_app (
     created_at            DATETIME      DEFAULT CURRENT_TIMESTAMP,
     updated_at            DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_active (is_active),
-    INDEX idx_pool_active (pool_id, is_active)
+    INDEX idx_pool_active (pool_id, is_active),
+    INDEX idx_security_mode_active (security_mode, is_active),
+    CONSTRAINT fk_remote_app_vscode_control_profile
+        FOREIGN KEY (vscode_control_profile_id) REFERENCES vscode_control_profile(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS remote_app_health (
@@ -102,6 +130,36 @@ CREATE TABLE IF NOT EXISTS resource_pool (
 -- 示例数据（请根据实际环境修改 hostname/密码）
 -- ============================================
 
+INSERT IGNORE INTO vscode_control_profile (
+    id, profile_key, display_name, description, policy_version, is_active, revision,
+    permissions_json, allowed_shells_json, allowed_tools_json, allowed_debuggers_json,
+    allowed_extensions_json, allowed_network_targets_json,
+    user_data_root, extensions_root, default_workspace_template
+) VALUES (
+    1,
+    'default-controlled',
+    '默认受控开发模式',
+    '全部可授予权限默认勾选；补齐程序、扩展和网络白名单后才能启用。',
+    1,
+    0,
+    1,
+    JSON_OBJECT(
+        'workspace_file_ops', TRUE, 'multi_root_workspace', TRUE,
+        'user_settings', TRUE, 'workspace_settings', TRUE, 'keybindings', TRUE, 'snippets', TRUE,
+        'terminal', TRUE, 'tasks', TRUE, 'run', TRUE, 'build', TRUE, 'debug', TRUE,
+        'git_local', TRUE, 'git_remote', TRUE, 'package_install', TRUE,
+        'extension_use', TRUE, 'extension_install_update', TRUE,
+        'ai_chat', TRUE, 'agent_mode', TRUE, 'mcp_tools', TRUE,
+        'integrated_browser', TRUE, 'port_forwarding', TRUE, 'remote_development', TRUE,
+        'copy_remote_to_local', TRUE, 'paste_local_to_remote', TRUE,
+        'browser_upload', TRUE, 'browser_download', TRUE,
+        'printing', TRUE, 'audio_output', TRUE, 'audio_input', TRUE,
+        'network_git', TRUE, 'network_packages', TRUE, 'network_business', TRUE, 'network_https', TRUE
+    ),
+    JSON_ARRAY(), JSON_ARRAY(), JSON_ARRAY(), JSON_ARRAY(), JSON_ARRAY(),
+    'C:\\PortalProfiles', 'C:\\PortalExtensions', '\\\\tsclient\\GuacDrive'
+);
+
 INSERT IGNORE INTO resource_pool
     (id, name, icon, max_concurrent, auto_dispatch_enabled,
      dispatch_grace_seconds, stale_timeout_seconds, idle_timeout_seconds, is_active)
@@ -111,11 +169,11 @@ VALUES
     (3, '默认池-3-远程桌面', 'desktop',   1, 1, 120, 120, NULL, 1);
 
 INSERT IGNORE INTO remote_app
-    (id, name, icon, app_kind, hostname, port, rdp_username, rdp_password, remote_app, pool_id, member_max_concurrent)
+    (id, name, icon, app_kind, hostname, port, rdp_username, rdp_password, remote_app, security_mode, pool_id, member_max_concurrent)
 VALUES
-    (1, '记事本',   'edit',      'commercial_software', '192.168.1.6', 3389, 'admin', 'password', '||notepad', 1, 1),
-    (2, '计算器',   'calculate', 'compute_tool',        '192.168.1.6', 3389, 'admin', 'password', '||calc',    2, 1),
-    (3, '远程桌面', 'desktop',   'simulation_app',      '192.168.1.6', 3389, 'admin', 'password', NULL,        3, 1);
+    (1, '记事本',   'edit',      'commercial_software', '192.168.1.6', 3389, 'admin', 'password', '||notepad', 'restricted_remoteapp', 1, 1),
+    (2, '计算器',   'calculate', 'compute_tool',        '192.168.1.6', 3389, 'admin', 'password', '||calc',    'restricted_remoteapp', 2, 1),
+    (3, '远程桌面', 'desktop',   'simulation_app',      '192.168.1.6', 3389, 'admin', 'password', NULL,        'admin_desktop', 3, 1);
 
 -- Token 缓存表（确保后端重启后复用已有 Guacamole session）
 CREATE TABLE IF NOT EXISTS token_cache (

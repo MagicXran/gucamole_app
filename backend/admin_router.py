@@ -15,17 +15,27 @@ from backend.audit import log_action
 from backend.router import guac_service
 from backend.resource_pool_service import ResourcePoolService
 from backend.script_profiles import get_script_profile, list_script_profiles, resolve_script_runtime_settings
+from backend.vscode_policy_service import (
+    SECURITY_MODES,
+    VscodePolicyError,
+    VscodePolicyService,
+    catalog_payload,
+    validate_restricted_arguments,
+)
 from backend.models import (
     UserInfo,
     AppCreateRequest, AppUpdateRequest, AppAdminResponse,
     UserCreateRequest, UserUpdateRequest, UserAdminResponse, UserAdminListResponse,
     AclUpdateRequest, AuditLogResponse, PaginatedResponse,
+    VscodeControlProfileCreateRequest, VscodeControlProfileUpdateRequest,
+    VscodeControlCatalogResponse, VscodeControlProfileResponse, VscodeControlProfileListResponse,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 pool_service = ResourcePoolService(db=db)
+vscode_policy_service = VscodePolicyService(db=db)
 
 
 def _coerce_bool_flag(value) -> bool:
@@ -45,6 +55,35 @@ def _ensure_pool_exists(pool_id: int | None, conn=None):
     )
     if not pool:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "资源池不存在或已禁用")
+
+
+def _validate_app_security_config(app: dict, conn=None):
+    mode = str(app.get("security_mode") or "restricted_remoteapp").strip()
+    if mode not in SECURITY_MODES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "未知安全模式")
+
+    remote_app = str(app.get("remote_app") or "").strip()
+    profile_id = app.get("vscode_control_profile_id")
+    arguments = str(app.get("remote_app_args") or "")
+
+    if mode in {"restricted_remoteapp", "restricted_vscode"} and not remote_app:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "受限模式必须配置非空 remote_app")
+    if mode == "restricted_vscode":
+        if not profile_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "受限 VSCode 必须绑定控制策略")
+        try:
+            vscode_policy_service.get_bindable_profile(int(profile_id), conn=conn)
+            validate_restricted_arguments(arguments, allow_user_id=True)
+        except VscodePolicyError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+        return
+    if profile_id is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "只有受限 VSCode 可以绑定控制策略")
+    if mode == "restricted_remoteapp":
+        try:
+            validate_restricted_arguments(arguments)
+        except VscodePolicyError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
 
 def _validate_script_config(
@@ -339,7 +378,9 @@ def _get_app_admin_row(app_id: int, conn=None):
             sp.executor_key AS script_executor_key,
             sp.scratch_root AS script_scratch_root,
             sb.worker_group_id AS script_worker_group_id,
-            sb.runtime_config_json AS script_runtime_config_json
+            sb.runtime_config_json AS script_runtime_config_json,
+            vcp.profile_key AS vscode_control_profile_key,
+            vcp.display_name AS vscode_control_profile_name
         FROM remote_app a
         LEFT JOIN remote_app_health h
           ON h.remote_app_id = a.id
@@ -348,6 +389,8 @@ def _get_app_admin_row(app_id: int, conn=None):
         LEFT JOIN app_binding sb
           ON sb.remote_app_id = a.id
          AND sb.binding_kind = 'worker_script'
+        LEFT JOIN vscode_control_profile vcp
+          ON vcp.id = a.vscode_control_profile_id
         WHERE a.id = %(id)s
         LIMIT 1
         """,
@@ -371,6 +414,120 @@ def _get_app_admin_row(app_id: int, conn=None):
 
 
 # ============================================
+# VSCode 控制策略
+# ============================================
+
+
+@router.get("/vscode-control-catalog", response_model=VscodeControlCatalogResponse)
+def get_vscode_control_catalog(admin: UserInfo = Depends(require_admin)):
+    return catalog_payload()
+
+
+@router.get("/vscode-control-profiles", response_model=VscodeControlProfileListResponse)
+def list_vscode_control_profiles(admin: UserInfo = Depends(require_admin)):
+    return {"items": vscode_policy_service.list_profiles()}
+
+
+@router.get("/vscode-control-profiles/{profile_id}/effective", response_model=VscodeControlProfileResponse)
+def get_vscode_control_profile_effective(
+    profile_id: int,
+    admin: UserInfo = Depends(require_admin),
+):
+    profile = vscode_policy_service.get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "VSCode 控制策略不存在")
+    return profile
+
+
+@router.post("/vscode-control-profiles", response_model=VscodeControlProfileResponse, status_code=201)
+def create_vscode_control_profile(
+    req: VscodeControlProfileCreateRequest,
+    request: Request,
+    admin: UserInfo = Depends(require_admin),
+):
+    try:
+        with db.transaction() as conn:
+            profile = vscode_policy_service.create_profile(req.model_dump(), conn=conn)
+    except VscodePolicyError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    guac_service.invalidate_all_sessions()
+    client_ip = request.client.host if request.client else "unknown"
+    log_action(
+        admin.user_id,
+        admin.username,
+        "admin_create_vscode_policy",
+        "vscode_policy",
+        profile["id"],
+        profile["profile_key"],
+        detail={"revision": profile["revision"], "policy_version": profile["policy_version"]},
+        ip_address=client_ip,
+    )
+    return profile
+
+
+@router.put("/vscode-control-profiles/{profile_id}", response_model=VscodeControlProfileResponse)
+def update_vscode_control_profile(
+    profile_id: int,
+    req: VscodeControlProfileUpdateRequest,
+    request: Request,
+    admin: UserInfo = Depends(require_admin),
+):
+    updates = req.model_dump(exclude_unset=True)
+    if not updates:
+        profile = vscode_policy_service.get_profile(profile_id)
+        if not profile:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "VSCode 控制策略不存在")
+        return profile
+    try:
+        with db.transaction() as conn:
+            profile = vscode_policy_service.update_profile(profile_id, updates, conn=conn)
+    except VscodePolicyError as exc:
+        code = status.HTTP_404_NOT_FOUND if "不存在" in str(exc) else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(code, str(exc))
+    guac_service.invalidate_all_sessions()
+    client_ip = request.client.host if request.client else "unknown"
+    log_action(
+        admin.user_id,
+        admin.username,
+        "admin_update_vscode_policy",
+        "vscode_policy",
+        profile["id"],
+        profile["profile_key"],
+        detail={"revision": profile["revision"], "policy_version": profile["policy_version"]},
+        ip_address=client_ip,
+    )
+    return profile
+
+
+@router.delete("/vscode-control-profiles/{profile_id}")
+def delete_vscode_control_profile(
+    profile_id: int,
+    request: Request,
+    admin: UserInfo = Depends(require_admin),
+):
+    existing = vscode_policy_service.get_profile(profile_id)
+    if not existing:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "VSCode 控制策略不存在")
+    try:
+        with db.transaction() as conn:
+            vscode_policy_service.delete_profile(profile_id, conn=conn)
+    except VscodePolicyError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc))
+    guac_service.invalidate_all_sessions()
+    client_ip = request.client.host if request.client else "unknown"
+    log_action(
+        admin.user_id,
+        admin.username,
+        "admin_delete_vscode_policy",
+        "vscode_policy",
+        profile_id,
+        existing["profile_key"],
+        ip_address=client_ip,
+    )
+    return {"message": "已删除"}
+
+
+# ============================================
 # 应用管理
 # ============================================
 
@@ -389,7 +546,9 @@ def list_apps(admin: UserInfo = Depends(require_admin)):
             sp.executor_key AS script_executor_key,
             sp.scratch_root AS script_scratch_root,
             sb.worker_group_id AS script_worker_group_id,
-            sb.runtime_config_json AS script_runtime_config_json
+            sb.runtime_config_json AS script_runtime_config_json,
+            vcp.profile_key AS vscode_control_profile_key,
+            vcp.display_name AS vscode_control_profile_name
         FROM remote_app a
         LEFT JOIN remote_app_health h
           ON h.remote_app_id = a.id
@@ -398,6 +557,8 @@ def list_apps(admin: UserInfo = Depends(require_admin)):
         LEFT JOIN app_binding sb
           ON sb.remote_app_id = a.id
          AND sb.binding_kind = 'worker_script'
+        LEFT JOIN vscode_control_profile vcp
+          ON vcp.id = a.vscode_control_profile_id
         ORDER BY a.id
         """
     )
@@ -429,6 +590,7 @@ def create_app(
 ):
     """创建应用"""
     _ensure_pool_exists(req.pool_id)
+    _validate_app_security_config(req.model_dump())
     try:
         runtime_settings = _build_script_runtime_config(
             script_profile_key=req.script_profile_key,
@@ -447,6 +609,7 @@ def create_app(
                 (name, icon, protocol, app_kind, hostname, port,
                  rdp_username, rdp_password, domain, security, ignore_cert,
                  remote_app, remote_app_dir, remote_app_args,
+                 security_mode, vscode_control_profile_id,
                  color_depth, disable_gfx, resize_method,
                  enable_wallpaper, enable_font_smoothing,
                  disable_copy, disable_paste,
@@ -458,6 +621,7 @@ def create_app(
                 (%(name)s, %(icon)s, %(protocol)s, %(app_kind)s, %(hostname)s, %(port)s,
                  %(rdp_username)s, %(rdp_password)s, %(domain)s, %(security)s, %(ignore_cert)s,
                  %(remote_app)s, %(remote_app_dir)s, %(remote_app_args)s,
+                 %(security_mode)s, %(vscode_control_profile_id)s,
                  %(color_depth)s, %(disable_gfx)s, %(resize_method)s,
                  %(enable_wallpaper)s, %(enable_font_smoothing)s,
                  %(disable_copy)s, %(disable_paste)s,
@@ -477,6 +641,8 @@ def create_app(
                 "remote_app": req.remote_app or None,
                 "remote_app_dir": req.remote_app_dir or None,
                 "remote_app_args": req.remote_app_args or None,
+                "security_mode": req.security_mode,
+                "vscode_control_profile_id": req.vscode_control_profile_id,
                 "color_depth": req.color_depth,
                 "disable_gfx": 1 if req.disable_gfx else 0,
                 "resize_method": req.resize_method,
@@ -516,7 +682,9 @@ def create_app(
     client_ip = request.client.host if request.client else "unknown"
     log_action(
         admin.user_id, admin.username, "admin_create_app",
-        "app", app["id"], req.name, ip_address=client_ip,
+        "app", app["id"], req.name,
+        detail={"security_mode": req.security_mode, "vscode_control_profile_id": req.vscode_control_profile_id},
+        ip_address=client_ip,
     )
     return app
 
@@ -540,6 +708,7 @@ def update_app(
         return _get_app_admin_row(app_id)
     if "pool_id" in updates:
         _ensure_pool_exists(updates["pool_id"])
+    _validate_app_security_config({**existing, **updates})
     script_updates = {
         key: updates.pop(key)
         for key in ("script_enabled", "script_profile_key", "script_executor_key", "script_worker_group_id", "script_scratch_root")
@@ -619,7 +788,14 @@ def update_app(
     client_ip = request.client.host if request.client else "unknown"
     log_action(
         admin.user_id, admin.username, "admin_update_app",
-        "app", app_id, existing["name"], ip_address=client_ip,
+        "app", app_id, existing["name"],
+        detail={
+            "security_mode": updates.get("security_mode", existing.get("security_mode")),
+            "vscode_control_profile_id": updates.get(
+                "vscode_control_profile_id", existing.get("vscode_control_profile_id")
+            ),
+        },
+        ip_address=client_ip,
     )
     return _get_app_admin_row(app_id)
 
@@ -840,21 +1016,46 @@ def update_user_acl(
     """覆盖式设置权限"""
     # 确认用户存在
     user = db.execute_query(
-        "SELECT id, username FROM portal_user WHERE id = %(id)s", {"id": user_id}, fetch_one=True,
+        "SELECT id, username, is_admin FROM portal_user WHERE id = %(id)s", {"id": user_id}, fetch_one=True,
     )
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "用户不存在")
 
-    # 先清空
-    db.execute_update(
-        "DELETE FROM remote_app_acl WHERE user_id = %(uid)s", {"uid": user_id},
-    )
-    # 再插入
-    for app_id in req.app_ids:
-        db.execute_update(
-            "INSERT IGNORE INTO remote_app_acl (user_id, app_id) VALUES (%(uid)s, %(aid)s)",
-            {"uid": user_id, "aid": app_id},
+    app_ids = sorted(set(req.app_ids))
+    apps: list[dict] = []
+    if app_ids:
+        params = {f"app_{index}": app_id for index, app_id in enumerate(app_ids)}
+        placeholders = ", ".join(f"%({key})s" for key in params)
+        apps = db.execute_query(
+            f"""
+            SELECT id, name, remote_app, remote_app_args, security_mode, vscode_control_profile_id
+            FROM remote_app
+            WHERE id IN ({placeholders}) AND is_active = 1
+            """,
+            params,
         )
+        if len(apps) != len(app_ids):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "应用不存在或已禁用")
+        if not _coerce_bool_flag(user.get("is_admin")):
+            admin_apps = [str(app["name"]) for app in apps if app.get("security_mode") == "admin_desktop"]
+            if admin_apps:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"普通用户不能授权管理员桌面: {', '.join(admin_apps)}",
+                )
+        for app in apps:
+            _validate_app_security_config(app)
+
+    with db.transaction() as conn:
+        db.execute_update(
+            "DELETE FROM remote_app_acl WHERE user_id = %(uid)s", {"uid": user_id}, conn=conn,
+        )
+        for app_id in app_ids:
+            db.execute_update(
+                "INSERT IGNORE INTO remote_app_acl (user_id, app_id) VALUES (%(uid)s, %(aid)s)",
+                {"uid": user_id, "aid": app_id},
+                conn=conn,
+            )
     guac_service.invalidate_all_sessions()
     pool_service.cleanup_invalid_queue_entries(user_id=user_id)
 
@@ -862,9 +1063,9 @@ def update_user_acl(
     log_action(
         admin.user_id, admin.username, "admin_update_acl",
         "user", user_id, user["username"],
-        detail={"app_ids": req.app_ids}, ip_address=client_ip,
+        detail={"app_ids": app_ids}, ip_address=client_ip,
     )
-    return {"user_id": user_id, "app_ids": req.app_ids}
+    return {"user_id": user_id, "app_ids": app_ids}
 
 
 # ============================================

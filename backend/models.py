@@ -9,6 +9,9 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, Field, field_validator
 
 
+SecurityMode = Literal["restricted_remoteapp", "restricted_vscode", "admin_desktop"]
+
+
 def _normalize_attachment_link_url(value: str) -> str:
     normalized = value.strip()
     parsed = urlsplit(normalized)
@@ -99,6 +102,8 @@ class AppCreateRequest(BaseModel):
     remote_app: str = Field(default="", max_length=200)
     remote_app_dir: str = Field(default="", max_length=500)
     remote_app_args: str = Field(default="", max_length=500)
+    security_mode: SecurityMode = "restricted_remoteapp"
+    vscode_control_profile_id: Optional[int] = Field(default=None, ge=1)
     # RDP 高级参数
     color_depth: Optional[int] = None
     disable_gfx: bool = True
@@ -152,7 +157,6 @@ class AppCreateRequest(BaseModel):
             raise ValueError("script_executor_key 必须是 python_api 或 command_statusfile")
         return v
 
-
 class AppUpdateRequest(BaseModel):
     """修改应用（全部可选）"""
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
@@ -168,6 +172,8 @@ class AppUpdateRequest(BaseModel):
     remote_app: Optional[str] = Field(default=None, max_length=200)
     remote_app_dir: Optional[str] = Field(default=None, max_length=500)
     remote_app_args: Optional[str] = Field(default=None, max_length=500)
+    security_mode: Optional[SecurityMode] = None
+    vscode_control_profile_id: Optional[int] = Field(default=None, ge=1)
     color_depth: Optional[int] = None
     disable_gfx: Optional[bool] = None
     resize_method: Optional[str] = Field(default=None, max_length=20)
@@ -239,6 +245,10 @@ class AppAdminResponse(BaseModel):
     remote_app: Optional[str] = None
     remote_app_dir: Optional[str] = None
     remote_app_args: Optional[str] = None
+    security_mode: SecurityMode = "restricted_remoteapp"
+    vscode_control_profile_id: Optional[int] = None
+    vscode_control_profile_key: Optional[str] = None
+    vscode_control_profile_name: Optional[str] = None
     color_depth: Optional[int] = None
     disable_gfx: bool = True
     resize_method: str = "display-update"
@@ -314,6 +324,83 @@ class UserAdminListResponse(UserAdminResponse):
 class AclUpdateRequest(BaseModel):
     """权限覆盖更新"""
     app_ids: List[int]
+
+
+class VscodeControlProfileCreateRequest(BaseModel):
+    """创建受限 VSCode 控制策略。"""
+
+    profile_key: str = Field(..., min_length=2, max_length=100)
+    display_name: str = Field(..., min_length=1, max_length=200)
+    description: str = Field(default="", max_length=1000)
+    policy_version: int = Field(default=1, ge=1)
+    is_active: bool = False
+    permissions: Optional[dict[str, bool]] = None
+    allowed_shells: list[str] = Field(default_factory=list)
+    allowed_tools: list[str] = Field(default_factory=list)
+    allowed_debuggers: list[str] = Field(default_factory=list)
+    allowed_extensions: list[str] = Field(default_factory=list)
+    allowed_network_targets: list[str] = Field(default_factory=list)
+    user_data_root: str = Field(default=r"C:\PortalProfiles", max_length=500)
+    extensions_root: str = Field(default=r"C:\PortalExtensions", max_length=500)
+    default_workspace_template: str = Field(default=r"\\tsclient\GuacDrive", max_length=500)
+
+
+class VscodeControlProfileUpdateRequest(BaseModel):
+    """修改受限 VSCode 控制策略。"""
+
+    profile_key: Optional[str] = Field(default=None, min_length=2, max_length=100)
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    policy_version: Optional[int] = Field(default=None, ge=1)
+    is_active: Optional[bool] = None
+    permissions: Optional[dict[str, bool]] = None
+    allowed_shells: Optional[list[str]] = None
+    allowed_tools: Optional[list[str]] = None
+    allowed_debuggers: Optional[list[str]] = None
+    allowed_extensions: Optional[list[str]] = None
+    allowed_network_targets: Optional[list[str]] = None
+    user_data_root: Optional[str] = Field(default=None, max_length=500)
+    extensions_root: Optional[str] = Field(default=None, max_length=500)
+    default_workspace_template: Optional[str] = Field(default=None, max_length=500)
+
+
+class VscodeControlCatalogResponse(BaseModel):
+    policy_version: int
+    controls: list[dict[str, Any]]
+    default_permissions: dict[str, bool]
+    locked_baseline: list[dict[str, str]]
+
+
+class VscodeControlProfileResponse(BaseModel):
+    id: int
+    profile_key: str
+    display_name: str
+    description: str
+    policy_version: int
+    is_active: bool
+    revision: int
+    permissions: dict[str, bool]
+    allowed_shells: list[str]
+    allowed_tools: list[str]
+    allowed_debuggers: list[str]
+    allowed_extensions: list[str]
+    allowed_network_targets: list[str]
+    user_data_root: str
+    extensions_root: str
+    default_workspace_template: str
+    valid: bool
+    validation_errors: list[str]
+    guacamole: dict[str, bool]
+    vscode: dict[str, Any]
+    applocker: dict[str, Any]
+    firewall: dict[str, Any]
+    locked_baseline: list[dict[str, str]]
+    created_at: Any = None
+    updated_at: Any = None
+
+
+class VscodeControlProfileListResponse(BaseModel):
+    items: list[VscodeControlProfileResponse]
 
 
 class AuditLogResponse(BaseModel):

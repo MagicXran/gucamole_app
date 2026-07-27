@@ -83,7 +83,7 @@ flowchart LR
     Guacd --> WindowsHost["Windows Server\nRDP / RemoteApp"]
     Guacd --> Drive
     Nginx -. "只读 X-Accel 下载" .-> Drive
-    Drive --> GuacDrive["Windows 会话中的\n\\\\tsclient\\GuacDrive"]
+    Drive --> GuacDrive["Windows 会话中的\n\\\\tsclient\\用户数据目录"]
     WindowsHost --> GuacDrive
     Worker["Windows Worker\n可选脚本任务"] --> Portal
 ```
@@ -323,12 +323,21 @@ Portal 用户 3 → /drive/portal_u3
 guacd 只把当前 Portal 用户的目录映射给本次连接。Windows 会话统一看到：
 
 ```text
-\\tsclient\GuacDrive
+\\tsclient\用户数据目录
 ```
 
 两个用户看到的盘名相同，但背后对应不同 Linux/Docker 目录。
 
-### 8.2 隔离层次
+`drive-name` 同时决定 Windows“此电脑”中的显示名和 `\\tsclient` 下的共享名。当前统一使用“用户数据目录”，不再使用旧名称 `GuacDrive`。
+
+### 8.2 RemoteApp 默认工作目录
+
+- 新建应用的 `remote_app_dir` 默认保存为 `\\tsclient\用户数据目录`。
+- 对历史应用，如果 `remote_app` 非空但 `remote_app_dir` 为空，启动时由 `backend/router.py` 自动回退到该目录。
+- 每个 Portal 用户虽然看到相同 UNC 路径，但 guacd 的 `drive-path` 仍指向各自 `/drive/portal_u{user_id}`。
+- Guacamole 的 `remote-app-dir` 只定义 RemoteApp 进程的启动工作目录。第三方软件可以忽略当前目录，Windows/应用自己的“打开/另存为”对话框也可能记忆其他位置；需要强制文件对话框或打开特定文件时，应使用应用参数或受控 Launcher，而不是把 `remote-app-dir` 当成硬限制。
+
+### 8.3 隔离层次
 
 | 层次 | 技术手段 | 当前作用 | 是否构成 Windows 硬隔离 |
 |---|---|---|---|
@@ -337,7 +346,7 @@ guacd 只把当前 Portal 用户的目录映射给本次连接。Windows 会话�
 | 文件 API | `_safe_resolve()`、路径规范化、Windows 文件名校验 | 阻止 `..`、绝对路径和越出个人目录 | 仅保护 Portal API |
 | 存储目录 | `/drive/portal_u{user_id}` | 每个 Portal 用户独立目录 | 保护 Linux/Portal 侧路径 |
 | Guacamole token | 每用户连接集合和 token | 防止拿到未授权连接 | 否 |
-| RDPDR | guacd `drive-path` | 只映射当前用户的 GuacDrive | 否 |
+| RDPDR | guacd `drive-path` | 只映射当前用户的“用户数据目录” | 否 |
 | 通道控制 | 禁剪贴板、浏览器传输、打印、音频输入 | 减少文件旁路和数据通道 | 否 |
 | Windows 入口限制 | NoDrives、NoViewOnDrive、禁 Run/控制面板/任务管理器等 | 阻止常规 UI 入口 | 否 |
 | Windows 身份 | 标准账号、管理员账号分域 | 限制系统权限 | 共享账号时不是租户隔离 |
@@ -346,7 +355,7 @@ guacd 只把当前 Portal 用户的目录映射给本次连接。Windows 会话�
 | Firewall | SMB/WebDAV/非必要出口限制 | 阻止网络共享和外部通道 | 网络边界 |
 | 会话清理 | Scheduled Task 清理 Temp/Recent/缓存 | 减少共享账号残留 | 事后清理，不是实时授权 |
 
-### 8.3 Portal API 隔离和 Windows 会话隔离不是一回事
+### 8.4 Portal API 隔离和 Windows 会话隔离不是一回事
 
 Portal 文件 API 会把所有路径限制在当前用户目录内，这个边界只对：
 
@@ -393,7 +402,7 @@ VSCode 当前生成的核心参数类似：
 --extensions-dir="C:\PortalExtensions\{user_id}"
 --disable-gpu
 --disable-workspace-trust
-"\\tsclient\GuacDrive"
+"\\tsclient\用户数据目录"
 ```
 
 Windows 主机还要为对应 Portal 用户写入：
@@ -479,7 +488,7 @@ fDisableCdm=0
 - 禁用 Run、控制面板、任务管理器、注册表工具等常规入口。
 - 限制网络驱动器映射入口。
 - `GuacRemoteApp` 禁用 cmd；`GuacVscode` 保留受控终端能力。
-- Desktop、Documents、Downloads 指向或限制到 `\\tsclient\GuacDrive` 的正常工作流。
+- Desktop、Documents、Downloads 指向或限制到 `\\tsclient\用户数据目录` 的正常工作流。
 - 保护关键策略注册表键，普通账号只能读取。
 
 这些策略主要控制 Explorer 和公共 UI，不替代 NTFS ACL。
@@ -655,7 +664,7 @@ VM 快照
 
 多个 RDS Session ID 可以隔离窗口、桌面和部分进程上下文，但共享账号意味着所有会话仍使用相同 Windows SID/access token。仅依赖以下机制不能满足严格文件隔离：
 
-- `/drive/portal_u{user_id}` 和 `\\tsclient\GuacDrive`；
+- `/drive/portal_u{user_id}` 和 `\\tsclient\用户数据目录`；
 - RDP/RAIL/RemoteApp 会话；
 - 隐藏盘符、禁 Explorer、禁 Run；
 - 关闭剪贴板、浏览器上传/下载、打印；
@@ -821,7 +830,7 @@ revoked / expired / failed / cleanup_pending
 | `C:\PortalScratch\{session_id}` | Read/Write | 当前会话计算和中间文件 |
 | 当前 Portal 用户输入 | Broker-controlled Read | 启动前按 manifest staging |
 | 当前 Portal 用户输出 | Broker-controlled Write | 结束时按输出规则同步 |
-| 当前会话 `\\tsclient\GuacDrive` | 按应用策略 | 简单应用可直接使用；复杂应用优先 broker staging |
+| 当前会话 `\\tsclient\用户数据目录` | 按应用策略 | 简单应用可直接使用；复杂应用优先 broker staging |
 | 其他用户 scratch/profile | Deny | 即使共享 SID 也由隔离运行时拒绝 |
 | `C:\Users` 真实共享 profile | 默认 Deny/Redirect | 必需文件重定向到 overlay |
 | 未登记 ProgramData/数据卷 | Deny | 逐应用增加只读或可写能力 |
@@ -882,7 +891,7 @@ File Broker 必须：
 - 保存 manifest、SHA-256、来源、目标、操作人和 session 审计。
 - 输出同步具有幂等键，断线重试不能产生重复或覆盖错误版本。
 
-RemoteApp 直接操作 `\\tsclient\GuacDrive` 会绕过 Portal 文件 API 的配额和审计。严格模式下应优先使用 Broker staging；需要直接 GuacDrive 的简单应用必须单独登记并经过隔离运行时验证。
+RemoteApp 直接操作 `\\tsclient\用户数据目录` 会绕过 Portal 文件 API 的配额和审计。严格模式下应优先使用 Broker staging；需要直接 GuacDrive 的简单应用必须单独登记并经过隔离运行时验证。
 
 ### 11.10 Local scratch 生命周期
 
@@ -1270,9 +1279,10 @@ http://127.0.0.1:18880/
 
 ```text
 database/migrate_access_security_modes.sql
+database/migrate_user_data_directory.sql
 ```
 
-它增加 `restricted_remoteapp`、`restricted_vscode`、`admin_desktop` 和 VSCode profile 相关结构。
+前者增加 `restricted_remoteapp`、`restricted_vscode`、`admin_desktop` 和 VSCode profile 相关结构；后者把映射盘与默认 RemoteApp 工作目录统一为 `\\tsclient\用户数据目录`，并失效旧 Guacamole token。
 
 ## 15. 验证命令
 

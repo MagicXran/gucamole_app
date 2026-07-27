@@ -27,7 +27,7 @@ def _valid_profile(**overrides):
         "allowed_network_targets": ["https://packages.example.local"],
         "user_data_root": r"C:\PortalProfiles",
         "extensions_root": r"C:\PortalExtensions",
-        "default_workspace_template": r"\\tsclient\GuacDrive",
+        "default_workspace_template": r"\\tsclient\用户数据目录",
     }
     payload.update(overrides)
     return normalize_profile_document(payload)
@@ -56,7 +56,7 @@ def test_profile_with_enabled_permissions_and_empty_allowlists_is_invalid():
             "allowed_network_targets": [],
             "user_data_root": r"C:\PortalProfiles",
             "extensions_root": r"C:\PortalExtensions",
-            "default_workspace_template": r"\\tsclient\GuacDrive",
+            "default_workspace_template": r"\\tsclient\用户数据目录",
         }
     )
 
@@ -104,8 +104,15 @@ def test_vscode_arguments_are_different_per_portal_user():
     assert r"C:\PortalProfiles\11" in user_a
     assert r"C:\PortalExtensions\11" in user_a
     assert "{user_id}" not in user_a
-    assert r"\\tsclient\GuacDrive" in user_a
+    assert r"\\tsclient\用户数据目录" in user_a
     assert "--disable-workspace-trust" in user_a
+
+
+def test_vscode_profile_uses_user_data_directory_share_name():
+    profile = _valid_profile(default_workspace_template=r"\\tsclient\用户数据目录")
+
+    assert profile["default_workspace_template"] == r"\\tsclient\用户数据目录"
+    assert r"\\tsclient\用户数据目录" in build_vscode_arguments(profile, 11)
 
 
 def test_restricted_argument_validation_allows_only_fixed_user_id_token():

@@ -5,7 +5,8 @@
 ## 当前关键逻辑
 
 - Portal 用户的 GuacDrive 路径由 `backend/router.py` 生成：`/drive/portal_u{user_id}`。
-- Guacamole 通过 RDPDR 将该目录映射为 Windows 会话中的 `\\tsclient\GuacDrive`。
+- Guacamole 通过 RDPDR 将该目录映射为 Windows 会话中的 `\\tsclient\用户数据目录`。
+- `drive-name` 同时决定 Windows 显示名和 `\\tsclient` 共享名；新建 RemoteApp 默认把 `remote_app_dir` 保存为该 UNC，历史空值在启动时自动回退。
 - `remote_app.security_mode` 区分 `restricted_remoteapp`、`restricted_vscode` 和 `admin_desktop`；普通用户查询和 ACL 更新都阻止管理员桌面。
 - `restricted_remoteapp` 在启动时强制关闭双向剪贴板、浏览器上传/下载、打印和麦克风，应用字段不能重新开启。
 - `restricted_vscode` 由 `vscode_control_profile` 计算最终权限。全部可授予权限默认勾选，但程序、扩展、路径和网络白名单不能为空且不能使用 `*`。
@@ -43,7 +44,7 @@
 ### 解决办法
 
 1. 新增 `backend/vscode_policy_service.py`，只生成固定 `--user-data-dir`、`--extensions-dir`、`--disable-gpu` 和 GuacDrive 工作区参数。
-2. user-data/extensions 根目录必须是 Windows 本地绝对路径；工作区固定为 `\\tsclient\GuacDrive`。
+2. user-data/extensions 根目录必须是 Windows 本地绝对路径；工作区固定为 `\\tsclient\用户数据目录`。
 3. 未知占位符、危险 shell 字符、未知控制项和 `*` 通配均被拒绝。
 4. 单元测试验证用户 A/B 参数不同、最终参数不含 `{user_id}`、受限通道映射和白名单缺失 fail closed。
 5. 已在运行 Docker/MySQL 上执行 Schema 迁移和 API smoke。
@@ -96,7 +97,7 @@
 
 ### 原因
 
-- VSCode 1.117 默认拒绝未登记的 UNC 主机；固定工作区 `\\tsclient\GuacDrive` 会触发 `security.allowedUNCHosts` 提示。
+- VSCode 1.117 默认拒绝未登记的 UNC 主机；固定工作区 `\\tsclient\用户数据目录` 会触发 `security.allowedUNCHosts` 提示。
 - UNC 主机允许后，默认 Workspace Trust 仍会让受控开发能力进入 Restricted Mode。
 - 仅重建 Portal 容器不会让已缓存的 Guacamole token 自动获得新启动参数；运行中的 backend 内存缓存和浏览器旧会话都可能继续启动旧命令行。
 
@@ -168,3 +169,28 @@
 - 现有 `active_session` 只是 Portal 会话监控记录，不得当成 OS 进程、许可证或隔离租约。
 - 新应用必须提交主 EXE、子进程、插件、脚本、TEMP/恢复目录、许可证端点、输入/输出和清理 manifest。
 - 验收必须覆盖绝对路径、UNC、设备路径、symlink/junction/reparse point、TOCTOU、断网、崩溃、旧 lease 和跨会话残留。
+
+## ISSUE-006：映射盘名称和 RemoteApp 默认工作目录不统一
+
+状态：代码、配置和数据库迁移已完成，真实 Windows 中文盘名验收待执行
+
+发现日期：2026-07-27
+
+### 现象与原因
+
+- `config/config.json` 的 `drive-name` 仍为 `GuacDrive`，Windows 显示名和 UNC 共享名因此保持英文。
+- 管理端和 `AppCreateRequest` 默认把 `remote_app_dir` 留空，历史应用启动时也原样传空值，应用通常回到本地盘或自身记忆目录。
+- VSCode 策略、SQL seed、Portal 文案和测试均硬编码旧 UNC，只改一处会造成策略校验、启动参数和界面说明失配。
+
+### 解决办法
+
+- 全链路统一使用 `\\tsclient\用户数据目录`，保留底层 `/drive/portal_u{user_id}` 隔离路径不变。
+- 新增 RemoteApp 默认保存该工作目录；历史非空 `remote_app` 且工作目录为空时，启动阶段自动回退。
+- 数据库迁移同步更新 `vscode_control_profile`、历史 `remote_app`，并清空包含旧连接参数的 `token_cache`。
+- 明确 `remote-app-dir` 只是进程启动工作目录，不承诺第三方软件的文件对话框始终定位于该目录。
+
+### 防止重复犯错
+
+- 修改 `drive-name` 时必须同步 VSCode 固定工作区、Pydantic 默认值、Vue/legacy 管理端、SQL seed/迁移、Portal 文案、README 和自动化测试。
+- 改动后必须结束旧 Windows 会话并重新登录，验证“此电脑”显示名、`\\tsclient` UNC、默认工作目录和 A/B 用户目录隔离。
+- Docker 构建上下文必须排除本地 `node_modules`；否则不同包管理器生成的目录结构会与镜像内 `npm ci` 结果冲突。

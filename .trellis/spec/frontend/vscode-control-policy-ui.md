@@ -23,7 +23,7 @@
 - New profiles clone `catalog.default_permissions`, so all current controls start selected.
 - Provide Select All, Clear All, and Reset Defaults.
 - Show locked baseline items as checked and disabled.
-- Fixed roots and GuacDrive workspace are visible but disabled.
+- Fixed roots and the `\\tsclient\用户数据目录` workspace are visible but disabled.
 - The application dialog only selects `security_mode` and a ready profile; it does not embed the policy matrix.
 
 ### 4. Validation & Error Matrix

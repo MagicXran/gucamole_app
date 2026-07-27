@@ -15,12 +15,12 @@ POLICY_VERSION = 1
 SECURITY_MODES = ("restricted_remoteapp", "restricted_vscode", "admin_desktop")
 FIXED_USER_DATA_ROOT = r"C:\PortalProfiles"
 FIXED_EXTENSIONS_ROOT = r"C:\PortalExtensions"
-FIXED_WORKSPACE = r"\\tsclient\GuacDrive"
+FIXED_WORKSPACE = r"\\tsclient\用户数据目录"
 
 
 CONTROL_CATALOG: tuple[dict[str, Any], ...] = (
-    {"code": "workspace_file_ops", "category": "workspace", "label": "GuacDrive 文件操作", "enforcement": "Portal + NTFS", "risk": "允许在个人 GuacDrive 中新建、读写、删除和重命名文件。"},
-    {"code": "multi_root_workspace", "category": "workspace", "label": "多根工作区", "enforcement": "VSCode policy", "risk": "工作区仍必须位于允许的 GuacDrive 路径。"},
+    {"code": "workspace_file_ops", "category": "workspace", "label": "用户数据目录文件操作", "enforcement": "Portal + NTFS", "risk": "允许在个人用户数据目录中新建、读写、删除和重命名文件。"},
+    {"code": "multi_root_workspace", "category": "workspace", "label": "多根工作区", "enforcement": "VSCode policy", "risk": "工作区仍必须位于允许的用户数据目录路径。"},
     {"code": "user_settings", "category": "personalization", "label": "用户设置", "enforcement": "VSCode profile", "risk": "设置写入当前门户用户的独立 user-data 目录。"},
     {"code": "workspace_settings", "category": "personalization", "label": "工作区设置", "enforcement": "VSCode policy", "risk": "工作区设置可能改变任务和扩展行为。"},
     {"code": "keybindings", "category": "personalization", "label": "快捷键", "enforcement": "VSCode profile", "risk": "允许用户保存自定义快捷键。"},
@@ -43,8 +43,8 @@ CONTROL_CATALOG: tuple[dict[str, Any], ...] = (
     {"code": "remote_development", "category": "remote", "label": "远程开发", "enforcement": "AppLocker + Firewall", "risk": "SSH、WSL 或容器工具必须登记。"},
     {"code": "copy_remote_to_local", "category": "data_channel", "label": "远程复制到本地", "enforcement": "Guacamole", "risk": "允许远程剪贴板内容复制到浏览器本地。"},
     {"code": "paste_local_to_remote", "category": "data_channel", "label": "本地粘贴到远程", "enforcement": "Guacamole", "risk": "允许浏览器本地剪贴板写入远程会话。"},
-    {"code": "browser_upload", "category": "data_channel", "label": "浏览器上传", "enforcement": "Guacamole", "risk": "允许浏览器向 GuacDrive 上传文件。"},
-    {"code": "browser_download", "category": "data_channel", "label": "浏览器下载", "enforcement": "Guacamole", "risk": "允许从 GuacDrive 下载到浏览器。"},
+    {"code": "browser_upload", "category": "data_channel", "label": "浏览器上传", "enforcement": "Guacamole", "risk": "允许浏览器向用户数据目录上传文件。"},
+    {"code": "browser_download", "category": "data_channel", "label": "浏览器下载", "enforcement": "Guacamole", "risk": "允许从用户数据目录下载到浏览器。"},
     {"code": "printing", "category": "device", "label": "虚拟打印", "enforcement": "Guacamole", "risk": "允许生成可下载的打印文件。"},
     {"code": "audio_output", "category": "device", "label": "音频输出", "enforcement": "Guacamole", "risk": "允许远程音频输出到浏览器。"},
     {"code": "audio_input", "category": "device", "label": "麦克风输入", "enforcement": "Guacamole", "risk": "允许浏览器麦克风输入远程会话。"},
@@ -62,7 +62,7 @@ LOCKED_BASELINE = (
     {"code": "personal_guacdrive", "label": "驱动器固定为 /drive/portal_u{user_id}"},
     {"code": "safe_user_id_expansion", "label": "只展开固定 {user_id} 占位符"},
     {"code": "fixed_profile_roots", "label": "user-data/extensions 根目录固定并校验"},
-    {"code": "guacdrive_workspace", "label": "默认业务工作区为 \\\\tsclient\\GuacDrive"},
+    {"code": "guacdrive_workspace", "label": "默认业务工作区为 \\\\tsclient\\用户数据目录"},
     {"code": "program_allowlist", "label": "shell、工具链和调试器必须显式白名单"},
     {"code": "extension_allowlist", "label": "扩展必须显式白名单"},
     {"code": "network_allowlist", "label": "网络目标必须显式白名单"},
@@ -232,7 +232,7 @@ def _normalize_fixed_windows_root(value: Any, field_name: str, expected_root: st
 def _normalize_workspace(value: Any) -> str:
     normalized = str(value or "").strip()
     if normalized != FIXED_WORKSPACE:
-        raise VscodePolicyError("default_workspace_template 必须固定为 \\\\tsclient\\GuacDrive")
+        raise VscodePolicyError("default_workspace_template 必须固定为 \\\\tsclient\\用户数据目录")
     return normalized
 
 

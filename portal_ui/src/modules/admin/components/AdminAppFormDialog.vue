@@ -99,7 +99,7 @@
           <label class="admin-app-dialog__wide"><span>命令参数</span><input v-model="form.remote_app_args" data-testid="admin-app-remote-args"></label>
         </div>
         <p class="admin-app-dialog__hint">
-          受限模式必须填写 RemoteApp；一般限制会强制关闭剪贴板、浏览器传输、打印和麦克风，受限 VSCode 则只采用绑定策略的最终权限。
+          新建 RemoteApp 默认使用当前用户的 <code>\\tsclient\用户数据目录</code> 作为启动工作目录；一般限制会强制关闭剪贴板、浏览器传输、打印和麦克风，受限 VSCode 则只采用绑定策略的最终权限。
         </p>
       </section>
 
@@ -305,7 +305,7 @@ function defaultForm(): AdminAppFormPayload {
     security: 'nla',
     ignore_cert: true,
     remote_app: '',
-    remote_app_dir: '',
+    remote_app_dir: '\\\\tsclient\\用户数据目录',
     remote_app_args: '',
     security_mode: 'restricted_remoteapp',
     vscode_control_profile_id: null,
@@ -410,7 +410,7 @@ function hydrateForm(app: AdminAppRecord | null) {
     security: app?.security || 'nla',
     ignore_cert: app?.ignore_cert ?? true,
     remote_app: app?.remote_app || '',
-    remote_app_dir: app?.remote_app_dir || '',
+    remote_app_dir: app?.remote_app_dir || '\\\\tsclient\\用户数据目录',
     remote_app_args: app?.remote_app_args || '',
     security_mode: app?.security_mode || 'restricted_remoteapp',
     vscode_control_profile_id: app?.vscode_control_profile_id ?? null,

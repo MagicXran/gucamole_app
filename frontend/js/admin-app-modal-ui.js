@@ -314,7 +314,7 @@
             '</div>' +
             formGroup('RemoteApp', 'app-remote-app', app ? (app.remote_app || '') : '', 'text', false, '如 ||notepad') +
             '<div class="form-row">' +
-            formGroup('工作目录', 'app-remote-dir', app ? (app.remote_app_dir || '') : '') +
+            formGroup('工作目录', 'app-remote-dir', app ? (app.remote_app_dir || '\\\\tsclient\\用户数据目录') : '\\\\tsclient\\用户数据目录') +
             formGroup('命令参数', 'app-remote-args', app ? (app.remote_app_args || '') : '') +
             '</div>' +
             '<div class="form-row">' +

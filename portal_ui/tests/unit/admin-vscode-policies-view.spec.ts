@@ -91,7 +91,7 @@ describe('AdminVscodePoliciesView', () => {
         allowed_network_targets: [],
         user_data_root: 'C:\\PortalProfiles',
         extensions_root: 'C:\\PortalExtensions',
-        default_workspace_template: '\\\\tsclient\\GuacDrive',
+        default_workspace_template: '\\\\tsclient\\用户数据目录',
       },
       headers: {},
     } as never)

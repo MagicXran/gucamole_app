@@ -1,0 +1,9 @@
+.git
+.worktrees
+.venv
+.pytest-tmp
+node_modules
+portal_ui/node_modules
+deploy/backups
+**/__pycache__
+**/.pytest_cache

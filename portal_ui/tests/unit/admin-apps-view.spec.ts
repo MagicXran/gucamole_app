@@ -420,7 +420,7 @@ describe('AdminAppsView', () => {
             allowed_network_targets: [],
             user_data_root: 'C:\\PortalProfiles',
             extensions_root: 'C:\\PortalExtensions',
-            default_workspace_template: '\\\\tsclient\\GuacDrive',
+            default_workspace_template: '\\\\tsclient\\用户数据目录',
           },
         ],
         initialApp: null,
@@ -440,6 +440,25 @@ describe('AdminAppsView', () => {
         vscode_control_profile_id: 3,
       }),
     })
+  })
+
+  it('defaults new RemoteApp instances to the user data directory', async () => {
+    const { default: AdminAppFormDialog } = await import('@/modules/admin/components/AdminAppFormDialog.vue')
+    const wrapper = mount(AdminAppFormDialog, {
+      props: {
+        open: true,
+        mode: 'create',
+        saving: false,
+        pools: [],
+        workerGroups: [],
+        scriptProfiles: [],
+        vscodeControlProfiles: [],
+        initialApp: null,
+      },
+    })
+
+    expect((wrapper.get('[data-testid="admin-app-remote-dir"]').element as HTMLInputElement).value)
+      .toBe('\\\\tsclient\\用户数据目录')
   })
 
   it('rejects an inactive or invalid VSCode control profile before API submit', async () => {
@@ -462,7 +481,7 @@ describe('AdminAppsView', () => {
       allowed_network_targets: [],
       user_data_root: 'C:\\PortalProfiles',
       extensions_root: 'C:\\PortalExtensions',
-      default_workspace_template: '\\\\tsclient\\GuacDrive',
+      default_workspace_template: '\\\\tsclient\\用户数据目录',
     }
     const wrapper = mount(AdminAppFormDialog, {
       props: {

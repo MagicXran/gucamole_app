@@ -157,7 +157,7 @@ INSERT IGNORE INTO vscode_control_profile (
         'network_git', TRUE, 'network_packages', TRUE, 'network_business', TRUE, 'network_https', TRUE
     ),
     JSON_ARRAY(), JSON_ARRAY(), JSON_ARRAY(), JSON_ARRAY(), JSON_ARRAY(),
-    'C:\\PortalProfiles', 'C:\\PortalExtensions', '\\\\tsclient\\GuacDrive'
+    'C:\\PortalProfiles', 'C:\\PortalExtensions', '\\\\tsclient\\用户数据目录'
 );
 
 INSERT IGNORE INTO resource_pool
@@ -169,11 +169,11 @@ VALUES
     (3, '默认池-3-远程桌面', 'desktop',   1, 1, 120, 120, NULL, 1);
 
 INSERT IGNORE INTO remote_app
-    (id, name, icon, app_kind, hostname, port, rdp_username, rdp_password, remote_app, security_mode, pool_id, member_max_concurrent)
+    (id, name, icon, app_kind, hostname, port, rdp_username, rdp_password, remote_app, remote_app_dir, security_mode, pool_id, member_max_concurrent)
 VALUES
-    (1, '记事本',   'edit',      'commercial_software', '192.168.1.6', 3389, 'admin', 'password', '||notepad', 'restricted_remoteapp', 1, 1),
-    (2, '计算器',   'calculate', 'compute_tool',        '192.168.1.6', 3389, 'admin', 'password', '||calc',    'restricted_remoteapp', 2, 1),
-    (3, '远程桌面', 'desktop',   'simulation_app',      '192.168.1.6', 3389, 'admin', 'password', NULL,        'admin_desktop', 3, 1);
+    (1, '记事本',   'edit',      'commercial_software', '192.168.1.6', 3389, 'admin', 'password', '||notepad', '\\\\tsclient\\用户数据目录', 'restricted_remoteapp', 1, 1),
+    (2, '计算器',   'calculate', 'compute_tool',        '192.168.1.6', 3389, 'admin', 'password', '||calc',    '\\\\tsclient\\用户数据目录', 'restricted_remoteapp', 2, 1),
+    (3, '远程桌面', 'desktop',   'simulation_app',      '192.168.1.6', 3389, 'admin', 'password', NULL,        NULL,                            'admin_desktop', 3, 1);
 
 -- Token 缓存表（确保后端重启后复用已有 Guacamole session）
 CREATE TABLE IF NOT EXISTS token_cache (

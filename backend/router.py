@@ -110,7 +110,7 @@ def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, st
     # Drive redirection 全局配置
     drive_cfg = CONFIG.get("guacamole", {}).get("drive", {})
     drive_enabled = drive_cfg.get("enabled", False)
-    drive_name = drive_cfg.get("name", "GuacDrive")
+    drive_name = str(drive_cfg.get("name") or "用户数据目录").strip()
     drive_base = drive_cfg.get("base_path", "/drive")
     drive_create = drive_cfg.get("create_path", True)
     drive_disable_download = bool(drive_cfg.get("disable_download", False))
@@ -125,9 +125,12 @@ def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, st
         try:
             security_mode = str(app.get("security_mode") or "restricted_remoteapp")
             remote_app = str(app.get("remote_app") or "").strip()
+            remote_app_dir = str(app.get("remote_app_dir") or "").strip()
             remote_app_args = str(app.get("remote_app_args") or "")
             if security_mode in {"restricted_remoteapp", "restricted_vscode"} and not remote_app:
                 raise VscodePolicyError("受限模式缺少 remote_app，已阻止完整桌面回退")
+            if remote_app and not remote_app_dir and drive_enabled:
+                remote_app_dir = f"\\\\tsclient\\{drive_name}"
 
             app_disable_download = _resolve_transfer_policy(app.get("disable_download"), drive_disable_download)
             app_disable_upload = _resolve_transfer_policy(app.get("disable_upload"), drive_disable_upload)
@@ -172,7 +175,7 @@ def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, st
                 security=app.get("security") or "nla",
                 ignore_cert=bool(app.get("ignore_cert", True)),
                 remote_app=remote_app,
-                remote_app_dir=app.get("remote_app_dir") or "",
+                remote_app_dir=remote_app_dir,
                 remote_app_args=remote_app_args,
                 enable_drive=drive_enabled,
                 drive_name=drive_name,

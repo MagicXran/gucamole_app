@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from backend.models import AppCreateRequest
 from backend.vscode_policy_service import DEFAULT_PERMISSIONS
 
 
@@ -14,6 +15,7 @@ def _load_router_module(
     app_disable_upload,
     global_disable_download=True,
     global_disable_upload=True,
+    drive_name="用户数据目录",
     row_overrides=None,
 ):
     fake_database = types.ModuleType("backend.database")
@@ -66,7 +68,7 @@ def _load_router_module(
             "token_expire_minutes": 60,
             "drive": {
                 "enabled": True,
-                "name": "GuacDrive",
+                "name": drive_name,
                 "base_path": "/drive",
                 "create_path": True,
                 "disable_download": global_disable_download,
@@ -169,6 +171,25 @@ def test_restricted_remoteapp_forces_strict_channels():
     assert "enable-audio-input" not in params
 
 
+def test_remoteapp_defaults_to_configured_user_data_directory():
+    router_module = _load_router_module(
+        0,
+        0,
+        drive_name="用户数据目录",
+        row_overrides={
+            "security_mode": "restricted_remoteapp",
+            "remote_app": "||notepad",
+            "remote_app_dir": "",
+        },
+    )
+
+    params = router_module._build_all_connections(7)["app_1"]["parameters"]
+
+    assert params["drive-name"] == "用户数据目录"
+    assert params["drive-path"] == "/drive/portal_u7"
+    assert params["remote-app-dir"] == r"\\tsclient\用户数据目录"
+
+
 def test_restricted_vscode_expands_user_paths_and_uses_profile_channels():
     router_module = _load_router_module(
         1,
@@ -193,7 +214,7 @@ def test_restricted_vscode_expands_user_paths_and_uses_profile_channels():
             "vcp_allowed_network_targets_json": ["https://packages.example.local"],
             "vcp_user_data_root": r"C:\\PortalProfiles",
             "vcp_extensions_root": r"C:\\PortalExtensions",
-            "vcp_default_workspace_template": r"\\tsclient\GuacDrive",
+            "vcp_default_workspace_template": r"\\tsclient\用户数据目录",
             "vcp_created_at": None,
             "vcp_updated_at": None,
         },
@@ -362,6 +383,16 @@ def test_admin_create_app_preserves_transfer_policy_values(policy_value):
     assert fake_db.insert_params is not None
     assert fake_db.insert_params["disable_download"] == policy_value
     assert fake_db.insert_params["disable_upload"] == policy_value
+
+
+def test_admin_create_app_defaults_remoteapp_working_directory():
+    req = AppCreateRequest(
+        name="default-workdir",
+        hostname="rdp.example.local",
+        remote_app="||notepad",
+    )
+
+    assert req.remote_app_dir == r"\\tsclient\用户数据目录"
 
 
 @pytest.mark.parametrize("policy_value", [None, 1, 0])

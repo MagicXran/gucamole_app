@@ -69,7 +69,7 @@ def _load_router_module(
             "token_expire_minutes": 60,
             "drive": {
                 "enabled": True,
-                "name": "资料空间",
+                "name": "GuacDrive",
                 "base_path": "/drive",
                 "create_path": True,
                 "disable_download": global_disable_download,
@@ -172,7 +172,7 @@ def test_restricted_remoteapp_forces_strict_channels():
     assert "enable-audio-input" not in params
 
 
-def test_remoteapp_uses_portal_user_name_for_drive_and_default_directory():
+def test_remoteapp_uses_ascii_drive_name_for_default_directory():
     router_module = _load_router_module(
         0,
         0,
@@ -185,20 +185,18 @@ def test_remoteapp_uses_portal_user_name_for_drive_and_default_directory():
 
     params = router_module._build_all_connections(7)["app_1"]["parameters"]
 
-    assert "u.username AS portal_username" in router_module.db.last_query
-    assert "u.display_name AS portal_display_name" in router_module.db.last_query
-    assert params["drive-name"] == "张三 的资料空间"
+    assert params["drive-name"] == "GuacDrive"
+    assert params["drive-name"].isascii()
     assert params["drive-path"] == "/drive/portal_u7"
-    assert params["remote-app-dir"] == r"\\tsclient\张三 的资料空间"
+    assert params["remote-app-dir"] == r"\\tsclient\GuacDrive"
 
 
-def test_user_drive_name_sanitizes_display_name_and_falls_back_to_username():
+def test_rdp_drive_name_falls_back_to_ascii_for_unicode_or_unsafe_labels():
     router_module = _load_router_module(0, 0)
 
-    assert router_module._build_user_drive_name(" 张/三:*? ", "zhangsan", 7) == "张_三___ 的资料空间"
-    assert router_module._build_user_drive_name("", "lisi", 8) == "lisi 的资料空间"
-    assert router_module._build_user_drive_name("", "", 9) == "用户9 的资料空间"
-    assert router_module._build_user_drive_name("张三", "", 10, "资料/空间") == "张三 的资料_空间"
+    assert router_module._build_rdp_drive_name("资料空间") == "GuacDrive"
+    assert router_module._build_rdp_drive_name(" User Files & Data ") == "User_Files_Data"
+    assert router_module._build_rdp_drive_name("***") == "GuacDrive"
 
 
 def test_restricted_vscode_expands_user_paths_and_uses_profile_channels():
@@ -236,7 +234,7 @@ def test_restricted_vscode_expands_user_paths_and_uses_profile_channels():
     assert "{user_id}" not in params["remote-app-args"]
     assert r"C:\PortalProfiles\7" in params["remote-app-args"]
     assert r"C:\PortalExtensions\7" in params["remote-app-args"]
-    assert r"\\tsclient\张三 的资料空间" in params["remote-app-args"]
+    assert r"\\tsclient\GuacDrive" in params["remote-app-args"]
     assert "disable-copy" not in params
     assert "disable-paste" not in params
     assert "disable-download" not in params

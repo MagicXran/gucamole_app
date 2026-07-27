@@ -99,7 +99,7 @@
           <label class="admin-app-dialog__wide"><span>命令参数</span><input v-model="form.remote_app_args" data-testid="admin-app-remote-args"></label>
         </div>
         <p class="admin-app-dialog__hint">
-          工作目录留空时，启动阶段按当前 Portal 用户展开为 <code>\\tsclient\用户名称 的资料空间</code>；显式填写时保留应用专用目录。一般限制会强制关闭剪贴板、浏览器传输、打印和麦克风。
+          工作目录留空时，启动阶段统一展开为 <code>\\tsclient\GuacDrive</code>；每个 Portal 用户仍映射到独立的底层目录。显式填写时保留应用专用目录。一般限制会强制关闭剪贴板、浏览器传输、打印和麦克风。
         </p>
       </section>
 

@@ -1,7 +1,7 @@
 # Guacamole RemoteApp Portal
 
 > 文档定位：项目总览、真实技术架构、核心事件流程、用户文件隔离机制、Windows RemoteApp 主机配置和新服务器标准流程。
-> 当前架构快照：2026-07-26。生产 Portal 的详细部署参数见 [`deploy/readme.md`](deploy/readme.md)，Windows 一般限制的执行与验收细节见 [`docs/2026-07-26-guacdrive-general-restriction-runbook.md`](docs/2026-07-26-guacdrive-general-restriction-runbook.md)。
+> 当前架构快照：2026-07-27。生产 Portal 的详细部署参数见 [`deploy/readme.md`](deploy/readme.md)，Windows 一般限制的执行与验收细节见 [`docs/2026-07-26-guacdrive-general-restriction-runbook.md`](docs/2026-07-26-guacdrive-general-restriction-runbook.md)。
 
 ## 1. 项目是什么
 
@@ -83,7 +83,7 @@ flowchart LR
     Guacd --> WindowsHost["Windows Server\nRDP / RemoteApp"]
     Guacd --> Drive
     Nginx -. "只读 X-Accel 下载" .-> Drive
-    Drive --> GuacDrive["Windows 会话中的\n\\\\tsclient\\张三 的资料空间（示例）"]
+    Drive --> GuacDrive["Windows 会话中的\n\\\\tsclient\\GuacDrive（示例）"]
     WindowsHost --> GuacDrive
     Worker["Windows Worker\n可选脚本任务"] --> Portal
 ```
@@ -320,23 +320,21 @@ Portal 用户 2 → /drive/portal_u2
 Portal 用户 3 → /drive/portal_u3
 ```
 
-guacd 只把当前 Portal 用户的目录映射给本次连接。共享名按数据库中的 `display_name` 动态生成，空值回退 `username`：
+guacd 只把当前 Portal 用户的目录映射给本次连接。Windows 侧统一使用 ASCII 共享名：
 
 ```text
-Portal 用户张三 → \\tsclient\张三 的资料空间
-Portal 用户李四 → \\tsclient\李四 的资料空间
+\\tsclient\GuacDrive
 ```
 
-两个用户看到不同共享名，背后仍分别对应自己的 Linux/Docker 目录。
+不同 Portal 用户虽然看到相同共享名，但各自会话背后仍分别对应 `/drive/portal_u{user_id}`，不会因此合并目录。
 
-`drive-name` 同时决定 `\\tsclient` 下的共享名和 Windows“此电脑”条目中的文件系统名称。Windows 会把它与 RDP `client-name` 组合，因此“此电脑”通常显示为“Guacamole RDP 上的 张三 的资料空间”；Guacamole 1.6 没有受支持的参数可隐藏这个系统前缀。
+Guacamole 1.6.0 的 RDPDR 设备声明会按 Unicode 字符数截取 UTF-8 字节；中文 `drive-name` 会被截断并产生乱码，完整中文 UNC 也无法访问。因此 `backend/router.py` 会把配置名称约束为 ASCII，非法或纯中文配置回退为 `GuacDrive`。Windows“此电脑”通常显示为“Guacamole RDP 上的 GuacDrive”。
 
 ### 8.2 RemoteApp 默认工作目录
 
-- 新建应用把 `remote_app_dir` 留空，避免把共享应用绑定到某个固定用户名。
-- 启动时由 `backend/router.py` 动态展开为 `\\tsclient\{display_name 或 username} 的资料空间`。
-- 历史固定值 `\\tsclient\GuacDrive` 和 `\\tsclient\用户数据目录` 也按动态路径处理；显式配置的应用专用目录继续保留。
-- 每个 Portal 用户的 guacd `drive-path` 仍固定指向各自 `/drive/portal_u{user_id}`。
+- 新建应用把 `remote_app_dir` 留空，由 `backend/router.py` 统一展开为 `\\tsclient\GuacDrive`。
+- 历史固定值 `\\tsclient\GuacDrive` 和 `\\tsclient\用户数据目录` 也按当前兼容名称处理；显式配置的应用专用目录继续保留。
+- 每个 Portal 用户的 guacd `drive-path` 仍固定指向各自 `/drive/portal_u{user_id}`，隔离依据是底层路径而不是共享名。
 - Guacamole 的 `remote-app-dir` 只定义 RemoteApp 进程的启动工作目录。第三方软件可以忽略当前目录，Windows/应用自己的“打开/另存为”对话框也可能记忆其他位置；需要强制文件对话框或打开特定文件时，应使用应用参数或受控 Launcher，而不是把 `remote-app-dir` 当成硬限制。
 
 ### 8.3 隔离层次
@@ -348,7 +346,7 @@ Portal 用户李四 → \\tsclient\李四 的资料空间
 | 文件 API | `_safe_resolve()`、路径规范化、Windows 文件名校验 | 阻止 `..`、绝对路径和越出个人目录 | 仅保护 Portal API |
 | 存储目录 | `/drive/portal_u{user_id}` | 每个 Portal 用户独立目录 | 保护 Linux/Portal 侧路径 |
 | Guacamole token | 每用户连接集合和 token | 防止拿到未授权连接 | 否 |
-| RDPDR | guacd `drive-path` + 动态 `drive-name` | 只映射当前用户，并显示为“用户名 的资料空间” | 否 |
+| RDPDR | per-user `drive-path` + ASCII `drive-name=GuacDrive` | 只映射当前用户目录，避免多字节共享名被截断 | 否 |
 | 通道控制 | 禁剪贴板、浏览器传输、打印、音频输入 | 减少文件旁路和数据通道 | 否 |
 | Windows 入口限制 | NoDrives、NoViewOnDrive、禁 Run/控制面板/任务管理器等 | 阻止常规 UI 入口 | 否 |
 | Windows 身份 | 标准账号、管理员账号分域 | 限制系统权限 | 共享账号时不是租户隔离 |
@@ -394,7 +392,7 @@ Windows RemoteApp 进程不经过 Portal 文件 API。允许的 Windows 应用�
 | 模式 | 使用者 | 行为 |
 |---|---|---|
 | `restricted_remoteapp` | 普通业务应用 | RemoteApp 必须非空；强制关闭双向剪贴板、浏览器上传/下载、打印和音频输入 |
-| `restricted_vscode` | 受控开发环境 | 动态资料空间工作区和每 Portal 用户独立 profile/extensions，权限由 `vscode_control_profile` 计算 |
+| `restricted_vscode` | 受控开发环境 | 固定 GuacDrive 工作区和每 Portal 用户独立 profile/extensions，权限由 `vscode_control_profile` 计算 |
 | `admin_desktop` | 管理员 | 允许完整桌面；普通用户查询和 ACL 更新均拒绝 |
 
 VSCode 当前生成的核心参数类似：
@@ -404,7 +402,7 @@ VSCode 当前生成的核心参数类似：
 --extensions-dir="C:\PortalExtensions\{user_id}"
 --disable-gpu
 --disable-workspace-trust
-"\\tsclient\张三 的资料空间"
+"\\tsclient\GuacDrive"
 ```
 
 Windows 主机还要为对应 Portal 用户写入：
@@ -490,7 +488,7 @@ fDisableCdm=0
 - 禁用 Run、控制面板、任务管理器、注册表工具等常规入口。
 - 限制网络驱动器映射入口。
 - `GuacRemoteApp` 禁用 cmd；`GuacVscode` 保留受控终端能力。
-- Desktop、Documents、Downloads 指向或限制到当前用户 `\\tsclient\用户名 的资料空间` 的正常工作流。
+- Desktop、Documents、Downloads 指向或限制到当前会话 `\\tsclient\GuacDrive` 的正常工作流。
 - 保护关键策略注册表键，普通账号只能读取。
 
 这些策略主要控制 Explorer 和公共 UI，不替代 NTFS ACL。
@@ -666,7 +664,7 @@ VM 快照
 
 多个 RDS Session ID 可以隔离窗口、桌面和部分进程上下文，但共享账号意味着所有会话仍使用相同 Windows SID/access token。仅依赖以下机制不能满足严格文件隔离：
 
-- `/drive/portal_u{user_id}` 和动态 `\\tsclient\用户名 的资料空间`；
+- `/drive/portal_u{user_id}` 和固定名称 `\\tsclient\GuacDrive`；
 - RDP/RAIL/RemoteApp 会话；
 - 隐藏盘符、禁 Explorer、禁 Run；
 - 关闭剪贴板、浏览器上传/下载、打印；
@@ -832,7 +830,7 @@ revoked / expired / failed / cleanup_pending
 | `C:\PortalScratch\{session_id}` | Read/Write | 当前会话计算和中间文件 |
 | 当前 Portal 用户输入 | Broker-controlled Read | 启动前按 manifest staging |
 | 当前 Portal 用户输出 | Broker-controlled Write | 结束时按输出规则同步 |
-| 当前会话 `\\tsclient\用户名 的资料空间` | 按应用策略 | 简单应用可直接使用；复杂应用优先 broker staging |
+| 当前会话 `\\tsclient\GuacDrive` | 按应用策略 | 简单应用可直接使用；复杂应用优先 broker staging |
 | 其他用户 scratch/profile | Deny | 即使共享 SID 也由隔离运行时拒绝 |
 | `C:\Users` 真实共享 profile | 默认 Deny/Redirect | 必需文件重定向到 overlay |
 | 未登记 ProgramData/数据卷 | Deny | 逐应用增加只读或可写能力 |
@@ -893,7 +891,7 @@ File Broker 必须：
 - 保存 manifest、SHA-256、来源、目标、操作人和 session 审计。
 - 输出同步具有幂等键，断线重试不能产生重复或覆盖错误版本。
 
-RemoteApp 直接操作动态 `\\tsclient\用户名 的资料空间` 会绕过 Portal 文件 API 的配额和审计。严格模式下应优先使用 Broker staging；需要直接 GuacDrive 的简单应用必须单独登记并经过隔离运行时验证。
+RemoteApp 直接操作 `\\tsclient\GuacDrive` 会绕过 Portal 文件 API 的配额和审计。严格模式下应优先使用 Broker staging；需要直接 GuacDrive 的简单应用必须单独登记并经过隔离运行时验证。
 
 ### 11.10 Local scratch 生命周期
 

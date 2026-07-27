@@ -22,7 +22,7 @@
     "token_expire_minutes": 480,
     "drive": {
       "enabled": true,
-      "name": "资料空间",
+      "name": "GuacDrive",
       "base_path": "/drive",
       "results_root": "Output",
       "create_path": true,

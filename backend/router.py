@@ -31,7 +31,7 @@ from backend.audit import log_action
 
 logger = logging.getLogger(__name__)
 
-_DRIVE_NAME_BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_RDP_DRIVE_NAME_BAD_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _AUTO_REMOTE_APP_DIRS = {
     r"\\tsclient\GuacDrive",
     r"\\tsclient\用户数据目录",
@@ -70,29 +70,12 @@ def _resolve_transfer_policy(override_value, global_value: bool) -> bool:
     return bool(override_value)
 
 
-def _build_user_drive_name(
-    display_name: object,
-    username: object,
-    user_id: int,
-    drive_label: object = "资料空间",
-) -> str:
-    """生成当前 Portal 用户在 RDPDR 中看到的安全共享名。"""
-    base_name = (
-        str(display_name or "").strip()
-        or str(username or "").strip()
-        or f"用户{user_id}"
-    )
-    base_name = _DRIVE_NAME_BAD_CHARS.sub("_", base_name)
-    base_name = re.sub(r"\s+", " ", base_name).strip(" .")
-    if not base_name:
-        base_name = f"用户{user_id}"
-    safe_label = _DRIVE_NAME_BAD_CHARS.sub("_", str(drive_label or "资料空间"))
-    safe_label = re.sub(r"\s+", " ", safe_label).strip(" .") or "资料空间"
-    safe_label = safe_label[:32].rstrip(" .") or "资料空间"
-    suffix = f" 的{safe_label}"
-    max_base_length = _DRIVE_NAME_MAX_LENGTH - len(suffix)
-    base_name = base_name[:max_base_length].rstrip(" .") or f"用户{user_id}"
-    return f"{base_name}{suffix}"
+def _build_rdp_drive_name(drive_label: object = "GuacDrive") -> str:
+    """生成仅含 ASCII 的 RDPDR 共享名，规避 guacd 多字节名称截断。"""
+    candidate = str(drive_label or "GuacDrive").strip()
+    safe_name = _RDP_DRIVE_NAME_BAD_CHARS.sub("_", candidate).strip("._-")
+    safe_name = safe_name[:_DRIVE_NAME_MAX_LENGTH].rstrip("._-")
+    return safe_name or "GuacDrive"
 
 
 def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, str]]:
@@ -112,8 +95,6 @@ def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, st
                a.enable_printing, a.disable_download, a.disable_upload,
                a.timezone, a.keyboard_layout,
                a.security_mode, a.vscode_control_profile_id,
-               u.username AS portal_username,
-               u.display_name AS portal_display_name,
                vcp.id AS vcp_id,
                vcp.profile_key AS vcp_profile_key,
                vcp.display_name AS vcp_display_name,
@@ -145,7 +126,7 @@ def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, st
     # Drive redirection 全局配置
     drive_cfg = CONFIG.get("guacamole", {}).get("drive", {})
     drive_enabled = drive_cfg.get("enabled", False)
-    drive_label = drive_cfg.get("name", "资料空间")
+    drive_name = _build_rdp_drive_name(drive_cfg.get("name", "GuacDrive"))
     drive_base = drive_cfg.get("base_path", "/drive")
     drive_create = drive_cfg.get("create_path", True)
     drive_disable_download = bool(drive_cfg.get("disable_download", False))
@@ -159,12 +140,6 @@ def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, st
         user_drive_path = f"{drive_base}/portal_u{user_id}" if drive_enabled else ""
         try:
             security_mode = str(app.get("security_mode") or "restricted_remoteapp")
-            drive_name = _build_user_drive_name(
-                app.get("portal_display_name"),
-                app.get("portal_username"),
-                user_id,
-                drive_label,
-            )
             remote_app = str(app.get("remote_app") or "").strip()
             remote_app_dir = str(app.get("remote_app_dir") or "").strip()
             remote_app_args = str(app.get("remote_app_args") or "")

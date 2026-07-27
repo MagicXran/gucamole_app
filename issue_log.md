@@ -5,8 +5,8 @@
 ## 当前关键逻辑
 
 - Portal 用户的 GuacDrive 路径由 `backend/router.py` 生成：`/drive/portal_u{user_id}`。
-- Guacamole 通过 RDPDR 将该目录映射为 `\\tsclient\{display_name 或 username} 的资料空间`。
-- `remote_app_dir` 对共享应用保持空值，启动时按当前用户动态展开；历史固定 UNC 自动按动态路径处理。
+- Guacamole 通过 RDPDR 将该目录映射为固定 ASCII 共享名 `\\tsclient\GuacDrive`；用户隔离由 `/drive/portal_u{user_id}` 保证。
+- `remote_app_dir` 对共享应用保持空值，启动时展开为 `\\tsclient\GuacDrive`；历史中文固定 UNC 自动切回兼容名称。
 - `remote_app.security_mode` 区分 `restricted_remoteapp`、`restricted_vscode` 和 `admin_desktop`；普通用户查询和 ACL 更新都阻止管理员桌面。
 - `restricted_remoteapp` 在启动时强制关闭双向剪贴板、浏览器上传/下载、打印和麦克风，应用字段不能重新开启。
 - `restricted_vscode` 由 `vscode_control_profile` 计算最终权限。全部可授予权限默认勾选，但程序、扩展、路径和网络白名单不能为空且不能使用 `*`。
@@ -172,7 +172,7 @@
 
 ## ISSUE-006：映射盘名称和 RemoteApp 默认工作目录不统一
 
-状态：代码、配置和数据库迁移已完成，真实 Windows 中文盘名验收待执行
+状态：历史中文盘名方案已被 ISSUE-008 回退
 
 发现日期：2026-07-27
 
@@ -197,7 +197,7 @@
 
 ## ISSUE-007：Windows 仍显示“Guacamole RDP 上的用户”，固定盘名无法体现具体用户
 
-状态：动态用户盘名已实现并部署，真实 Windows 新会话显示待验收
+状态：历史动态盘名方案已被 ISSUE-008 回退
 
 发现日期：2026-07-27
 
@@ -220,3 +220,36 @@
 - UNC 共享路径会精确成为 `\\tsclient\张三 的资料空间`。
 - Windows“此电脑”通常仍显示“Guacamole RDP 上的 张三 的资料空间”；这是 Windows RDPDR 的组合标签，不是 Portal 文案。
 - 如果产品必须在“此电脑”中只显示“张三 的资料空间”，需要 Windows Shell 快捷方式/命名空间等主机侧方案，不能仅靠 Guacamole `drive-name` 保证。
+
+## ISSUE-008：中文 RDPDR 共享名被截断，显示乱码且目录打不开
+
+状态：已修复并完成真实浏览器 RemoteApp 复测
+
+发现日期：2026-07-27
+
+### 现象
+
+- `test` 账户启动 RemoteApp 后，Windows 文件对话框中的“Guacamole RDP 上的 …”条目末尾乱码。
+- 点击该条目后无法进入个人 GuacDrive。
+
+### 根因
+
+- Portal 正确生成了 `drive-name=测试用户 的资料空间`，MySQL `display_name`、JSON Auth 和 RDP 会话建立均未出现乱码。
+- Guacamole 1.6.0 的 `src/protocols/rdp/channels/rdpdr/rdpdr-fs.c` 使用 `guac_utf8_strlen()` 计算设备名长度，但随后按该长度直接写 UTF-8 字节。
+- `测试用户 的资料空间` 是 10 个 Unicode 字符、28 个 UTF-8 字节；实际只发送前 10 字节，结果截断为 `测试用�`。
+- Windows 收到损坏的共享名，而 `remote-app-dir` 仍指向完整中文 UNC，因此显示乱码并且路径无法解析。
+
+### 解决办法
+
+- RDPDR `drive-name` 固定使用 ASCII 兼容名 `GuacDrive`，不再把 Portal 显示名放进共享名。
+- 底层目录继续保持 `/drive/portal_u{user_id}`，所以多个用户即使看到相同共享名，实际映射内容仍然隔离。
+- `remote-app-dir` 和 VSCode `{user_drive}` 模板统一展开为 `\\tsclient\GuacDrive`。
+- 配置名称包含中文或其他不安全字符时，运行时清洗为 ASCII；纯非 ASCII 名称回退 `GuacDrive`。
+- 发布后必须清空 `token_cache`、重启 backend、结束旧 Windows 会话并重新启动 RemoteApp。
+- 已使用中文显示名的临时 Portal 用户通过真实浏览器启动记事本；“另存为”对话框直接进入 `\\tsclient\GuacDrive`，并成功枚举测试文件，验证共享目录可打开。
+
+### 防止重复犯错
+
+- 不要把“Windows 接受 Unicode 路径”直接推导成“Guacamole RDPDR 的设备共享名支持任意 Unicode”。
+- 修改 `drive-name` 后必须同时验证字节长度、真实 Windows 显示、`\\tsclient` 访问、默认工作目录和旧 token/session 缓存。
+- 用户可读名称放在 Portal UI；RDPDR 共享名保持短、稳定、ASCII，隔离依据始终是 per-user `drive-path`。

@@ -111,8 +111,12 @@ def _load_admin_router_module():
     fake_audit.log_action = lambda *args, **kwargs: None
     sys.modules["backend.audit"] = fake_audit
 
+    invalidated_users = []
     fake_router = types.ModuleType("backend.router")
-    fake_router.guac_service = SimpleNamespace(invalidate_all_sessions=lambda: None)
+    fake_router.guac_service = SimpleNamespace(
+        invalidate_all_sessions=lambda: None,
+        invalidate_user_session=invalidated_users.append,
+    )
     sys.modules["backend.router"] = fake_router
 
     fake_pool_service = types.ModuleType("backend.resource_pool_service")
@@ -159,7 +163,11 @@ def _load_admin_router_module():
         "disable_upload": None,
         "is_active": 1,
     }
-    admin_module.guac_service = SimpleNamespace(invalidate_all_sessions=lambda: None)
+    admin_module.guac_service = SimpleNamespace(
+        invalidate_all_sessions=lambda: None,
+        invalidate_user_session=invalidated_users.append,
+    )
+    admin_module.invalidated_users = invalidated_users
     admin_module.pool_service = SimpleNamespace(cleanup_invalid_queue_entries=lambda **kwargs: None)
 
     return admin_module, fake_db
@@ -252,6 +260,7 @@ def test_admin_create_and_update_user_persist_department():
     update_req = admin_module.UserUpdateRequest(display_name="张三-新", department="数智中心")
     admin_module.update_user(user_id=5, req=update_req, request=request, admin=admin)
     assert fake_db.user_update_params["department"] == "数智中心"
+    assert admin_module.invalidated_users == ["portal_u5"]
 
 
 def test_admin_list_users_returns_boolean_flags_with_quota_fields():

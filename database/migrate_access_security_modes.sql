@@ -109,7 +109,7 @@ INSERT IGNORE INTO vscode_control_profile (
         'network_git', TRUE, 'network_packages', TRUE, 'network_business', TRUE, 'network_https', TRUE
     ),
     JSON_ARRAY(), JSON_ARRAY(), JSON_ARRAY(), JSON_ARRAY(), JSON_ARRAY(),
-    'C:\\PortalProfiles', 'C:\\PortalExtensions', '\\\\tsclient\\用户数据目录'
+    'C:\\PortalProfiles', 'C:\\PortalExtensions', '\\\\tsclient\\{user_drive}'
 );
 
 -- 普通用户不保留管理员桌面的旧 ACL；管理员 ACL 保持不变。

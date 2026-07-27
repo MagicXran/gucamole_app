@@ -15,7 +15,6 @@ def _load_router_module(
     app_disable_upload,
     global_disable_download=True,
     global_disable_upload=True,
-    drive_name="用户数据目录",
     row_overrides=None,
 ):
     fake_database = types.ModuleType("backend.database")
@@ -38,6 +37,8 @@ def _load_router_module(
                 "remote_app": "",
                 "remote_app_dir": "",
                 "remote_app_args": "",
+                "portal_username": "zhangsan",
+                "portal_display_name": "张三",
                 "security_mode": "admin_desktop",
                 "vscode_control_profile_id": None,
                 "color_depth": None,
@@ -68,7 +69,7 @@ def _load_router_module(
             "token_expire_minutes": 60,
             "drive": {
                 "enabled": True,
-                "name": drive_name,
+                "name": "资料空间",
                 "base_path": "/drive",
                 "create_path": True,
                 "disable_download": global_disable_download,
@@ -171,11 +172,10 @@ def test_restricted_remoteapp_forces_strict_channels():
     assert "enable-audio-input" not in params
 
 
-def test_remoteapp_defaults_to_configured_user_data_directory():
+def test_remoteapp_uses_portal_user_name_for_drive_and_default_directory():
     router_module = _load_router_module(
         0,
         0,
-        drive_name="用户数据目录",
         row_overrides={
             "security_mode": "restricted_remoteapp",
             "remote_app": "||notepad",
@@ -185,9 +185,20 @@ def test_remoteapp_defaults_to_configured_user_data_directory():
 
     params = router_module._build_all_connections(7)["app_1"]["parameters"]
 
-    assert params["drive-name"] == "用户数据目录"
+    assert "u.username AS portal_username" in router_module.db.last_query
+    assert "u.display_name AS portal_display_name" in router_module.db.last_query
+    assert params["drive-name"] == "张三 的资料空间"
     assert params["drive-path"] == "/drive/portal_u7"
-    assert params["remote-app-dir"] == r"\\tsclient\用户数据目录"
+    assert params["remote-app-dir"] == r"\\tsclient\张三 的资料空间"
+
+
+def test_user_drive_name_sanitizes_display_name_and_falls_back_to_username():
+    router_module = _load_router_module(0, 0)
+
+    assert router_module._build_user_drive_name(" 张/三:*? ", "zhangsan", 7) == "张_三___ 的资料空间"
+    assert router_module._build_user_drive_name("", "lisi", 8) == "lisi 的资料空间"
+    assert router_module._build_user_drive_name("", "", 9) == "用户9 的资料空间"
+    assert router_module._build_user_drive_name("张三", "", 10, "资料/空间") == "张三 的资料_空间"
 
 
 def test_restricted_vscode_expands_user_paths_and_uses_profile_channels():
@@ -214,7 +225,7 @@ def test_restricted_vscode_expands_user_paths_and_uses_profile_channels():
             "vcp_allowed_network_targets_json": ["https://packages.example.local"],
             "vcp_user_data_root": r"C:\\PortalProfiles",
             "vcp_extensions_root": r"C:\\PortalExtensions",
-            "vcp_default_workspace_template": r"\\tsclient\用户数据目录",
+            "vcp_default_workspace_template": r"\\tsclient\{user_drive}",
             "vcp_created_at": None,
             "vcp_updated_at": None,
         },
@@ -225,6 +236,7 @@ def test_restricted_vscode_expands_user_paths_and_uses_profile_channels():
     assert "{user_id}" not in params["remote-app-args"]
     assert r"C:\PortalProfiles\7" in params["remote-app-args"]
     assert r"C:\PortalExtensions\7" in params["remote-app-args"]
+    assert r"\\tsclient\张三 的资料空间" in params["remote-app-args"]
     assert "disable-copy" not in params
     assert "disable-paste" not in params
     assert "disable-download" not in params
@@ -385,14 +397,14 @@ def test_admin_create_app_preserves_transfer_policy_values(policy_value):
     assert fake_db.insert_params["disable_upload"] == policy_value
 
 
-def test_admin_create_app_defaults_remoteapp_working_directory():
+def test_admin_create_app_leaves_working_directory_for_runtime_user_expansion():
     req = AppCreateRequest(
         name="default-workdir",
         hostname="rdp.example.local",
         remote_app="||notepad",
     )
 
-    assert req.remote_app_dir == r"\\tsclient\用户数据目录"
+    assert req.remote_app_dir == ""
 
 
 @pytest.mark.parametrize("policy_value", [None, 1, 0])

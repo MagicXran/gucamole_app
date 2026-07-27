@@ -27,7 +27,7 @@ def _valid_profile(**overrides):
         "allowed_network_targets": ["https://packages.example.local"],
         "user_data_root": r"C:\PortalProfiles",
         "extensions_root": r"C:\PortalExtensions",
-        "default_workspace_template": r"\\tsclient\用户数据目录",
+        "default_workspace_template": r"\\tsclient\{user_drive}",
     }
     payload.update(overrides)
     return normalize_profile_document(payload)
@@ -56,7 +56,7 @@ def test_profile_with_enabled_permissions_and_empty_allowlists_is_invalid():
             "allowed_network_targets": [],
             "user_data_root": r"C:\PortalProfiles",
             "extensions_root": r"C:\PortalExtensions",
-            "default_workspace_template": r"\\tsclient\用户数据目录",
+            "default_workspace_template": r"\\tsclient\{user_drive}",
         }
     )
 
@@ -97,22 +97,26 @@ def test_profile_roots_are_locked_and_allowlist_formats_are_validated():
 def test_vscode_arguments_are_different_per_portal_user():
     profile = _valid_profile()
 
-    user_a = build_vscode_arguments(profile, 11)
-    user_b = build_vscode_arguments(profile, 12)
+    user_a = build_vscode_arguments(profile, 11, drive_name="张三 的资料空间")
+    user_b = build_vscode_arguments(profile, 12, drive_name="李四 的资料空间")
 
     assert user_a != user_b
     assert r"C:\PortalProfiles\11" in user_a
     assert r"C:\PortalExtensions\11" in user_a
     assert "{user_id}" not in user_a
-    assert r"\\tsclient\用户数据目录" in user_a
+    assert r"\\tsclient\张三 的资料空间" in user_a
     assert "--disable-workspace-trust" in user_a
 
 
-def test_vscode_profile_uses_user_data_directory_share_name():
-    profile = _valid_profile(default_workspace_template=r"\\tsclient\用户数据目录")
+def test_vscode_profile_expands_runtime_user_drive_name():
+    profile = _valid_profile(default_workspace_template=r"\\tsclient\{user_drive}")
 
-    assert profile["default_workspace_template"] == r"\\tsclient\用户数据目录"
-    assert r"\\tsclient\用户数据目录" in build_vscode_arguments(profile, 11)
+    assert profile["default_workspace_template"] == r"\\tsclient\{user_drive}"
+    assert r"\\tsclient\王五 的资料空间" in build_vscode_arguments(
+        profile,
+        11,
+        drive_name="王五 的资料空间",
+    )
 
 
 def test_restricted_argument_validation_allows_only_fixed_user_id_token():

@@ -2,7 +2,7 @@
 
 ## 1. 结论边界
 
-本方案限制普通用户的正常操作和常见绕过路径，使业务文件只通过个人 `\\tsclient\用户数据目录` 进出。驱动器隐藏策略本身不是安全边界；最终拒绝依赖标准用户权限、NTFS、AppLocker、Firewall 和应用白名单。
+本方案限制普通用户的正常操作和常见绕过路径，使业务文件只通过个人 `\\tsclient\用户名 的资料空间` 进出。驱动器隐藏策略本身不是安全边界；最终拒绝依赖标准用户权限、NTFS、AppLocker、Firewall 和应用白名单。
 
 ## 2. 实施顺序
 
@@ -21,7 +21,7 @@
 
 1. 保存 Git 分支/tag 回滚锚点。
 2. 导出 Portal 数据库关键表。
-3. 依次执行 `database/migrate_access_security_modes.sql` 和 `database/migrate_user_data_directory.sql`。
+3. 依次执行 `database/migrate_access_security_modes.sql`、`database/migrate_user_data_directory.sql` 和 `database/migrate_dynamic_user_drive_names.sql`。
 4. 确认应用分类：
    - 普通业务 RemoteApp：`restricted_remoteapp`
    - VSCode：`restricted_vscode`
@@ -74,7 +74,7 @@ pwsh -File scripts\windows\export-guacdrive-security-baseline.ps1
 
 ### 正向场景
 
-- `\\tsclient\用户数据目录` 新建、打开、保存、覆盖、重命名、删除。
+- `\\tsclient\用户名 的资料空间` 新建、打开、保存、覆盖、重命名、删除。
 - 大文件读写与断线恢复。
 - 用户 A/B 的 VSCode `--user-data-dir` 和 `--extensions-dir` 不同。
 - VSCode 默认打开 GuacDrive 工作区。

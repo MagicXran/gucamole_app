@@ -100,7 +100,7 @@ class AppCreateRequest(BaseModel):
     security: str = Field(default="nla", max_length=20)
     ignore_cert: bool = True
     remote_app: str = Field(default="", max_length=200)
-    remote_app_dir: str = Field(default=r"\\tsclient\用户数据目录", max_length=500)
+    remote_app_dir: str = Field(default="", max_length=500)
     remote_app_args: str = Field(default="", max_length=500)
     security_mode: SecurityMode = "restricted_remoteapp"
     vscode_control_profile_id: Optional[int] = Field(default=None, ge=1)
@@ -342,7 +342,7 @@ class VscodeControlProfileCreateRequest(BaseModel):
     allowed_network_targets: list[str] = Field(default_factory=list)
     user_data_root: str = Field(default=r"C:\PortalProfiles", max_length=500)
     extensions_root: str = Field(default=r"C:\PortalExtensions", max_length=500)
-    default_workspace_template: str = Field(default=r"\\tsclient\用户数据目录", max_length=500)
+    default_workspace_template: str = Field(default=r"\\tsclient\{user_drive}", max_length=500)
 
 
 class VscodeControlProfileUpdateRequest(BaseModel):

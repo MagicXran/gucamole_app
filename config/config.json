@@ -22,7 +22,7 @@
     "token_expire_minutes": 480,
     "drive": {
       "enabled": true,
-      "name": "用户数据目录",
+      "name": "资料空间",
       "base_path": "/drive",
       "results_root": "Output",
       "create_path": true,

@@ -955,6 +955,7 @@ def update_user(
     db.execute_update(
         f"UPDATE portal_user SET {', '.join(set_parts)} WHERE id = %(id)s", params,
     )
+    guac_service.invalidate_user_session(f"portal_u{user_id}")
     client_ip = request.client.host if request.client else "unknown"
     log_action(
         admin.user_id, admin.username, "admin_update_user",
@@ -984,6 +985,7 @@ def delete_user(
     db.execute_update(
         "UPDATE portal_user SET is_active = 0 WHERE id = %(id)s", {"id": user_id},
     )
+    guac_service.invalidate_user_session(f"portal_u{user_id}")
     client_ip = request.client.host if request.client else "unknown"
     log_action(
         admin.user_id, admin.username, "admin_delete_user",

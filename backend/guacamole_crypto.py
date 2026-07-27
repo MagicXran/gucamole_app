@@ -114,7 +114,7 @@ class GuacamoleCrypto:
         remote_app_dir: str = "",
         remote_app_args: str = "",
         enable_drive: bool = False,
-        drive_name: str = "用户数据目录",
+        drive_name: str = "资料空间",
         drive_path: str = "",
         create_drive_path: bool = True,
         disable_download: bool = False,

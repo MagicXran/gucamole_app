@@ -5,8 +5,8 @@
 ## 当前关键逻辑
 
 - Portal 用户的 GuacDrive 路径由 `backend/router.py` 生成：`/drive/portal_u{user_id}`。
-- Guacamole 通过 RDPDR 将该目录映射为 Windows 会话中的 `\\tsclient\用户数据目录`。
-- `drive-name` 同时决定 Windows 显示名和 `\\tsclient` 共享名；新建 RemoteApp 默认把 `remote_app_dir` 保存为该 UNC，历史空值在启动时自动回退。
+- Guacamole 通过 RDPDR 将该目录映射为 `\\tsclient\{display_name 或 username} 的资料空间`。
+- `remote_app_dir` 对共享应用保持空值，启动时按当前用户动态展开；历史固定 UNC 自动按动态路径处理。
 - `remote_app.security_mode` 区分 `restricted_remoteapp`、`restricted_vscode` 和 `admin_desktop`；普通用户查询和 ACL 更新都阻止管理员桌面。
 - `restricted_remoteapp` 在启动时强制关闭双向剪贴板、浏览器上传/下载、打印和麦克风，应用字段不能重新开启。
 - `restricted_vscode` 由 `vscode_control_profile` 计算最终权限。全部可授予权限默认勾选，但程序、扩展、路径和网络白名单不能为空且不能使用 `*`。
@@ -194,3 +194,29 @@
 - 修改 `drive-name` 时必须同步 VSCode 固定工作区、Pydantic 默认值、Vue/legacy 管理端、SQL seed/迁移、Portal 文案、README 和自动化测试。
 - 改动后必须结束旧 Windows 会话并重新登录，验证“此电脑”显示名、`\\tsclient` UNC、默认工作目录和 A/B 用户目录隔离。
 - Docker 构建上下文必须排除本地 `node_modules`；否则不同包管理器生成的目录结构会与镜像内 `npm ci` 结果冲突。
+
+## ISSUE-007：Windows 仍显示“Guacamole RDP 上的用户”，固定盘名无法体现具体用户
+
+状态：动态用户盘名已实现并部署，真实 Windows 新会话显示待验收
+
+发现日期：2026-07-27
+
+### 根因
+
+- 上一轮 Docker 和 `drive-name=用户数据目录` 已实际生效；Windows“此电脑”会把 RDP `client-name` 与 `drive-name` 组合显示，因此中文界面出现“Guacamole RDP 上的 用户数据目录”。
+- Guacamole 1.6 的 `client-name` 默认是 `Guacamole RDP`，官方参数只能修改该文本，没有隐藏组合前缀的开关。
+- `remote_app` 是多用户共享配置，不能把 `remote_app_dir` 持久化成某一个固定 UNC，否则无法按 Portal 用户变化。
+
+### 解决办法
+
+- 启动查询同时读取 `portal_user.display_name` 和 `username`，优先生成“`display_name` 的资料空间”，空值回退 username，再回退 `用户{user_id}`。
+- 非法 Windows 名称字符替换为 `_`，清理控制字符、尾随点/空格并限制长度。
+- `drive-name`、自动 RemoteApp 工作目录和 VSCode 工作区使用同一个运行时名称；底层 `drive-path=/drive/portal_u{user_id}` 不变。
+- VSCode 固定策略改为 `\\tsclient\{user_drive}` 模板，由启动链安全展开。
+- 管理员修改或停用用户后失效 `portal_u{user_id}` Guacamole token，避免继续复用旧盘名。
+
+### 显示边界
+
+- UNC 共享路径会精确成为 `\\tsclient\张三 的资料空间`。
+- Windows“此电脑”通常仍显示“Guacamole RDP 上的 张三 的资料空间”；这是 Windows RDPDR 的组合标签，不是 Portal 文案。
+- 如果产品必须在“此电脑”中只显示“张三 的资料空间”，需要 Windows Shell 快捷方式/命名空间等主机侧方案，不能仅靠 Guacamole `drive-name` 保证。

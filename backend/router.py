@@ -3,6 +3,7 @@ FastAPI 路由 - RemoteApp 门户 API
 """
 
 import logging
+import re
 import uuid
 from typing import List
 
@@ -29,6 +30,13 @@ from backend.auth import get_current_user
 from backend.audit import log_action
 
 logger = logging.getLogger(__name__)
+
+_DRIVE_NAME_BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_AUTO_REMOTE_APP_DIRS = {
+    r"\\tsclient\GuacDrive",
+    r"\\tsclient\用户数据目录",
+}
+_DRIVE_NAME_MAX_LENGTH = 64
 
 router = APIRouter(
     prefix=CONFIG["api"]["prefix"],
@@ -62,6 +70,31 @@ def _resolve_transfer_policy(override_value, global_value: bool) -> bool:
     return bool(override_value)
 
 
+def _build_user_drive_name(
+    display_name: object,
+    username: object,
+    user_id: int,
+    drive_label: object = "资料空间",
+) -> str:
+    """生成当前 Portal 用户在 RDPDR 中看到的安全共享名。"""
+    base_name = (
+        str(display_name or "").strip()
+        or str(username or "").strip()
+        or f"用户{user_id}"
+    )
+    base_name = _DRIVE_NAME_BAD_CHARS.sub("_", base_name)
+    base_name = re.sub(r"\s+", " ", base_name).strip(" .")
+    if not base_name:
+        base_name = f"用户{user_id}"
+    safe_label = _DRIVE_NAME_BAD_CHARS.sub("_", str(drive_label or "资料空间"))
+    safe_label = re.sub(r"\s+", " ", safe_label).strip(" .") or "资料空间"
+    safe_label = safe_label[:32].rstrip(" .") or "资料空间"
+    suffix = f" 的{safe_label}"
+    max_base_length = _DRIVE_NAME_MAX_LENGTH - len(suffix)
+    base_name = base_name[:max_base_length].rstrip(" .") or f"用户{user_id}"
+    return f"{base_name}{suffix}"
+
+
 def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, str]]:
     """查询该用户所有可用应用，构建完整的 connections dict。
 
@@ -79,6 +112,8 @@ def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, st
                a.enable_printing, a.disable_download, a.disable_upload,
                a.timezone, a.keyboard_layout,
                a.security_mode, a.vscode_control_profile_id,
+               u.username AS portal_username,
+               u.display_name AS portal_display_name,
                vcp.id AS vcp_id,
                vcp.profile_key AS vcp_profile_key,
                vcp.display_name AS vcp_display_name,
@@ -110,7 +145,7 @@ def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, st
     # Drive redirection 全局配置
     drive_cfg = CONFIG.get("guacamole", {}).get("drive", {})
     drive_enabled = drive_cfg.get("enabled", False)
-    drive_name = str(drive_cfg.get("name") or "用户数据目录").strip()
+    drive_label = drive_cfg.get("name", "资料空间")
     drive_base = drive_cfg.get("base_path", "/drive")
     drive_create = drive_cfg.get("create_path", True)
     drive_disable_download = bool(drive_cfg.get("disable_download", False))
@@ -124,12 +159,20 @@ def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, st
         user_drive_path = f"{drive_base}/portal_u{user_id}" if drive_enabled else ""
         try:
             security_mode = str(app.get("security_mode") or "restricted_remoteapp")
+            drive_name = _build_user_drive_name(
+                app.get("portal_display_name"),
+                app.get("portal_username"),
+                user_id,
+                drive_label,
+            )
             remote_app = str(app.get("remote_app") or "").strip()
             remote_app_dir = str(app.get("remote_app_dir") or "").strip()
             remote_app_args = str(app.get("remote_app_args") or "")
             if security_mode in {"restricted_remoteapp", "restricted_vscode"} and not remote_app:
                 raise VscodePolicyError("受限模式缺少 remote_app，已阻止完整桌面回退")
-            if remote_app and not remote_app_dir and drive_enabled:
+            if remote_app and drive_enabled and (
+                not remote_app_dir or remote_app_dir in _AUTO_REMOTE_APP_DIRS
+            ):
                 remote_app_dir = f"\\\\tsclient\\{drive_name}"
 
             app_disable_download = _resolve_transfer_policy(app.get("disable_download"), drive_disable_download)
@@ -153,7 +196,11 @@ def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, st
                     raise VscodePolicyError("受限 VSCode 未绑定控制策略")
                 validate_restricted_arguments(remote_app_args, allow_user_id=True)
                 profile = profile_from_row(app, prefix="vcp_")
-                remote_app_args = build_vscode_arguments(profile, user_id)
+                remote_app_args = build_vscode_arguments(
+                    profile,
+                    user_id,
+                    drive_name=drive_name,
+                )
                 permissions = profile["permissions"]
                 disable_copy = not permissions["copy_remote_to_local"]
                 disable_paste = not permissions["paste_local_to_remote"]

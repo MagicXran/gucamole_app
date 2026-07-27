@@ -20,13 +20,13 @@
   - `GET /api/admin/vscode-control-profiles/{id}/effective`
 - Launch boundary:
   - `_build_all_connections_with_errors(user_id) -> (connections, errors)`
-  - `build_vscode_arguments(profile, user_id) -> str`
+  - `build_vscode_arguments(profile, user_id, drive_name=...) -> str`
 
 ### 3. Contracts
 
 - `backend/vscode_policy_service.py` is the only backend owner of control codes, defaults, allowlist dependencies, locked baselines, and effective Guacamole mapping.
 - All current grantable controls default to `true` for a new profile.
-- `C:\PortalProfiles`, `C:\PortalExtensions`, and `\\tsclient\用户数据目录` are fixed values, not administrator-selected arbitrary paths.
+- `C:\PortalProfiles`, `C:\PortalExtensions`, and the `\\tsclient\{user_drive}` template are fixed values; `{user_drive}` is expanded from the current Portal user's display name at launch.
 - Executable allowlists contain local absolute Windows executable/script paths; extension entries use `publisher.extension`; network entries use host, host:port, CIDR, or HTTP(S) URL.
 - App/ACL/profile mutations must invalidate all Guacamole sessions.
 - Per-user token reuse remains unchanged: all valid user connections are packaged into one token.
@@ -71,7 +71,7 @@ This trusts arbitrary templates, allows unknown placeholders, and can break mult
 
 ```python
 profile = profile_from_row(app, prefix="vcp_")
-remote_app_args = build_vscode_arguments(profile, user_id)
+remote_app_args = build_vscode_arguments(profile, user_id, drive_name=drive_name)
 ```
 
 The service owns fixed roots, validation, effective permissions, and the only allowed argument shape.

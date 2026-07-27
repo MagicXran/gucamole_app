@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/vscode-control-policy.md","reason":"核验中性 RDP 标签、旧目录兼容和缓存失效契约"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"核验测试、错误边界、编码和部署质量门禁"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"核验静态 Portal 与 Vue 管理端文案及构建"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"核验 client-name 与 drive-name 共享清洗边界"}

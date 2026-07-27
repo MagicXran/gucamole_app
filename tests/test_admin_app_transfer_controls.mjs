@@ -5,6 +5,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 const adminHtml = fs.readFileSync(path.join(process.cwd(), 'frontend', 'admin.html'), 'utf8');
+const portalHtml = fs.readFileSync(path.join(process.cwd(), 'frontend', 'index.html'), 'utf8');
 const source = fs.readFileSync(path.join(process.cwd(), 'frontend', 'js', 'admin.js'), 'utf8');
 const appModalSource = fs.readFileSync(path.join(process.cwd(), 'frontend', 'js', 'admin-app-modal-ui.js'), 'utf8');
 
@@ -143,6 +144,13 @@ test('admin shell wires app modal logic through AdminAppUi and script include', 
   assert.match(source, /window\.AdminAppUi\.showAppModal/);
   assert.match(source, /window\.AdminAppUi\.saveApp/);
   assert.match(source, /window\.AdminAppUi\.loadApps/);
+});
+
+test('legacy portal and admin help hide internal RDP filesystem names', () => {
+  assert.doesNotMatch(portalHtml, /GuacDrive|Guacamole RDP/);
+  assert.match(portalHtml, /个人文件空间/);
+  assert.doesNotMatch(appModalSource, /GuacDrive|Guacamole RDP/);
+  assert.match(appModalSource, /当前用户的个人文件空间/);
 });
 
 test('buildTriStatePolicyOptions returns selected tri-state option', () => {

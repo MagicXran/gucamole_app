@@ -1,8 +1,8 @@
-# GuacDrive 一般访问限制实施与验收手册
+# 个人文件空间一般访问限制实施与验收手册
 
 ## 1. 结论边界
 
-本方案限制普通用户的正常操作和常见绕过路径，使业务文件只通过个人 `\\tsclient\用户名 的资料空间` 进出。驱动器隐藏策略本身不是安全边界；最终拒绝依赖标准用户权限、NTFS、AppLocker、Firewall 和应用白名单。
+本方案限制普通用户的正常操作和常见绕过路径，使业务文件只通过个人文件空间进出。RDPDR 内部 UNC 固定为 `\\tsclient\UserFiles`；Windows 侧 PoC 可以创建“`{用户名}的文件空间`”入口，但生产 Launcher/Agent 尚未接入该入口。驱动器隐藏和友好命名本身不是安全边界；最终拒绝依赖标准用户权限、NTFS、AppLocker、Firewall 和应用白名单。
 
 ## 2. 实施顺序
 
@@ -13,7 +13,7 @@
 - 已启用 RDP drive redirection 和同账号多会话；记事本、计算器、VSCode 已发布为 RemoteApp。
 - AppLocker 的 EXE/Script/MSI 已从 AuditOnly 切换为 Enforced，DLL 仍保持 AuditOnly；实际负向测试已阻止 `cmd.exe` 和 `explorer.exe`。
 - `security.allowedUNCHosts=["tsclient"]` 已写入 Portal 用户 1、2、3 的独立 VSCode profile，Portal 启动参数加入 `--disable-workspace-trust`。
-- 真实浏览器已验证用户 A/B 同时运行 VSCode，分别使用 `C:\PortalProfiles\2` / `C:\PortalProfiles\3` 与独立 extensions 目录，并只显示各自 GuacDrive。
+- 真实浏览器已验证用户 A/B 同时运行 VSCode，分别使用 `C:\PortalProfiles\2` / `C:\PortalProfiles\3` 与独立 extensions 目录，并只看到各自个人文件空间的内容；文件对话框的中性 `UserFiles` 标签已验证，精确用户名入口仍是独立 PoC。
 - 未完成项：正式 RDS Session Host/RDS CAL、Defender 恢复、2026-07 累积更新、精确出站 allowlist、真实仿真应用依赖和完整逃逸矩阵。
 - 当前 `TermService` 的 `ServiceDll` 指向 RDP Wrapper。它不是正式 RDS 授权方案，并可能在 Windows 累积更新或 Defender 恢复后失效。
 
@@ -21,7 +21,7 @@
 
 1. 保存 Git 分支/tag 回滚锚点。
 2. 导出 Portal 数据库关键表。
-3. 依次执行 `database/migrate_access_security_modes.sql`、`database/migrate_user_data_directory.sql` 和 `database/migrate_dynamic_user_drive_names.sql`。
+3. 依次执行 `database/migrate_access_security_modes.sql`、`database/migrate_user_data_directory.sql`、`database/migrate_dynamic_user_drive_names.sql` 和 `database/migrate_neutral_rdp_labels.sql`。
 4. 确认应用分类：
    - 普通业务 RemoteApp：`restricted_remoteapp`
    - VSCode：`restricted_vscode`
@@ -30,6 +30,8 @@
 6. 策略有效后启用并绑定 VSCode。
 7. 修改应用、ACL 或策略后确认 Guacamole token cache 已失效。
 8. 修改 VSCode 启动参数代码后，清空数据库 `token_cache` 并重启 `portal-backend`，同时结束旧 Windows 会话后再验收最终命令行。
+9. 使用匹配的 Guacamole 1.6.0 `guac-web`/`guacd` 镜像重建并重启相关容器，避免前后端协议实现版本漂移。
+10. 确认最终 JSON Auth 参数使用 `client-name=Workspace`、`drive-name=UserFiles`；不得继续出现 `Guacamole RDP` 或 `GuacDrive`。
 
 ### 阶段 B：Windows 只读盘点
 
@@ -70,14 +72,40 @@ pwsh -File scripts\windows\export-guacdrive-security-baseline.ps1
 - 对已知 Portal 用户运行 `scripts\windows\set-vscode-guacdrive-profile-settings.ps1`，将 `tsclient` 写入各自 `security.allowedUNCHosts`；新增用户必须同步执行。
 - profile 的允许项必须与 AppLocker、Firewall 和企业策略实际配置一致；Portal 的 JSON 不是 Windows 策略替代品。
 
+### 阶段 F：会话级友好入口 PoC
+
+先由 Windows 管理员迁移共享账号的 Known Folder、MountPoints2 和 Quick Access 历史状态：
+
+```powershell
+powershell -File scripts\windows\migrate-portal-filespace-labels.ps1
+```
+
+脚本报告 `requires_logoff=true` 的账号必须注销旧 RDS 会话后重新进入，否则文件对话框仍可能显示缓存的历史快速访问项。为清除 Explorer 的二进制跳转列表，迁移会删除该受限账号的整个 Quick Access 缓存文件，因此该账号原有的其他快速访问记录也会被重置，但不会删除业务文件。
+
+然后在目标 RemoteApp 会话内运行：
+
+```powershell
+powershell -File scripts\windows\set-portal-session-filespace-entry.ps1 `
+  -Username USERNAME `
+  -DisplayName DISPLAY_NAME `
+  -PortalSessionId PORTAL_SESSION_UUID
+```
+
+- 脚本在 Windows Session ID + Portal Session UUID 独立目录内创建“`{用户名}的文件空间.lnk`”。
+- 链接目标固定为 `\\tsclient\UserFiles`，不接受任意本地路径或命令。
+- 该 PoC 只验证名称展示、幂等和并发不覆盖；共享 Windows SID 下它不是文件授权边界。
+- 正式接入必须由后续受控 Launcher/Agent 传入可信 Portal Session ID，不能让最终用户自行伪造启动参数。
+
 ## 3. 验收矩阵
 
 ### 正向场景
 
-- `\\tsclient\用户名 的资料空间` 新建、打开、保存、覆盖、重命名、删除。
+- `\\tsclient\UserFiles` 新建、打开、保存、覆盖、重命名、删除。
+- 文件对话框不再出现 `Guacamole RDP` 或 `GuacDrive`，底层中性条目最多显示为 `Workspace/UserFiles`。
+- PoC 中两个并发会话分别创建“张三的文件空间”和“李四的文件空间”，入口目录不覆盖，均打开各自会话映射的 `\\tsclient\UserFiles`；正式入口仍需 Launcher/Agent 接入后重新验收。
 - 大文件读写与断线恢复。
 - 用户 A/B 的 VSCode `--user-data-dir` 和 `--extensions-dir` 不同。
-- VSCode 默认打开 GuacDrive 工作区。
+- VSCode 默认打开当前用户的个人文件空间工作区。
 - 允许的终端、Tasks、Run、Build、Debug、Git、包管理和扩展正常。
 - 管理员桌面仍通过独立账号和资源域可用。
 - AppLocker Enforced 下允许的记事本、计算器和 VSCode 仍能启动。
@@ -101,7 +129,9 @@ pwsh -File scripts\windows\export-guacdrive-security-baseline.ps1
 ## 4. 回滚
 
 - Portal：按提交或目标文件回滚，不自动整体 hard reset。
-- 数据库：从迁移前 dump 恢复关键表，恢复前停止 Portal 写入。
+- 数据库：从 `database/migrate_neutral_rdp_labels.sql` 执行前的备份恢复 `remote_app.remote_app_dir`；`token_cache` 不恢复旧 token，恢复前停止 Portal 写入。
+- RDP 标签回滚后必须再次清空 `token_cache`，恢复上一版配置/镜像，依次重启 `guacd`、`guac-web`、`portal-backend`，并结束旧 Windows 会话。
+- PoC 回滚只删除对应 `session_{windows_session_id}_{portal_session_id}` 目录，不删除父目录或业务文件。
 - AppLocker：Enforced 回退 Audit。
 - GPO/NTFS/Firewall：只回滚试点 OU 和普通连接域，不影响管理员连接域。
 - 保留带外管理员通道，避免策略错误把管理员锁在主机外。

@@ -110,11 +110,12 @@ class GuacamoleCrypto:
         domain: str = "",
         security: str = "nla",
         ignore_cert: bool = True,
+        client_name: str = "Workspace",
         remote_app: str = "",
         remote_app_dir: str = "",
         remote_app_args: str = "",
         enable_drive: bool = False,
-        drive_name: str = "GuacDrive",
+        drive_name: str = "UserFiles",
         drive_path: str = "",
         create_drive_path: bool = True,
         disable_download: bool = False,
@@ -142,6 +143,7 @@ class GuacamoleCrypto:
             username/password/domain: RDP 认证
             security: 安全模式 (nla/tls/rdp/any)
             ignore_cert: 是否忽略证书
+            client_name: Windows 远端看到的 RDP 客户端名称
             remote_app/remote_app_dir/remote_app_args: RemoteApp 配置
             enable_drive/drive_name/drive_path/create_drive_path: 虚拟磁盘
             disable_download/disable_upload: 禁用 Guacamole 浏览器传输通道
@@ -165,6 +167,7 @@ class GuacamoleCrypto:
             "security": security,
             "ignore-cert": "true" if ignore_cert else "false",
             "resize-method": resize_method,
+            "client-name": client_name or "Workspace",
         }
 
         if username:

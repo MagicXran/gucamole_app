@@ -26,7 +26,7 @@
 
 - `backend/vscode_policy_service.py` is the only backend owner of control codes, defaults, allowlist dependencies, locked baselines, and effective Guacamole mapping.
 - All current grantable controls default to `true` for a new profile.
-- `C:\PortalProfiles`, `C:\PortalExtensions`, and the `\\tsclient\{user_drive}` template are fixed values; `{user_drive}` is expanded from the current Portal user's display name at launch.
+- `C:\PortalProfiles`, `C:\PortalExtensions`, and the `\\tsclient\{user_drive}` template are fixed values; `{user_drive}` is expanded from the sanitized neutral RDPDR drive name (`UserFiles` by default), never from a multibyte Portal display name.
 - Executable allowlists contain local absolute Windows executable/script paths; extension entries use `publisher.extension`; network entries use host, host:port, CIDR, or HTTP(S) URL.
 - App/ACL/profile mutations must invalidate all Guacamole sessions.
 - Per-user token reuse remains unchanged: all valid user connections are packaged into one token.
@@ -75,3 +75,27 @@ remote_app_args = build_vscode_arguments(profile, user_id, drive_name=drive_name
 ```
 
 The service owns fixed roots, validation, effective permissions, and the only allowed argument shape.
+
+## Scenario: Neutral RDP client and personal-file-space labels
+
+### 1. Scope / Trigger
+
+- Trigger: changes to Guacamole RDP `client-name`, `drive-name`, automatic RemoteApp working directories, or the VSCode `{user_drive}` expansion.
+
+### 2. Contracts
+
+- The physical storage and authorization key remains `/drive/portal_u{user_id}`.
+- Every generated RDP connection explicitly sends an ASCII `client-name`; the default is `Workspace` and the effective value is limited to 31 characters.
+- RDPDR uses an ASCII `drive-name`; the default is `UserFiles` and the repository compatibility limit remains 64 characters.
+- The same effective `drive-name` owns RDPDR, automatic `remote-app-dir`, and VSCode workspace expansion.
+- Historical `\\tsclient\GuacDrive` and `\\tsclient\用户数据目录` values are automatic compatibility values. Unrelated explicit application directories are preserved.
+- Connection-label changes require persisted token invalidation, backend memory-cache restart, and new Windows sessions.
+- User-facing Portal help says “个人文件空间” and does not expose the internal UNC.
+
+### 3. Tests Required
+
+- Assert default and explicit `client-name` generation.
+- Assert non-ASCII or invalid labels fall back to neutral ASCII names and client names are limited to 31 characters.
+- Assert users A/B keep different `/drive/portal_u{id}` paths while sharing the neutral UNC name.
+- Assert RemoteApp working-directory and VSCode workspace expansion use the same effective `drive-name`.
+- Assert historical automatic directories are normalized and explicit application directories are preserved.

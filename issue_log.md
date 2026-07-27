@@ -253,3 +253,58 @@
 - 不要把“Windows 接受 Unicode 路径”直接推导成“Guacamole RDPDR 的设备共享名支持任意 Unicode”。
 - 修改 `drive-name` 后必须同时验证字节长度、真实 Windows 显示、`\\tsclient` 访问、默认工作目录和旧 token/session 缓存。
 - 用户可读名称放在 Portal UI；RDPDR 共享名保持短、稳定、ASCII，隔离依据始终是 per-user `drive-path`。
+
+## ISSUE-009：RemoteApp 文件对话框暴露 Guacamole/GuacDrive 技术标识
+
+状态：P0 中性协议标签已完成真实浏览器验证；会话级友好入口 PoC 已实现，精确用户名入口的生产接入待完成
+
+发现日期：2026-07-27
+
+### 现象与影响
+
+- Guacamole 1.6.0 未显式配置 `client-name` 时默认使用 `Guacamole RDP`。
+- 当前固定 `drive-name=GuacDrive`，Windows Shell 通常组合显示为“Guacamole RDP 上的 GuacDrive”。
+- 该文字会向第三方暴露产品内部协议代理和组件品牌；它是产品信息泄露和品牌问题，但改名本身不构成安全隔离。
+
+### 根因
+
+- `backend/guacamole_crypto.py` 过去只写入 `drive-name`，没有写入 `client-name`。
+- Windows 的组合标签不能通过 Guacamole 参数关闭，只能替换 `client-name` 和 `drive-name`。
+- ISSUE-008 已证明中文用户名不能安全写入 Guacamole 1.6.0 RDPDR 设备名，因此不能用动态中文 `drive-name` 直接实现友好名称。
+- 旧 JSON Auth token 和已建立的 Windows RDP 会话仍保留旧参数，单改配置不会立即生效。
+
+### 当前处理
+
+1. RDP 协议内部名称固定为 ASCII：`client-name=Workspace`、`drive-name=UserFiles`。
+2. `backend/router.py` 对 client/drive 标签使用同一 ASCII 清理逻辑；client-name 最长 31 字符，drive-name 保持 64 字符兼容策略。
+3. `remote-app-dir` 和 VSCode 工作区统一使用 `\\tsclient\UserFiles`；历史 `GuacDrive`、`用户数据目录` 和当前 `UserFiles` 均按自动目录兼容。
+4. 新增 `database/migrate_neutral_rdp_labels.sql`，清理历史自动工作目录并删除持久化 `token_cache`。
+5. 部署镜像固定到匹配的 Guacamole/guacd 1.6.0，避免 `latest` 漂移。
+6. Portal 用户提示不再展示内部 UNC 或 GuacDrive 名称，统一使用“个人文件空间”。
+7. 新增 `migrate-portal-filespace-labels.ps1`，把 restricted Windows 账号的 Desktop/Documents/Downloads 从历史 UNC 迁移到 `\\tsclient\UserFiles`，并移除旧 MountPoints2 和 File Explorer Quick Access 缓存。
+8. 新增 `PortalSessionFileSpace.psm1` 和 `set-portal-session-filespace-entry.ps1` PoC，按 Windows Session ID + Portal Session UUID 创建“`{用户名}的文件空间.lnk`”，固定指向 `\\tsclient\UserFiles`。
+9. 最终审查后收紧 PoC 边界：导出函数重新验证 Plan 的固定 UNC、GUID、会话目录和文件路径，拒绝重解析点及含非入口文件的目录删除；Windows 迁移只接受已知历史 UNC、精确匹配 MountPoints2，并仅在实际发生变更时报告 `updated/requires_logoff`。
+
+### 已完成验证
+
+- Python 测试覆盖默认/显式 client-name、ASCII 回退、长度限制、旧目录兼容、per-user drive-path、VSCode 工作区和环境覆盖。
+- PowerShell PoC 通过真实 Windows PowerShell/WScript.Shell 创建、更新、读取 metadata 和删除 `.lnk`；两个 session 计划生成不同目录，并覆盖伪造 Plan、驱动器相对 Root、未知历史 UNC 和含额外文件目录的拒绝路径。
+- 旧静态 Portal、Vue 管理端提示测试确认不再出现 `GuacDrive` 或 `Guacamole RDP`。
+- 最终回归：Python 129 项、旧静态 Portal Node 11 项、Vue Vitest 108 项全部通过，Vue typecheck/build 和 Compose render 均成功。
+- 真实浏览器启动 Windows 记事本并打开“另存为”：迁移前捕获到 Quick Access 仍缓存 `GuacDrive` 且访问旧 UNC 报错；执行 Windows shell-state 迁移并建立新会话后，文件对话框只显示 `UserFiles`，地址栏和侧栏均不再出现 Guacamole/GuacDrive。
+
+### 上线步骤
+
+1. 备份 Portal DB，并执行 `database/migrate_neutral_rdp_labels.sql`。
+2. 重建并重启 `portal-backend`、`guacd` 和 `guac-web`；仅删除数据库 token 不会清理 backend 内存缓存。
+3. 结束旧 Windows 会话，重新从 Portal 启动 RemoteApp。
+4. 使用两个 Portal 用户并发验证文件打开、另存为、目录选择和 VSCode 工作区。
+5. 验收 UI、错误提示、Recent 和应用自定义文件选择器中均不再出现 Guacamole/GuacDrive。
+
+### 边界与防止重复犯错
+
+- `Workspace/UserFiles` 解决技术品牌暴露，但 Windows 仍可能显示组合标签；只有 Windows 会话级入口能提供精确中文友好名称。
+- `.lnk` PoC 只解决展示和并发不覆盖，不是通用 Launcher、Windows SID 隔离或文件授权边界。
+- 共享 Windows 账号下禁止使用静态 Desktop、Quick Access 或 HKCU 重命名保存每个 Portal 用户名称，否则并发会话会互相覆盖。
+- 在真实 RDS/RemoteApp 与目标第三方软件验证完成前，不能宣称所有文件对话框都只显示“`{用户名}的文件空间`”。
+- 旧版或未提交的 Windows 限制安装脚本如果仍把 Known Folder 写成 `\\tsclient\GuacDrive`，会重新制造缓存项；纳入正式部署前必须同步改为 `UserFiles` 或强制执行迁移脚本。

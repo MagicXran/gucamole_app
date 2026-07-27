@@ -20,9 +20,10 @@
     "internal_url": "http://localhost:8080",
     "external_url": "http://localhost:8080",
     "token_expire_minutes": 480,
+    "client_name": "Workspace",
     "drive": {
       "enabled": true,
-      "name": "GuacDrive",
+      "name": "UserFiles",
       "base_path": "/drive",
       "results_root": "Output",
       "create_path": true,

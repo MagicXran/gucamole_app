@@ -39,10 +39,13 @@ GUI RemoteApp 启动不依赖 Worker；Worker 只处理脚本任务、输入快�
 - GuacDrive 隔离不等于 Windows 本地盘权限隔离。
 - 驱动器隐藏、禁用 Explorer 等入口不等于应用文件 API 失效。
 
-需要严格文件授权或运行不可信代码时，应升级为：
+需要严格文件授权或运行不可信代码时，应建立新的强制安全边界：
 
 - 每个用户使用独立 Windows 账号/SID，并使用 NTFS ACL；或
-- 每租户独占 VM、主机或 Worker。
+- 每租户独占 VM、主机或 Worker；或
+- 在共享 Windows 账号不变的条件下，增加按 Portal session/process tree 执行的内核文件隔离运行时、Windows Isolation Agent 和 File Broker。
+
+第三种是第 11 章确定的目标生产架构，当前尚未实现；在隔离运行时和验收矩阵完成前，现有系统仍只能称为一般访问限制。
 
 ## 3. 技术栈
 
@@ -630,290 +633,563 @@ VM 快照
 → 重新验证 RemoteApp/AppLocker/GuacDrive
 ```
 
-## 11. 配置新的 Windows RemoteApp 服务器
+## 11. 生产多会话共享账号下的严格文件隔离架构
 
-### 11.1 先确定生产边界
+> 本章是**目标生产架构和实施要求**，不是当前已经具备的能力。
 
-配置前先明确：
+### 11.1 固定业务前提
 
-1. 是试点还是生产。
-2. 是否需要多个并发用户。
-3. 是否已有 RDS CAL 和 Licensing Server。
-4. 普通用户是否继续共享 Windows 账号。
-5. 是否要求严格文件隔离。
-6. 需要发布哪些软件、子进程和许可证端点。
+后续新增 Windows RemoteApp 服务器固定采用以下背景：
 
-生产多会话必须优先使用正式 RDS Session Host 和许可证，不以 RDP Wrapper 作为标准方案。
+1. Windows Server 已具备正式的多会话并发能力。
+2. 用于生产环境。
+3. 普通 Portal 用户继续复用同一个低权限 Windows 账号。
+4. 业务要求严格文件隔离：用户 A 不能读取、修改、删除或枚举用户 B 的输入、工作文件、中间文件和输出。
 
-如果要求用户绝对不能访问其他用户文件，应为不同 Portal 用户分配不同 Windows SID/账号；当前一个 `remote_app` 行固定保存一个 `rdp_username`，动态身份绑定还需要平台级模型扩展。
-
-### 11.2 创建回滚基础
-
-执行任何限制前：
-
-1. 创建 VM snapshot。
-2. 确认 VMware/Hyper-V/云控制台等带外入口可用。
-3. 保留独立管理员账号，不使用普通 RemoteApp 账号恢复策略。
-4. 导出 Portal 数据库关键表。
-5. 导出 Windows 基线。
-
-基线命令：
-
-```powershell
-powershell -File scripts\windows\export-guacdrive-security-baseline.ps1 `
-  -OutputRoot C:\ProgramData\GuacDriveRestriction\baseline
-```
-
-至少保存：
-
-- Windows 版本、功能、卷和更新状态。
-- RDP、RemoteApp、WinRM listener。
-- 本地用户/组。
-- GPO 和注册表策略。
-- NTFS SDDL。
-- AppLocker effective policy。
-- Firewall export。
-- VSCode 版本、hash 和企业策略。
-
-配置前必须确认所引用的 `scripts/windows` 文件已经在目标 Git 提交中存在。不要把本机未提交脚本当成可复制的部署包。
-
-### 11.3 基础系统与远程管理
-
-1. 设置稳定主机名、静态 IP、DNS、网关和时区。
-2. 安装当前 Windows 安全更新并重启。
-3. 确认 Defender/EDR 正常，不先为了兼容未知软件关闭防护。
-4. 配置 WinRM HTTPS 5986，证书名称与管理地址匹配。
-5. Firewall 只允许管理网段访问 3389/5986。
-6. 确认 Portal/guacd 所在网络可以访问 Windows TCP 3389。
-
-连通性检查：
-
-```powershell
-Test-NetConnection WINDOWS_HOST -Port 3389
-Test-NetConnection WINDOWS_HOST -Port 5986
-```
-
-### 11.4 安装正式 RDS
-
-完成 RDS CAL/Licensing 决策后再安装：
-
-```powershell
-Install-WindowsFeature RDS-RD-Server -IncludeManagementTools
-Restart-Computer
-```
-
-重启后确认：
-
-```powershell
-Get-WindowsFeature RDS-RD-Server
-```
-
-然后配置：
-
-- RDS Licensing Server。
-- Per User 或 Per Device licensing mode。
-- Session timeout、断开会话回收和最大并发策略。
-- 保留 RDPDR drive redirection。
-
-### 11.5 安装并盘点业务软件
-
-在限制 AppLocker 之前安装：
-
-- 目标 GUI 软件。
-- 许可证客户端。
-- 必需 VC++/.NET/Java/Python/MPI/GPU runtime。
-- 插件、后处理器和导出组件。
-
-为每个应用记录：
+必须先接受一个事实：
 
 ```text
-主 EXE
-RemoteApp alias
-启动目录
-启动参数
-项目文件格式
-子进程树
-TEMP/APPDATA/ProgramData 路径
-日志/恢复/缓存路径
-许可证 HOST/PORT
-所需网络目标
+多会话能力 ≠ 多租户文件隔离
+共享 Windows 账号 ≠ 不同 Windows 安全主体
 ```
 
-ANSYS、COMSOL 等复杂工程软件不能只记录主 EXE；还必须测试求解器、MPI、恢复文件、插件、宏和许可证组件。
+多个 RDS Session ID 可以隔离窗口、桌面和部分进程上下文，但共享账号意味着所有会话仍使用相同 Windows SID/access token。仅依赖以下机制不能满足严格文件隔离：
 
-### 11.6 创建账号和安全域
+- `/drive/portal_u{user_id}` 和 `\\tsclient\GuacDrive`；
+- RDP/RAIL/RemoteApp 会话；
+- 隐藏盘符、禁 Explorer、禁 Run；
+- 关闭剪贴板、浏览器上传/下载、打印；
+- AppLocker、Firewall 和事后清理；
+- 不同的 VSCode profile 目录；
+- 不同的 Sandboxie box 名称。
 
-至少分开：
+这些机制可以降低误操作和常见绕过，但不会把同一个 Windows SID 变成不同用户的 NTFS 权限主体。
+
+### 11.2 架构决策
+
+在“共享 Windows 账号”不改变的前提下，要满足严格文件隔离，必须新增一个**按 Portal 会话强制执行的文件系统安全边界**。
+
+本项目的目标方案确定为：
 
 ```text
-管理员桌面账号
-普通 restricted_remoteapp 账号/组
-受控 VSCode 账号/组
+Portal Session/Lease Service
+ Windows Isolation Agent（SYSTEM 服务）
+ 受控 RemoteApp Launcher
+ Job Object / Process Tree
+ 经安全评审和签名的内核文件隔离运行时
+ File Broker / Result Broker
+ 每会话 overlay、profile 和 local scratch
 ```
 
-普通账号要求：
+其中真正承担文件拒绝职责的是：
 
-- 标准用户。
-- 不属于 Administrators。
-- 只加入 Remote Desktop Users 和对应策略组。
-- 禁止修改密码和任意安装软件的能力按运维策略控制。
-- 生产严格文件隔离时，一个 Portal 用户对应一个 Windows SID。
+- 经验证的内核文件系统 minifilter；或
+- 具备等效内核强制能力、可以按 Session/Process Context 隔离读写的企业应用沙箱。
 
-### 11.7 创建目录和 NTFS ACL
+Sandboxie-Plus 可以用于 PoC、兼容性验证和降低配置污染，但默认不把它认定为生产严格隔离边界：
 
-推荐规划：
+- 它不创建新的 Windows SID。
+- `LockBoxToUser` 看到的是共享 Windows 用户，不是 Portal 用户。
+- 许可证服务、GPU、COM、插件等兼容例外会扩大穿透面。
+- 未完成跨 box、子进程、服务、IPC 和宿主路径逃逸测试前，不能写成“严格隔离已完成”。
+
+如果找不到经过安全评审、可支持目标第三方软件的内核隔离运行时，则生产兜底方案必须改为：
+
+- 每 Portal 用户/会话独占 Hyper-V VM、独占 Worker 或独立 Windows 主机；或
+- 改为不同 Windows SID/账号。
+
+否则“共享账号”和“严格文件隔离”两个要求不能同时验收通过。
+
+### 11.3 严格文件隔离的验收定义
+
+本章中的严格文件隔离至少覆盖：
+
+- 用户 A 不能读取、覆盖、删除、重命名或枚举用户 B 的业务文件。
+- 用户 A 不能读取用户 B 的 scratch、Temp、恢复文件、日志和缓存。
+- 主应用及其子进程、插件、宏和脚本均受相同文件策略约束。
+- 绝对路径、UNC、设备路径、符号链接、junction、hard link 和重解析点不能绕过隔离。
+- 会话崩溃、网络断开、guacd 重启和应用异常退出后，不留下其他用户可读数据。
+- 文件授权以 Portal 用户和 session lease 为依据，而不是共享 Windows 用户名。
+
+它不自动等于完整恶意代码隔离。以下威胁仍需要 VM/Hypervisor、补丁、Defender/EDR、网络分区和管理员安全共同处理：
+
+- Windows 内核或驱动漏洞；
+- 本地提权；
+- 管理员凭据泄露；
+- 跨进程注入、IPC/共享内存和侧信道；
+- 隔离驱动或 Agent 自身漏洞；
+- 宿主机整体失陷。
+
+### 11.4 目标架构
+
+```mermaid
+flowchart LR
+    User["Portal 用户"] --> Portal["Portal Control Plane"]
+    Portal --> Lease["Session / Lease Service"]
+    Lease --> Ticket["短期签名 Launch Ticket"]
+    Ticket --> Launcher["受控 RemoteApp Launcher"]
+    Launcher --> Agent["Windows Isolation Agent\nSYSTEM Service"]
+    Agent --> Job["Job Object / Process Tree"]
+    Agent --> Isolation["内核文件隔离运行时\nMinifilter / Enterprise Sandbox"]
+    Job --> App["ANSYS / COMSOL / 业务应用"]
+    Isolation --> Overlay["Per-Session Profile Overlay"]
+    Isolation --> Scratch["C:\\PortalScratch\\{session_id}"]
+    Portal --> Broker["File Broker / Result Broker"]
+    Broker --> UserDrive["/drive/portal_u{user_id}"]
+    Broker --> Scratch
+    App --> Scratch
+    Isolation -. "拒绝" .-> OtherFiles["其他用户目录 / Host 数据 / UNC"]
+```
+
+共享 Windows 账号只承担 RDS 登录和 GUI 会话承载，不再作为业务文件授权主体。
+
+### 11.5 组件与信任边界
+
+| 组件 | 运行身份 | 职责 | 当前是否存在 |
+|---|---|---|---|
+| Portal Control Plane | Portal service | JWT、ACL、应用策略、用户身份 | 已存在 |
+| Session/Lease Service | Portal service | 为每次启动生成唯一隔离租约、TTL、fencing | 未实现 |
+| Launch Ticket | 短期 capability | 将 Portal user/session/app 与 Windows 启动绑定 | 未实现 |
+| RemoteApp Launcher | 共享低权限账号启动，受 Agent 控制 | 不直接启动第三方 EXE；只提交 ticket | 未实现 |
+| Windows Isolation Agent | LocalSystem | 验证 ticket、创建隔离上下文、启动/终止进程树 | 未实现 |
+| 内核文件隔离运行时 | 签名驱动/受信产品 | 按 isolation context 强制允许、重定向或拒绝文件 I/O | 未实现 |
+| Job Object | Agent 管理 | 绑定主进程、子进程、资源限制和整体终止 | 未实现 |
+| File Broker | 受信服务 | 按 Portal user capability 读取输入、写入结果 | 未实现 |
+| Per-session overlay | 隔离运行时管理 | 虚拟化 APPDATA、LOCALAPPDATA、TEMP、Recent 等 | 未实现 |
+| Local scratch | Windows 本地 NTFS | 复杂应用高速计算和中间文件 | 需标准化 |
+| GuacDrive | guacd/RDPDR | 当前用户文件交换和结果入口 | 已存在 |
+| AppLocker/Firewall | Windows policy | 程序和网络控制，作为纵深防御 | 部分已存在 |
+
+“当前是否存在”必须保留，避免把目标设计误写成现有能力。
+
+### 11.6 Session Lease 与 Windows 进程绑定
+
+现有 `active_session` 主要记录 Portal/浏览器逻辑会话和心跳，没有以下强隔离字段：
 
 ```text
-C:\Apps                         # 只读应用目录
-C:\PortalProfiles\{user_id}    # 每 Portal 用户 VSCode/profile
-C:\PortalExtensions\{user_id}  # 每 Portal 用户扩展
-C:\PortalScratch\{user_id}     # 大型仿真软件本地 scratch
-C:\ProgramData\GuacDriveRestriction
+lease_token
+lease_expires_at
+fencing_token / generation
+windows_session_id
+isolation_context_id
+root_pid
+process_tree_state
+scratch_path
+policy_version
+result_manifest_state
 ```
 
-原则：
+目标启动流程：
 
-- Windows、Program Files 和应用目录保留运行所需 Read & Execute。
-- 管理员、SYSTEM 保留 Full Control。
-- 用户自己的 profile/scratch 允许必要修改。
-- 其他用户目录通过不同 SID 和 NTFS ACL 拒绝。
-- 不对整个 `C:\` 递归 Deny。
-- 共享 Windows 账号下，不要声称不同 `{user_id}` 本地目录形成硬隔离。
+1. Portal 校验 JWT、ACL、应用、资源池、许可证和隔离策略版本。
+2. 数据库事务原子创建 `session_lease`。
+3. 生成一次性、短期、不可预测的 launch ticket。
+4. Guacamole RemoteApp alias 固定启动 `PortalAppLauncher.exe`，不直接启动第三方软件。
+5. Launcher 将 ticket 交给本机 Isolation Agent。
+6. Agent 向 Portal 验证 ticket，获取 `user_id`、`session_id`、应用 manifest 和文件 capability。
+7. Agent 获取真实 Windows RDS Session ID。
+8. Agent 创建 isolation context、profile overlay、scratch 和 Job Object。
+9. Agent 在隔离上下文中启动第三方主 EXE，并跟踪完整子进程树。
+10. Agent/Portal 心跳续租；租约过期或 fencing 变化时立即停止进程树。
 
-### 11.8 用户策略
-
-普通 RemoteApp 域建议：
-
-- 隐藏/限制本地盘入口。
-- 禁 Run、控制面板、任务管理器、注册表和网络驱动器映射入口。
-- 禁用或限制 Explorer 完整桌面能力。
-- Desktop/Documents/Downloads 指向业务空间或禁止本地持久化。
-- 配置会话结束清理。
-
-域环境优先使用试点 OU + GPO loopback processing；独立工作组服务器可以使用本地策略/离线 user hive，但维护成本更高。
-
-### 11.9 AppLocker 必须 Audit → Enforced
-
-第一阶段：
-
-```powershell
-powershell -File scripts\windows\set-guacdrive-applocker-mode.ps1 -Mode AuditOnly
-```
-
-在 Audit 阶段真实运行：
-
-- 主应用。
-- 打开、保存、导入、导出。
-- 求解、后处理、打印或渲染。
-- 插件、宏、脚本和子进程。
-- 许可证连接。
-
-收集无缺口后切换：
-
-```powershell
-powershell -File scripts\windows\set-guacdrive-applocker-mode.ps1 -Mode Enabled
-```
-
-切换后重新执行全部正向和阻断场景。DLL 建议长时间 Audit，直接 Enforced 很容易把复杂工程软件打死。
-
-### 11.10 Firewall
-
-推荐默认策略：
-
-- 入站 Block。
-- 仅管理网段允许 RDP/WinRM。
-- 阻断 SMB 445/139、NetBIOS 137/138、WebDAV 和管理员共享。
-- 按 HOST/PORT 放行许可证、数据库、Git、包仓库和业务服务。
-- 不使用 `*` 作为网络 allowlist。
-- 完成真实应用验证后，再考虑将默认出站收紧为 Block + allowlist。
-
-### 11.11 发布 RemoteApp
-
-每个普通应用必须发布非空 RemoteApp alias，不能让受限模式回退完整桌面。
-
-Portal `remote_app` 至少核对：
+建议状态机：
 
 ```text
-name
-hostname
-port
-rdp_username / credential
-domain
-security=nla
-ignore_cert
-remote_app
-remote_app_dir
-remote_app_args
-security_mode
-pool_id
-member_max_concurrent
+requested
+  → leased
+  → preparing
+  → starting
+  → running
+  → collecting
+  → syncing
+  → completed
+
+任意阶段可进入：
+revoked / expired / failed / cleanup_pending
 ```
 
-安全模式建议：
+旧 Agent、旧进程或旧会话不得在新 generation 建立后继续写文件。
 
-- 普通第三方软件：`restricted_remoteapp`。
-- VSCode：`restricted_vscode` + `vscode_control_profile_id`。
-- 管理员完整桌面：`admin_desktop`，只授权管理员。
+### 11.7 文件命名空间和强制策略
 
-应用、ACL 或策略修改后必须确认 Guacamole session cache 已失效。
+每个 isolation context 只允许以下路径类别：
 
-### 11.12 配置 Portal ACL 和资源池
+| 路径类别 | 权限 | 说明 |
+|---|---|---|
+| Windows/Program Files 必需文件 | Read/Execute allowlist | 只允许应用运行依赖，不允许写 |
+| 当前会话 profile overlay | Read/Write | APPDATA、LOCALAPPDATA、TEMP、Recent、应用配置 |
+| `C:\PortalScratch\{session_id}` | Read/Write | 当前会话计算和中间文件 |
+| 当前 Portal 用户输入 | Broker-controlled Read | 启动前按 manifest staging |
+| 当前 Portal 用户输出 | Broker-controlled Write | 结束时按输出规则同步 |
+| 当前会话 `\\tsclient\GuacDrive` | 按应用策略 | 简单应用可直接使用；复杂应用优先 broker staging |
+| 其他用户 scratch/profile | Deny | 即使共享 SID 也由隔离运行时拒绝 |
+| `C:\Users` 真实共享 profile | 默认 Deny/Redirect | 必需文件重定向到 overlay |
+| 未登记 ProgramData/数据卷 | Deny | 逐应用增加只读或可写能力 |
+| 任意 UNC/SMB/WebDAV | Deny | 许可证等例外由 manifest 单独声明 |
+| `\\?\`、`\\.\`、设备路径 | Deny | 防止绕过 Win32 路径规范化 |
+| junction/symlink/reparse point | Resolve then authorize | 以最终真实对象重新授权 |
 
-检查：
+隔离检查必须发生在内核或等效强制层。仅在 Launcher 中检查字符串没有意义，第三方进程可以直接调用 `CreateFile`。
 
-- `remote_app_acl`：普通用户只拥有普通 RemoteApp。
-- `resource_pool` / `resource_pool_member`：主机成员、容量和健康状态正确。
-- `remote_app_health`：TCP 3389 探测为 healthy。
-- `member_max_concurrent`：不能超过真实 RDS、软件和许可证容量。
+### 11.8 Profile、注册表和临时目录
 
-Portal TCP 健康探测只证明端口可连接，不证明：
+共享账号默认共享 HKCU 和 Windows profile。仅隔离业务目录仍可能通过以下位置泄漏数据：
 
-- Windows 凭据正确；
-- RemoteApp alias 存在；
-- 软件能启动；
-- 第三方许可证可用。
-
-### 11.13 VSCode profile 初始化
-
-同步当前 Portal 用户 ID：
-
-```powershell
-powershell -File scripts\windows\set-vscode-guacdrive-profile-settings.ps1 `
-  -PortalUserIds 1,2,3 `
-  -DiscoverExistingProfiles `
-  -AllowedUNCHosts tsclient
+```text
+%APPDATA%
+%LOCALAPPDATA%
+%TEMP%
+Recent
+CrashDumps
+应用恢复目录
+插件缓存
+许可证缓存
 ```
 
-新增 Portal 用户后必须重复执行，或者后续建设统一 Windows launcher/agent 自动完成 profile 初始化。
+生产隔离运行时必须为每个 isolation context 提供：
 
-### 11.14 新服务器验收
+- 文件 profile overlay；
+- 注册表/HKCU 虚拟化或按会话隔离；
+- Known Folder 重定向；
+- 独立 TEMP、恢复、日志和崩溃目录；
+- 子进程继承相同 overlay；
+- 会话结束后的完整销毁。
 
-#### 正向场景
+如果目标产品不能隔离注册表、Known Folder 和子进程，则不能通过生产验收。
 
-- Portal 登录、应用列表和 ACL 正确。
-- 记事本/计算器 smoke 成功。
-- GuacDrive 新建、打开、覆盖、重命名和删除。
-- 大文件传输和断线重连。
-- 两个用户同时启动同一应用。
-- VSCode A/B profile/extensions 路径不同。
-- 允许的第三方软件子进程和许可证正常。
+### 11.9 File Broker 和数据流
 
-#### 阻断场景
+严格模式下，权威业务文件流为：
 
-- 普通用户看不到/启动不了 `admin_desktop`。
-- `C:\`、`D:\`、其他用户 profile、数据卷和备份目录。
-- `\\HOST\share`、`\\HOST\C$`、映射网络盘。
-- Explorer、cmd、PowerShell、wscript/cscript、mshta、taskmgr、control、mmc、安装器。
-- 普通 RemoteApp 的剪贴板、浏览器上传/下载、打印和麦克风。
-- 未登记插件、扩展、工具链、调试器和网络目标。
+```text
+/drive/portal_u{user_id}
+  → File Broker 校验 capability、路径、大小和 hash
+  → staging 到 C:\PortalScratch\{session_id}\input
+  → 隔离应用在 scratch 内工作
+  → 输出进入 C:\PortalScratch\{session_id}\output
+  → Result Broker 校验 manifest、hash、大小和类型
+  → 幂等同步回 /drive/portal_u{user_id}
+```
 
-#### 会话后检查
+File Broker 必须：
 
-- Temp、Recent、Desktop、Downloads、缓存无业务残留。
-- Portal `active_session` 最终回收。
-- Portal 审计包含真实 Portal 用户、应用、资源和安全模式。
-- Windows 审计明确共享账号时不能区分 Portal 身份。
-- AppLocker 阻断有 8004/对应事件，而不是只看窗口没出现。
+- 只接受 Portal 颁发的短期 capability。
+- capability 固定 `user_id + session_id + app_id + allowed operation`。
+- 规范化路径并重新解析最终对象。
+- 拒绝绝对 Windows 路径、UNC、设备名、ADS、junction、symlink 和越权 user ID。
+- 防止 TOCTOU：校验和打开尽量在同一受控操作中完成。
+- 限制文件数量、单文件大小、总大小、解压倍率和并发。
+- 保存 manifest、SHA-256、来源、目标、操作人和 session 审计。
+- 输出同步具有幂等键，断线重试不能产生重复或覆盖错误版本。
+
+RemoteApp 直接操作 `\\tsclient\GuacDrive` 会绕过 Portal 文件 API 的配额和审计。严格模式下应优先使用 Broker staging；需要直接 GuacDrive 的简单应用必须单独登记并经过隔离运行时验证。
+
+### 11.10 Local scratch 生命周期
+
+推荐目录：
+
+```text
+C:\PortalScratch\{session_id}\input
+C:\PortalScratch\{session_id}\work
+C:\PortalScratch\{session_id}\output
+C:\PortalScratch\{session_id}\logs
+```
+
+生命周期：
+
+1. Agent 验证 lease 后创建目录。
+2. 写入不可变 session metadata 和 policy version。
+3. Broker staging 输入。
+4. 运行期间持续检查配额、磁盘和 lease。
+5. 应用结束后停止新的文件写入。
+6. 生成结果 manifest 和 hash。
+7. 同步并验证 Portal 端结果。
+8. 终止完整进程树。
+9. 卸载 overlay、撤销 isolation context。
+10. 安全删除 scratch；失败时进入 quarantine 而不是交给下一个用户。
+
+仅按顶层 RemoteApp 窗口关闭判断会话结束是不够的，ANSYS、COMSOL、MPI、求解器和插件可能仍有子进程运行。
+
+### 11.11 AppLocker、WDAC 和 Firewall
+
+这些策略是纵深防御，不替代内核文件隔离。
+
+应用 manifest 必须列出：
+
+- 主 EXE；
+- launcher/helper；
+- 求解器和 MPI 子进程；
+- 插件宿主；
+- 脚本解释器；
+- 调试器和工具链；
+- 服务和许可证客户端；
+- DLL、驱动和 COM 依赖。
+
+策略顺序：
+
+```text
+Audit
+→ 收集真实进程/DLL/脚本/网络证据
+→ 评审 allowlist
+→ Enforced
+→ 真实双用户回归
+```
+
+Firewall：
+
+- 默认入站 Block。
+- 普通应用进程默认禁止 SMB、WebDAV、管理员共享和任意外网。
+- 按应用 manifest 放行许可证 `HOST:PORT`、数据库和必要业务服务。
+- 最终目标是出站 Block + 精确 allowlist。
+- Agent、Broker 和 Portal 使用独立服务身份和专用端口。
+- 所有拒绝和例外写入审计。
+
+### 11.12 第三方应用接入合同
+
+每个新增应用必须提交 manifest，而不是只填一个 EXE：
+
+```yaml
+app_id: APP_ID
+remote_app_alias: REMOTE_APP_ALIAS
+main_executable: MAIN_EXE
+arguments_template: ARGUMENTS_TEMPLATE
+working_directory: SESSION_WORK_DIR
+profile_paths: []
+temp_paths: []
+recovery_paths: []
+child_processes: []
+plugins: []
+script_engines: []
+license_endpoints: []
+network_allowlist: []
+input_patterns: []
+output_patterns: []
+max_scratch_bytes: SIZE
+cleanup_policy: POLICY
+policy_version: VERSION
+```
+
+ANSYS、COMSOL 等复杂软件至少验收：
+
+- 项目目录和关联文件；
+- solver/MPI 子进程；
+- 本地高速 scratch；
+- TEMP、恢复和崩溃文件；
+- 插件、宏、Journal 和脚本引擎；
+- 许可证服务及端口；
+- 中断、恢复和结果同步。
+
+没有完整 manifest、进程树和文件/网络证据时，应用保持不可绑定或不可启动。
+
+### 11.13 新服务器配置顺序
+
+新服务器已经支持多会话，但仍要验证它是正式生产能力：
+
+#### A. 生产前置
+
+1. 确认正式 RDS Session Host、Licensing Server 和 CAL 正常。
+2. 确认没有使用 RDP Wrapper 替代正式 RDS。
+3. 创建 VM snapshot 和带外管理员入口。
+4. 安装 Windows 更新，启用 Defender/EDR。
+5. 配置 WinRM HTTPS 和管理网段 Firewall。
+6. 导出 Windows、RDS、RemoteApp、NTFS、AppLocker、Firewall 和 WinRM 基线。
+
+#### B. 安装业务软件
+
+1. 安装应用、runtime、许可证客户端和插件。
+2. 在无限制管理员测试域完成单用户功能验证。
+3. 收集主进程、子进程、DLL、脚本、COM、TEMP、恢复目录和网络依赖。
+4. 为应用建立 manifest。
+
+#### C. 部署隔离运行时
+
+1. 安装经过安全评审和签名的 minifilter/企业隔离产品。
+2. 安装 Windows Isolation Agent 服务。
+3. 安装 `PortalAppLauncher.exe` 并注册为普通应用唯一 RemoteApp alias。
+4. 配置 Agent 与 Portal 的机器身份、双向认证和证书轮换。
+5. 创建 `C:\PortalScratch`、overlay、quarantine 和日志目录。
+6. 配置 isolation context、进程树、profile/registry virtualization。
+7. 验证驱动更新、Secure Boot、Defender/EDR 和崩溃恢复兼容性。
+
+#### D. Portal 控制面改造
+
+当前代码还需要新增：
+
+- `session_lease` / `isolation_job` 数据模型；
+- launch ticket 签发与一次性消费；
+- Windows Agent 注册、心跳、策略同步和审计 API；
+- Portal session 到 Windows Session ID/PID/process tree 映射；
+- File Broker/Result Broker API；
+- policy version、fencing、TTL、结果 manifest 和 quarantine 状态；
+- launcher 连接类型，禁止直接启动第三方 EXE；
+- 资源池同时校验 RDS、隔离 runtime、磁盘、应用和许可证容量。
+
+现有 `active_session` 不能冒充强租约；它目前主要用于 Portal 心跳、监控和回收。
+
+#### E. Windows 策略
+
+1. AppLocker/WDAC 先 Audit。
+2. 禁止普通用户直接启动第三方 EXE，只允许 Launcher 通过 Agent 启动。
+3. Firewall 从 SMB/WebDAV 基础阻断收敛到按 manifest 的出站 allowlist。
+4. 禁止完整桌面、Explorer、shell、安装器和未登记插件。
+5. 对 Agent、Broker、驱动和日志设置管理员/SYSTEM ACL。
+6. 配置磁盘配额、监控、告警和 quarantine 清理流程。
+
+#### F. Portal 应用和 ACL
+
+- 普通应用使用 `restricted_remoteapp`。
+- `remote_app` 指向受控 Launcher alias，而不是实际软件 alias。
+- `remote_app_args` 不保存可伪造的用户路径，只传短期 ticket/launch identifier。
+- 普通用户不拥有 `admin_desktop`。
+- 修改应用、ACL、manifest 或策略后失效 Guacamole token cache。
+
+#### G. Audit → Enforced
+
+1. 使用真实浏览器运行两个以上 Portal 用户。
+2. 收集 allow/deny 文件事件、进程树、AppLocker、Firewall 和 Broker 审计。
+3. 修复依赖缺口。
+4. 切换文件隔离、AppLocker/WDAC 和 Firewall Enforced。
+5. 重跑完整验收矩阵。
+
+### 11.14 失败关闭与回收
+
+以下任一条件成立都必须拒绝启动或终止会话：
+
+- ticket 缺失、过期、重复使用或签名无效；
+- lease 不存在、过期或 fencing generation 落后；
+- Agent、驱动、Broker 或策略版本不一致；
+- scratch/overlay 创建失败；
+- 应用 manifest 无效或依赖未审批；
+- 文件路径不在 capability 内；
+- 许可证、磁盘、隔离容量不足；
+- 输出 manifest/hash 校验失败；
+- 无法确认旧进程树已经终止。
+
+回收顺序：
+
+```text
+停止接受新写入
+→ 撤销 lease
+→ 冻结/终止 Job Object 进程树
+→ 收集日志和可验证输出
+→ Result Broker 同步
+→ 校验 Portal 结果
+→ 卸载 overlay/isolation context
+→ 删除或 quarantine scratch
+→ 结束 active_session
+```
+
+### 11.15 生产验收矩阵
+
+#### 跨用户文件隔离
+
+- A/B/C 三个 Portal 用户并发运行同一共享 Windows 账号。
+- A 猜测 B 的 scratch、profile、output 和日志路径。
+- 通过绝对路径、`..`、UNC、设备路径、ADS、symlink、junction、hard link 和 reparse point 尝试越权。
+- 通过文件对话框、拖放、Recent、恢复文件和崩溃转储尝试越权。
+- 预期全部拒绝，并记录 Portal user、session、process、path、operation 和 policy version。
+
+#### 进程和应用
+
+- 主进程、launcher、solver、MPI、插件和子进程都进入同一 Job Object/isolation context。
+- cmd、PowerShell、Explorer、安装器和未登记 helper 被阻止。
+- 尝试子进程逃出 Job Object、继承句柄或使用另一个可执行文件。
+- 应用退出后不存在孤儿进程。
+
+#### Broker
+
+- 越权 user ID、过期 token、重复 ticket、TOCTOU 和重解析点攻击失败。
+- 超大文件、恶意压缩包、并发上传和断点恢复不突破配额。
+- 输出 manifest/hash/size 与实际文件一致。
+- 同一结果重试同步不会重复或错误覆盖。
+
+#### 生命周期
+
+- 浏览器关闭、RDP 断开、guacd 重启、Agent 重启、Portal 重启、应用崩溃和服务器断电恢复。
+- 旧 lease 和旧 generation 不能继续写入。
+- scratch/overlay 最终被删除或进入 quarantine。
+- 下一个用户不能读取前一个用户残留。
+
+#### 网络和许可证
+
+- SMB/WebDAV/管理员共享和未登记外网被阻断。
+- 只有 manifest 中的许可证和业务 `HOST:PORT` 可达。
+- 许可证不足时排队或拒绝，不允许绕过 Agent 直接启动。
+
+#### 安全工具
+
+- AppLocker/WDAC deny 事件、Firewall deny 日志、Broker 审计和 minifilter deny 事件完整。
+- Defender/EDR 开启，隔离驱动和 Agent 不依赖关闭安全防护。
+- 普通用户不能修改策略、停止 Agent/驱动或读取其他 session 日志。
+
+### 11.16 回滚
+
+上线前必须准备：
+
+- VM snapshot 和带外控制台；
+- Windows baseline；
+- 隔离驱动/Agent 安装包和签名信息；
+- Portal DB migration 的正向/反向脚本；
+- policy/manifest 版本和上一稳定版本；
+- AppLocker/WDAC、Firewall、GPO、NTFS 导出；
+- Broker 存储和 quarantine 恢复流程。
+
+回滚顺序：
+
+1. 停止新 lease 和新 RemoteApp 启动。
+2. 等待或强制结束隔离作业。
+3. 同步可验证输出并隔离未完成数据。
+4. 将 AppLocker/WDAC 和文件隔离策略退回 Audit。
+5. 回滚 Portal schema/API/launcher 配置。
+6. 卸载或回退 Agent/minifilter。
+7. 恢复 Firewall/GPO/NTFS。
+8. 必要时恢复 VM snapshot。
+
+不能在进程树仍运行时直接卸载隔离驱动，也不能在输出未校验时删除 scratch。
+
+### 11.17 实施分期和上线门槛
+
+#### P0：架构与 PoC
+
+- 选定内核隔离运行时或 per-session VM 方案。
+- 完成安全、许可证、驱动签名和第三方软件兼容性评审。
+- 使用记事本和一个真实业务软件做 3 用户并发 PoC。
+
+#### P1：控制面
+
+- 实现 lease、launch ticket、fencing、Agent 注册/心跳和策略版本。
+- 实现 Launcher、Job Object、Windows Session ID/PID/process tree 绑定。
+
+#### P2：文件数据面
+
+- 实现 File Broker、Result Broker、scratch、overlay、manifest、hash 和 quarantine。
+- 完成路径、reparse point、TOCTOU、配额和断点测试。
+
+#### P3：应用与策略
+
+- 逐应用建立 manifest。
+- AppLocker/WDAC/Firewall Audit → Enforced。
+- 完成 ANSYS、COMSOL 等真实应用并发和许可证验收。
+
+#### P4：生产门槛
+
+只有以下全部满足后，文档和产品界面才能使用“严格文件隔离”：
+
+- 隔离运行时为强制模式且不能被普通用户停止。
+- A/B/C 跨用户文件测试全部拒绝。
+- 所有子进程继承 isolation context。
+- Broker 路径、token、TOCTOU、hash 和配额测试通过。
+- 崩溃/断网/重启后无跨用户残留。
+- Defender/EDR、Windows 更新、正式 RDS/CAL 正常。
+- 真实第三方应用和许可证验证完成。
+- 审计能够把 Windows 行为关联到 Portal user/session。
+
+在 P4 之前，系统状态必须标记为：
+
+```text
+共享账号严格文件隔离：目标设计 / 未完成
+当前可用能力：一般访问限制
+```
 
 ## 12. 配置新的 Portal 服务器
 
@@ -1102,8 +1378,11 @@ C:\ProgramData\GuacDriveRestriction\backups
 - Firewall 精确出站 allowlist。
 - DLL AppLocker 依赖收集。
 - 完成 GPO/NTFS 完整逃逸矩阵。
-- 为 ANSYS、COMSOL 等真实业务软件建立启动器、工作/临时/恢复目录和子进程策略。
-- 共享账号升级为独立 Windows SID 或独占 VM，以支持严格文件隔离。
+- 实现 `session_lease`、launch ticket、fencing、Windows Isolation Agent、Launcher 和进程树绑定。
+- 选定并验证按 session/process 强制执行的内核文件隔离运行时；不合格时回退 per-session VM/独立 Worker。
+- 实现 File Broker、Result Broker、per-session overlay、scratch、manifest、hash 和 quarantine。
+- 为 ANSYS、COMSOL 等真实业务软件建立 manifest、工作/临时/恢复目录、子进程和许可证策略。
+- 完成三用户并发、路径绕过、崩溃恢复和跨会话残留的严格隔离验收。
 - 将所有实际使用的 Windows 部署脚本审计后纳入 Git，避免依赖本地未提交文件。
 
 ## 18. 文档导航

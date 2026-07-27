@@ -128,3 +128,43 @@
 - 生产方案应安装正式 RDS Session Host，并提供 RDS Licensing Server / CAL 信息后移除 RDP Wrapper。
 - 在正式 RDS 或明确风险接受前，不自动安装上述累积更新，也不修改 Defender 禁用策略。
 - 任何切换前先保留 VM 快照、带外控制台、WinRM HTTPS 和当前安全基线导出。
+
+## ISSUE-005：生产多会话继续共享 Windows 账号，但要求严格文件隔离
+
+状态：目标架构已确定，隔离运行时和控制面尚未实现
+
+发现日期：2026-07-27
+
+### 固定业务前提
+
+- 新 Windows Server 已具备生产多会话能力。
+- 普通 Portal 用户继续共享同一个低权限 Windows 账号。
+- 用户 A 必须不能读取、修改、删除或枚举用户 B 的输入、中间文件、缓存和输出。
+
+### 根本冲突
+
+- 共享 Windows 账号意味着所有会话拥有相同 SID/access token；NTFS ACL 不能按 Portal 用户区分授权。
+- GuacDrive、RDPDR、隐藏盘符、AppLocker、Firewall、VSCode profile 和会话清理均不能把共享 SID 变成不同安全主体。
+- RemoteApp 进程可绕过 Portal 文件 API，通过绝对路径、APPDATA/TEMP、插件、宏、子进程和本地/网络文件 API 访问共享账号有权路径。
+
+### 目标解决方案
+
+- Portal 增加 `session_lease`、一次性 launch ticket、TTL 和 fencing。
+- 普通 RemoteApp alias 统一指向受控 Launcher，不直接启动第三方软件。
+- Windows Isolation Agent 以 SYSTEM 身份验证 ticket，绑定真实 RDS Session ID、Job Object 和完整进程树。
+- 部署经过安全评审和签名的内核文件隔离运行时，按 Portal session/process context 强制隔离 profile、scratch 和文件 I/O。
+- File Broker/Result Broker 负责输入 staging、输出 manifest/hash 校验、幂等同步和审计。
+- 每个会话使用独立 overlay、TEMP、恢复目录和 `C:\PortalScratch\{session_id}`。
+
+### 边界
+
+- Sandboxie 可以用于 PoC 和兼容性验证，但不因 box 名称不同就自动成为共享账号下的生产硬隔离边界。
+- 如果没有合格的内核隔离产品/驱动，必须回退到 per-session VM、独立 Worker/主机或不同 Windows SID。
+- 文件隔离不等于完整恶意代码隔离；内核漏洞、提权、IPC、进程注入和宿主逃逸仍需要 VM/Hypervisor、补丁、Defender/EDR 和网络分区。
+
+### 防止重复犯错
+
+- 在 Agent、隔离运行时、Broker 和三用户并发逃逸矩阵完成前，只能宣称“一般访问限制”。
+- 现有 `active_session` 只是 Portal 会话监控记录，不得当成 OS 进程、许可证或隔离租约。
+- 新应用必须提交主 EXE、子进程、插件、脚本、TEMP/恢复目录、许可证端点、输入/输出和清理 manifest。
+- 验收必须覆盖绝对路径、UNC、设备路径、symlink/junction/reparse point、TOCTOU、断网、崩溃、旧 lease 和跨会话残留。

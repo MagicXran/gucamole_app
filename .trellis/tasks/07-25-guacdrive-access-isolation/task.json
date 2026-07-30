@@ -18,7 +18,9 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [],
+  "children": [
+    "07-27-generic-app-runtime-profiles"
+  ],
   "parent": null,
   "relatedFiles": [],
   "notes": "Portal、数据库、启动策略和 Vue 管理端已实现并迁移到本地 Docker/MySQL；Windows Server 2019 试点已完成低权限账号分域、RDPDR、AppLocker Enforced、VSCode AllowedExtensions、UNC profile 初始化和真实浏览器 A/B RemoteApp 验收。剩余工作是正式 RDS Session Host/RDS CAL、移除 RDP Wrapper、恢复 Defender、安装系统更新、收紧出站 allowlist、补齐 GPO/NTFS 完整逃逸矩阵并迁移真实业务应用。",

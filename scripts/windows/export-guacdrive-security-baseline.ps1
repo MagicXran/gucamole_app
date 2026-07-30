@@ -36,6 +36,21 @@ Export-Check "computer" {
         Set-Content -LiteralPath (Join-Path $outputDirectory "computer.json") -Encoding utf8
 }
 
+Export-Check "volumes" {
+    Get-Volume |
+        Select-Object DriveLetter, FileSystemLabel, FileSystem, DriveType, HealthStatus, Size, SizeRemaining |
+        ConvertTo-Json -Depth 4 |
+        Set-Content -LiteralPath (Join-Path $outputDirectory "volumes.json") -Encoding utf8
+}
+
+Export-Check "windows_features" {
+    Get-WindowsFeature |
+        Where-Object InstallState -eq "Installed" |
+        Select-Object Name, DisplayName, InstallState |
+        ConvertTo-Json -Depth 4 |
+        Set-Content -LiteralPath (Join-Path $outputDirectory "windows-features.json") -Encoding utf8
+}
+
 Export-Check "gpresult" {
     & gpresult.exe /h (Join-Path $outputDirectory "gpresult.html") /f | Out-Null
 }
@@ -78,6 +93,48 @@ Export-Check "remoteapps" {
         Set-Content -LiteralPath (Join-Path $outputDirectory "remoteapps.json") -Encoding utf8
 }
 
+Export-Check "rdp_config" {
+    $terminalServer = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server"
+    $rdpTcp = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
+    [ordered]@{
+        deny_connections = $terminalServer.fDenyTSConnections
+        single_session_per_user = $terminalServer.fSingleSessionPerUser
+        port = $rdpTcp.PortNumber
+        user_authentication = $rdpTcp.UserAuthentication
+        security_layer = $rdpTcp.SecurityLayer
+        min_encryption_level = $rdpTcp.MinEncryptionLevel
+        disable_drive_redirection = $rdpTcp.fDisableCdm
+    } |
+        ConvertTo-Json -Depth 4 |
+        Set-Content -LiteralPath (Join-Path $outputDirectory "rdp-config.json") -Encoding utf8
+}
+
+Export-Check "selected_acls" {
+    $paths = @(
+        "C:\",
+        "C:\Windows",
+        "C:\Program Files",
+        "C:\ProgramData",
+        "C:\Apps",
+        "C:\Users",
+        "C:\PortalProfiles",
+        "C:\PortalExtensions"
+    )
+    $paths |
+        ForEach-Object {
+            if (Test-Path -LiteralPath $_) {
+                $acl = Get-Acl -LiteralPath $_
+                [ordered]@{
+                    path = $_
+                    owner = $acl.Owner
+                    sddl = $acl.Sddl
+                }
+            }
+        } |
+        ConvertTo-Json -Depth 4 |
+        Set-Content -LiteralPath (Join-Path $outputDirectory "selected-acls.json") -Encoding utf8
+}
+
 Export-Check "vscode" {
     $candidates = @(
         "C:\Apps\Microsoft VS Code\Code.exe",
@@ -96,6 +153,37 @@ Export-Check "vscode" {
         } |
         ConvertTo-Json -Depth 4 |
         Set-Content -LiteralPath (Join-Path $outputDirectory "vscode.json") -Encoding utf8
+}
+
+Export-Check "vscode_policy" {
+    $path = "HKLM:\SOFTWARE\Policies\Microsoft\VSCode"
+    if (-not (Test-Path -LiteralPath $path)) {
+        $null |
+            ConvertTo-Json |
+            Set-Content -LiteralPath (Join-Path $outputDirectory "vscode-policy.json") -Encoding utf8
+        return
+    }
+    $key = Get-Item -LiteralPath $path
+    $values = [ordered]@{}
+    foreach ($valueName in $key.GetValueNames()) {
+        $values[$valueName] = $key.GetValue($valueName)
+    }
+    $values |
+        ConvertTo-Json -Depth 4 |
+        Set-Content -LiteralPath (Join-Path $outputDirectory "vscode-policy.json") -Encoding utf8
+}
+
+Export-Check "winrm" {
+    Get-ChildItem WSMan:\localhost\Listener |
+        ForEach-Object {
+            $values = [ordered]@{}
+            foreach ($item in Get-ChildItem -LiteralPath $_.PSPath) {
+                $values[$item.Name] = $item.Value
+            }
+            $values
+        } |
+        ConvertTo-Json -Depth 6 |
+        Set-Content -LiteralPath (Join-Path $outputDirectory "winrm-listeners.json") -Encoding utf8
 }
 
 $result |

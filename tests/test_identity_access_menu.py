@@ -1,6 +1,13 @@
 from backend.identity_access import ADMIN_MENU_ITEMS, _build_menu_tree
 
 
+def test_workspace_menu_uses_user_space_label():
+    my_group = next(group for group in _build_menu_tree(False) if group["key"] == "my")
+    workspace = next(item for item in my_group["children"] if item["key"] == "my-workspace")
+
+    assert workspace["title"] == "用户空间"
+
+
 def test_admin_menu_restores_all_admin_pages():
     paths = [item["path"] for item in ADMIN_MENU_ITEMS]
 

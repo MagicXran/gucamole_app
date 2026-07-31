@@ -112,7 +112,7 @@ describe('AdminAppsView', () => {
     await flushPromises()
 
     expect((wrapper.get('[data-testid="admin-app-kind"]').element as HTMLSelectElement).value).toBe('commercial_software')
-    expect(wrapper.text()).toContain('当前用户的个人文件空间')
+    expect(wrapper.text()).toContain('当前用户的用户空间')
     expect(wrapper.text()).not.toContain('GuacDrive')
 
     await wrapper.get('[data-testid="admin-app-kind"]').setValue('simulation_app')

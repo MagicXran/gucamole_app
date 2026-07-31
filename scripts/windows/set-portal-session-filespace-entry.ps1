@@ -10,7 +10,7 @@ param(
 
     [int]$WindowsSessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId,
 
-    [string]$TargetPath = '\\tsclient\UserFiles',
+    [string]$TargetPath = '\\tsclient\用户空间',
 
     [string]$Root = '',
 

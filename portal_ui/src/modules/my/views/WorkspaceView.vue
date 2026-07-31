@@ -2,7 +2,7 @@
   <section class="workspace-view">
     <header class="workspace-view__header">
       <div>
-        <h1>个人空间</h1>
+        <h1>用户空间</h1>
         <p>浏览、上传、下载、移动和整理你的远程应用文件。</p>
       </div>
       <div v-if="workspace.quota" class="workspace-view__quota">

@@ -40,7 +40,7 @@ function resolveErrorMessage(error: unknown) {
   if (error instanceof Error) {
     return error.message
   }
-  return '个人空间操作失败'
+  return '用户空间操作失败'
 }
 
 export const useWorkspaceStore = defineStore('workspace', () => {

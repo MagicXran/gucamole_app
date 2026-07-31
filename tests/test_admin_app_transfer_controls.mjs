@@ -148,9 +148,10 @@ test('admin shell wires app modal logic through AdminAppUi and script include', 
 
 test('legacy portal and admin help hide internal RDP filesystem names', () => {
   assert.doesNotMatch(portalHtml, /GuacDrive|Guacamole RDP/);
-  assert.match(portalHtml, /个人文件空间/);
+  assert.match(portalHtml, /用户空间/);
+  assert.doesNotMatch(portalHtml, /个人文件空间|我的空间/);
   assert.doesNotMatch(appModalSource, /GuacDrive|Guacamole RDP/);
-  assert.match(appModalSource, /当前用户的个人文件空间/);
+  assert.match(appModalSource, /当前用户的用户空间/);
 });
 
 test('buildTriStatePolicyOptions returns selected tri-state option', () => {

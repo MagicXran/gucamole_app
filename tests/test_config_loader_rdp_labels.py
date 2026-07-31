@@ -19,4 +19,4 @@ def test_rdp_label_environment_overrides_still_cross_router_sanitization(monkeyp
     config = load_config()
 
     assert _build_rdp_client_name(config["guacamole"]["client_name"]) == "Workspace"
-    assert _build_rdp_drive_name(config["guacamole"]["drive"]["name"]) == "UserFiles"
+    assert _build_rdp_drive_name(config["guacamole"]["drive"]["name"]) == "用户空间"

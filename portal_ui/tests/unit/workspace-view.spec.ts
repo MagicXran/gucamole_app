@@ -165,7 +165,7 @@ describe('WorkspaceView', () => {
 
     expect(apiMocks.getSpaceInfo).toHaveBeenCalledTimes(1)
     expect(apiMocks.listFiles).toHaveBeenCalledWith('workspace/output')
-    expect(wrapper.text()).toContain('个人空间')
+    expect(wrapper.text()).toContain('用户空间')
     expect(wrapper.text()).toContain('1 KB')
     expect(wrapper.text()).toContain('4 KB')
     expect(wrapper.get('[data-testid="browser-path"]').text()).toBe('workspace/output')
@@ -191,7 +191,7 @@ describe('WorkspaceView', () => {
     expect(apiMocks.listFiles).toHaveBeenCalledWith('workspace/output')
     expect(wrapper.get('[data-testid="browser-path"]').text()).toBe('workspace/output')
     expect(wrapper.get('[data-testid="browser-count"]').text()).toBe('2')
-    expect(wrapper.text()).toContain('个人空间')
+    expect(wrapper.text()).toContain('用户空间')
   })
 
   it('handles create, delete, move, download, upload, and navigation actions', async () => {

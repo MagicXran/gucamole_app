@@ -16,7 +16,7 @@ const menuTree = [
   {
     key: 'my',
     title: '我的',
-    children: [{ key: 'my-workspace', title: '个人空间', path: '/my/workspace' }],
+    children: [{ key: 'my-workspace', title: '用户空间', path: '/my/workspace' }],
   },
   {
     key: 'cases',

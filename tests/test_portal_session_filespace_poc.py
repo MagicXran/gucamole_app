@@ -7,7 +7,7 @@ from uuid import UUID
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "windows" / "set-portal-session-filespace-entry.ps1"
 MODULE_PATH = REPO_ROOT / "scripts" / "windows" / "PortalSessionFileSpace.psm1"
-EXPECTED_TARGET = r"\\tsclient\UserFiles"
+EXPECTED_TARGET = r"\\tsclient\用户空间"
 
 
 def _run_script(*args: str) -> dict:
@@ -70,8 +70,9 @@ def test_plan_uses_exact_friendly_name_and_session_scoped_directory(tmp_path):
         "-PlanOnly",
     )
 
-    assert payload["display_name"] == "张三的文件空间"
-    assert Path(payload["entry_path"]).name == "张三的文件空间.lnk"
+    assert payload["display_name"] == "用户空间"
+    assert payload["owner_name"] == "张三"
+    assert Path(payload["entry_path"]).name == "用户空间.lnk"
     assert Path(payload["entry_directory"]).name == f"session_41_{portal_session_id}"
     assert payload["target_path"] == EXPECTED_TARGET
     assert payload["windows_session_id"] == 41
@@ -129,7 +130,10 @@ def test_create_is_idempotent_and_remove_cleans_only_the_session_entry(tmp_path)
     assert second["action"] == "updated"
     assert entry_path.is_file()
     assert metadata_path.is_file()
-    assert json.loads(metadata_path.read_text(encoding="utf-8"))["target_path"] == EXPECTED_TARGET
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata["display_name"] == "用户空间"
+    assert metadata["owner_name"] == "张三"
+    assert metadata["target_path"] == EXPECTED_TARGET
 
     removed = _run_script(*common_args, "-Remove")
     assert removed["action"] == "removed"
@@ -227,3 +231,35 @@ Remove-PortalSessionFileSpaceEntry -Plan $plan | Out-Null
     assert result.returncode != 0
     assert "非入口文件" in (result.stderr + result.stdout)
     assert any(path.name == "unexpected.txt" for path in tmp_path.rglob("unexpected.txt"))
+
+
+def test_create_replaces_legacy_owner_named_shortcut(tmp_path):
+    result = _run_module_script(
+        tmp_path,
+        f"""
+Import-Module '{MODULE_PATH}' -Force
+$plan = Get-PortalSessionFileSpacePlan -Username 'zhangsan' -DisplayName '张三' -PortalSessionId '88888888-8888-4888-8888-888888888888' -WindowsSessionId 81 -Root '{tmp_path}'
+New-Item -ItemType Directory -Path $plan.entry_directory -Force | Out-Null
+$legacyPath = Join-Path $plan.entry_directory '张三的文件空间.lnk'
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($legacyPath)
+$shortcut.TargetPath = '{EXPECTED_TARGET}'
+$shortcut.Save()
+$result = Set-PortalSessionFileSpaceEntry -Plan $plan
+[ordered]@{{
+    action = $result.action
+    current_exists = Test-Path -LiteralPath $result.entry_path
+    legacy_exists = Test-Path -LiteralPath $legacyPath
+    display_name = $result.display_name
+}} | ConvertTo-Json -Compress
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "action": "created",
+        "current_exists": True,
+        "legacy_exists": False,
+        "display_name": "用户空间",
+    }

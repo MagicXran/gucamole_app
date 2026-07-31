@@ -20,7 +20,7 @@ const menuTree = [
     key: 'my',
     title: '我的',
     children: [
-      { key: 'my-workspace', title: '个人空间', path: '/my/workspace' },
+      { key: 'my-workspace', title: '用户空间', path: '/my/workspace' },
       { key: 'my-tasks', title: 'App任务', path: '/my/tasks' },
       { key: 'my-bookings', title: '预约登记', path: '/my/bookings' },
     ],
@@ -48,7 +48,7 @@ describe('my center navigation shell', () => {
     const navigationStore = useNavigationStore()
 
     expect(navigationStore.defaultPath).toBe('/compute/commercial')
-    expect(navigationStore.resolveBreadcrumb('/my/workspace')).toEqual(['我的', '个人空间'])
+    expect(navigationStore.resolveBreadcrumb('/my/workspace')).toEqual(['我的', '用户空间'])
     expect(navigationStore.resolveBreadcrumb('/my/tasks')).toEqual(['我的', 'App任务'])
     expect(navigationStore.resolveBreadcrumb('/my/bookings')).toEqual(['我的', '预约登记'])
   })
@@ -63,7 +63,7 @@ describe('my center navigation shell', () => {
     })
 
     expect(wrapper.text()).toContain('我的')
-    expect(wrapper.find('a[href="/my/workspace"]').text()).toContain('个人空间')
+    expect(wrapper.find('a[href="/my/workspace"]').text()).toContain('用户空间')
     expect(wrapper.find('a[href="/my/tasks"]').text()).toContain('App任务')
     expect(wrapper.find('a[href="/my/bookings"]').text()).toContain('预约登记')
   })

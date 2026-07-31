@@ -19,7 +19,8 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "07-27-generic-app-runtime-profiles"
+    "07-27-generic-app-runtime-profiles",
+    "07-31-remoteapp-user-space-chinese-label"
   ],
   "parent": null,
   "relatedFiles": [],

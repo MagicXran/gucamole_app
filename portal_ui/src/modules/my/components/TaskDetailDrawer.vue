@@ -60,7 +60,7 @@
               :data-testid="`artifact-workspace-link-${index}`"
               :href="workspaceHref(artifact) || '#'
               "
-            >跳到个人空间</a>
+            >跳到用户空间</a>
           </li>
         </ul>
       </section>

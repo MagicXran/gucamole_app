@@ -1,10 +1,18 @@
 ﻿Set-StrictMode -Version Latest
 
-$script:ExpectedTargetPath = '\\tsclient\UserFiles'
+$script:ExpectedTargetPath = '\\tsclient\用户空间'
+$script:UserVisibleName = '用户空间'
 $script:InvalidFileNameCharsPattern = '[<>:"/\\|?*\x00-\x1F]'
 $script:MaximumIdentityLength = 64
 
 function ConvertTo-PortalFileSpaceDisplayName {
+    [CmdletBinding()]
+    param()
+
+    return $script:UserVisibleName
+}
+
+function ConvertTo-PortalFileSpaceOwnerName {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -27,11 +35,7 @@ function ConvertTo-PortalFileSpaceDisplayName {
     if ([string]::IsNullOrWhiteSpace($candidate)) {
         throw 'Username 或 DisplayName 清理后为空。'
     }
-
-    if ($candidate.EndsWith('的文件空间', [System.StringComparison]::Ordinal)) {
-        return $candidate
-    }
-    return "${candidate}的文件空间"
+    return $candidate
 }
 
 function Resolve-PortalSessionEntryRoot {
@@ -71,7 +75,7 @@ function Get-PortalSessionFileSpacePlan {
 
         [int]$WindowsSessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId,
 
-        [string]$TargetPath = '\\tsclient\UserFiles',
+        [string]$TargetPath = '\\tsclient\用户空间',
 
         [string]$Root = ''
     )
@@ -89,15 +93,17 @@ function Get-PortalSessionFileSpacePlan {
 
     $resolvedRoot = Resolve-PortalSessionEntryRoot -Root $Root
     $normalizedPortalSessionId = $PortalSessionId.ToString('D').ToLowerInvariant()
-    $displayLabel = ConvertTo-PortalFileSpaceDisplayName -Username $Username -DisplayName $DisplayName
+    $displayLabel = ConvertTo-PortalFileSpaceDisplayName
+    $ownerName = ConvertTo-PortalFileSpaceOwnerName -Username $Username -DisplayName $DisplayName
     $entryDirectoryName = "session_{0}_{1}" -f $WindowsSessionId, $normalizedPortalSessionId
     $entryDirectory = Join-Path $resolvedRoot $entryDirectoryName
-    $entryPath = Join-Path $entryDirectory "${displayLabel}.lnk"
+    $entryPath = Join-Path $entryDirectory ($displayLabel + '.lnk')
     $metadataPath = Join-Path $entryDirectory 'entry.json'
 
     return [ordered]@{
         action = 'planned'
         display_name = $displayLabel
+        owner_name = $ownerName
         target_path = $script:ExpectedTargetPath
         root = $resolvedRoot
         entry_directory = $entryDirectory
@@ -117,6 +123,7 @@ function Write-PortalSessionEntryMetadata {
 
     $metadata = [ordered]@{
         display_name = $Plan.display_name
+        owner_name = $Plan.owner_name
         target_path = $Plan.target_path
         entry_path = $Plan.entry_path
         windows_session_id = $Plan.windows_session_id
@@ -137,6 +144,7 @@ function Assert-PortalSessionFileSpacePlan {
 
     $requiredKeys = @(
         'display_name',
+        'owner_name',
         'target_path',
         'root',
         'entry_directory',
@@ -177,13 +185,22 @@ function Assert-PortalSessionFileSpacePlan {
     }
 
     $displayName = [string]$Plan.display_name
-    $normalizedDisplayName = ConvertTo-PortalFileSpaceDisplayName -Username $displayName -DisplayName $displayName
+    $normalizedDisplayName = ConvertTo-PortalFileSpaceDisplayName
     if (-not [string]::Equals(
         $displayName,
         $normalizedDisplayName,
         [System.StringComparison]::Ordinal
     )) {
         throw 'Plan display_name 不是合法的文件空间名称。'
+    }
+    $ownerName = [string]$Plan.owner_name
+    $normalizedOwnerName = ConvertTo-PortalFileSpaceOwnerName -Username $ownerName -DisplayName $ownerName
+    if (-not [string]::Equals(
+        $ownerName,
+        $normalizedOwnerName,
+        [System.StringComparison]::Ordinal
+    )) {
+        throw 'Plan owner_name 不是合法的用户名称。'
     }
 
     $resolvedRoot = Resolve-PortalSessionEntryRoot -Root ([string]$Plan.root)
@@ -219,6 +236,7 @@ function Assert-PortalSessionFileSpacePlan {
     return [ordered]@{
         action = [string]$Plan.action
         display_name = $displayName
+        owner_name = $ownerName
         target_path = $script:ExpectedTargetPath
         root = $resolvedRoot
         entry_directory = $expectedDirectory
@@ -226,6 +244,40 @@ function Assert-PortalSessionFileSpacePlan {
         metadata_path = $expectedMetadataPath
         windows_session_id = $windowsSessionId
         portal_session_id = $normalizedPortalSessionId
+    }
+}
+
+function Get-PortalLegacyEntryPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary]$Plan
+    )
+
+    return Join-Path $Plan.entry_directory ($Plan.owner_name + '的文件空间.lnk')
+}
+
+function Test-PortalShortcutTarget {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $false
+    }
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($Path)
+        return [string]::Equals(
+            [string]$shortcut.TargetPath,
+            $script:ExpectedTargetPath,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+    }
+    catch {
+        return $false
     }
 }
 
@@ -239,6 +291,17 @@ function Set-PortalSessionFileSpaceEntry {
     $validatedPlan = Assert-PortalSessionFileSpacePlan -Plan $Plan
     $entryExisted = Test-Path -LiteralPath $validatedPlan.entry_path -PathType Leaf
     New-Item -ItemType Directory -Path $validatedPlan.entry_directory -Force | Out-Null
+    $legacyEntryPath = Get-PortalLegacyEntryPath -Plan $validatedPlan
+    if (-not [string]::Equals(
+        $legacyEntryPath,
+        $validatedPlan.entry_path,
+        [System.StringComparison]::OrdinalIgnoreCase
+    ) -and (Test-Path -LiteralPath $legacyEntryPath -PathType Leaf)) {
+        if (-not (Test-PortalShortcutTarget -Path $legacyEntryPath)) {
+            throw '旧会话入口目标不受信任，已拒绝覆盖。'
+        }
+        Remove-Item -LiteralPath $legacyEntryPath -Force
+    }
 
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($validatedPlan.entry_path)
@@ -261,24 +324,28 @@ function Remove-PortalSessionFileSpaceEntry {
 
     $validatedPlan = Assert-PortalSessionFileSpacePlan -Plan $Plan
     if (Test-Path -LiteralPath $validatedPlan.entry_directory) {
-        $allowedPaths = @(
+        $managedPaths = @(
             [System.IO.Path]::GetFullPath($validatedPlan.entry_path),
             [System.IO.Path]::GetFullPath($validatedPlan.metadata_path)
         )
+        $legacyEntryPath = Get-PortalLegacyEntryPath -Plan $validatedPlan
+        if (Test-PortalShortcutTarget -Path $legacyEntryPath) {
+            $managedPaths += [System.IO.Path]::GetFullPath($legacyEntryPath)
+        }
         $unexpectedItems = @(
             Get-ChildItem -LiteralPath $validatedPlan.entry_directory -Force |
                 Where-Object {
                     $candidatePath = [System.IO.Path]::GetFullPath($_.FullName)
-                    -not ($allowedPaths -contains $candidatePath)
+                    -not ($managedPaths -contains $candidatePath)
                 }
         )
         if ($unexpectedItems.Count -gt 0) {
             throw '会话入口目录包含非入口文件，已拒绝递归删除。'
         }
 
-        foreach ($allowedPath in $allowedPaths) {
-            if (Test-Path -LiteralPath $allowedPath) {
-                Remove-Item -LiteralPath $allowedPath -Force
+        foreach ($managedPath in $managedPaths) {
+            if (Test-Path -LiteralPath $managedPath) {
+                Remove-Item -LiteralPath $managedPath -Force
             }
         }
         Remove-Item -LiteralPath $validatedPlan.entry_directory -Force

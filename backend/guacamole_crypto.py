@@ -110,12 +110,12 @@ class GuacamoleCrypto:
         domain: str = "",
         security: str = "nla",
         ignore_cert: bool = True,
-        client_name: str = "Workspace",
+        client_name: str = "用户空间",
         remote_app: str = "",
         remote_app_dir: str = "",
         remote_app_args: str = "",
         enable_drive: bool = False,
-        drive_name: str = "UserFiles",
+        drive_name: str = "用户空间",
         drive_path: str = "",
         create_drive_path: bool = True,
         disable_download: bool = False,
@@ -167,7 +167,7 @@ class GuacamoleCrypto:
             "security": security,
             "ignore-cert": "true" if ignore_cert else "false",
             "resize-method": resize_method,
-            "client-name": client_name or "Workspace",
+            "client-name": client_name or "用户空间",
         }
 
         if username:

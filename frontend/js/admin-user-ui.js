@@ -102,7 +102,7 @@
                 formGroup('用户名', 'user-username', '', 'text', true)) +
             formGroup(isEdit ? '新密码（留空不改）' : '密码', 'user-password', '', 'password', !isEdit) +
             formGroup('显示名称', 'user-display', isEdit ? u.display_name : '') +
-            formGroupSelect('个人空间配额', 'user-quota', ['默认(10GB)', '5 GB', '10 GB', '20 GB', '50 GB', '100 GB', '不限制'],
+            formGroupSelect('用户空间配额', 'user-quota', ['默认(10GB)', '5 GB', '10 GB', '20 GB', '50 GB', '100 GB', '不限制'],
                 isEdit && u.quota_bytes ? _quotaBytesToLabel(u.quota_bytes) : '默认(10GB)') +
             '<div class="form-group form-group--checkbox">' +
             '<input type="checkbox" id="user-is-admin"' + (isEdit && u.is_admin ? ' checked' : '') + '>' +

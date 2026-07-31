@@ -15,7 +15,7 @@
           :disabled="!casesStore.detail || casesStore.transferLoading"
           @click="handleTransfer"
         >
-          {{ casesStore.transferLoading ? '转存中...' : '转存到个人空间' }}
+          {{ casesStore.transferLoading ? '转存中...' : '转存到用户空间' }}
         </button>
       </div>
     </header>

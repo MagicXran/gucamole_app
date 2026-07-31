@@ -26,7 +26,7 @@ GUI RemoteApp 启动不依赖 Worker；Worker 只处理脚本任务、输入快�
 
 当前目标是 **一般访问限制**：
 
-- 普通用户正常使用时只通过个人文件空间读写业务文件；RDPDR 内部共享名固定为 `UserFiles`。
+- 普通用户正常使用时只通过用户空间读写业务文件；当前定制 guacd 的 RDPDR 共享名固定为“用户空间”。
 - 普通业务连接只发布指定 RemoteApp。
 - 完整桌面和管理工具进入管理员连接域。
 - 关闭普通业务 RemoteApp 的剪贴板、浏览器上传/下载、打印和麦克风等旁路通道。
@@ -83,8 +83,8 @@ flowchart LR
     Guacd --> WindowsHost["Windows Server\nRDP / RemoteApp"]
     Guacd --> Drive
     Nginx -. "只读 X-Accel 下载" .-> Drive
-    Drive --> UserFiles["Windows 会话中的\n\\\\tsclient\\UserFiles（内部名）"]
-    WindowsHost --> UserFiles
+    Drive --> UserSpace["Windows 会话中的\n\\\\tsclient\\用户空间"]
+    WindowsHost --> UserSpace
     Worker["Windows Worker\n可选脚本任务"] --> Portal
 ```
 
@@ -320,20 +320,20 @@ Portal 用户 2 → /drive/portal_u2
 Portal 用户 3 → /drive/portal_u3
 ```
 
-guacd 只把当前 Portal 用户的目录映射给本次连接。Windows 侧统一使用 ASCII 共享名：
+guacd 只把当前 Portal 用户的目录映射给本次连接。Windows 侧统一使用中文共享名：
 
 ```text
-\\tsclient\UserFiles
+\\tsclient\用户空间
 ```
 
 不同 Portal 用户虽然看到相同共享名，但各自会话背后仍分别对应 `/drive/portal_u{user_id}`，不会因此合并目录。
 
-Guacamole 1.6.0 的 RDPDR 设备声明会按 Unicode 字符数截取 UTF-8 字节；中文 `drive-name` 会被截断并产生乱码，完整中文 UNC 也无法访问。因此 `backend/router.py` 会把协议标签约束为 ASCII：`client-name` 默认 `Workspace`，`drive-name` 默认 `UserFiles`，非法配置分别回退到这两个中性名称。Windows 仍可能组合显示“Workspace 上的 UserFiles”，但不再暴露 Guacamole/GuacDrive 标识。
+官方 Guacamole 1.6.0 的 RDPDR 设备声明曾按 Unicode 字符数计算 UTF-8 字节长度，直接写入中文会截断。当前部署使用 `nercar-portal-guacd:1.6.0-user-space`，只把该调用修正为按实际字节长度写入；`client-name` 和 `drive-name` 默认均为“用户空间”。若回退到未打补丁的官方 guacd 镜像，必须恢复 ASCII 名称，不能混用。
 
 ### 8.2 RemoteApp 默认工作目录
 
-- 新建应用把 `remote_app_dir` 留空，由 `backend/router.py` 统一展开为 `\\tsclient\UserFiles`。
-- 历史固定值 `\\tsclient\GuacDrive`、`\\tsclient\用户数据目录` 和当前 `\\tsclient\UserFiles` 都按自动工作目录处理；显式配置的应用专用目录继续保留。
+- 新建应用把 `remote_app_dir` 留空，由 `backend/router.py` 统一展开为 `\\tsclient\用户空间`。
+- 历史固定值 `\\tsclient\GuacDrive`、`\\tsclient\用户数据目录`、`\\tsclient\UserFiles` 和当前 `\\tsclient\用户空间` 都按自动工作目录处理；显式配置的应用专用目录继续保留。
 - 每个 Portal 用户的 guacd `drive-path` 仍固定指向各自 `/drive/portal_u{user_id}`，隔离依据是底层路径而不是共享名。
 - Guacamole 的 `remote-app-dir` 只定义 RemoteApp 进程的启动工作目录。第三方软件可以忽略当前目录，Windows/应用自己的“打开/另存为”对话框也可能记忆其他位置；需要强制文件对话框或打开特定文件时，应使用应用参数或受控 Launcher，而不是把 `remote-app-dir` 当成硬限制。
 
@@ -346,7 +346,7 @@ Guacamole 1.6.0 的 RDPDR 设备声明会按 Unicode 字符数截取 UTF-8 字�
 | 文件 API | `_safe_resolve()`、路径规范化、Windows 文件名校验 | 阻止 `..`、绝对路径和越出个人目录 | 仅保护 Portal API |
 | 存储目录 | `/drive/portal_u{user_id}` | 每个 Portal 用户独立目录 | 保护 Linux/Portal 侧路径 |
 | Guacamole token | 每用户连接集合和 token | 防止拿到未授权连接 | 否 |
-| RDPDR | per-user `drive-path` + `client-name=Workspace` + `drive-name=UserFiles` | 只映射当前用户目录，避免多字节共享名和技术品牌暴露 | 否 |
+| RDPDR | per-user `drive-path` + `client-name=用户空间` + `drive-name=用户空间` | 只映射当前用户目录；guacd 使用固定字节长度补丁支持中文共享名 | 否 |
 | 通道控制 | 禁剪贴板、浏览器传输、打印、音频输入 | 减少文件旁路和数据通道 | 否 |
 | Windows 入口限制 | NoDrives、NoViewOnDrive、禁 Run/控制面板/任务管理器等 | 阻止常规 UI 入口 | 否 |
 | Windows 身份 | 标准账号、管理员账号分域 | 限制系统权限 | 共享账号时不是租户隔离 |
@@ -402,7 +402,7 @@ VSCode 当前生成的核心参数类似：
 --extensions-dir="C:\PortalExtensions\{user_id}"
 --disable-gpu
 --disable-workspace-trust
-"\\tsclient\UserFiles"
+"\\tsclient\用户空间"
 ```
 
 Windows 主机还要为对应 Portal 用户写入：
@@ -418,7 +418,7 @@ Windows 主机还要为对应 Portal 用户写入：
 
 ### 8.5 会话级友好名称 PoC
 
-协议层保持稳定的 `Workspace/UserFiles` ASCII 名称。为了验证用户看到“`{用户名}的文件空间`”的展示效果，仓库提供独立 PoC：
+协议层与 Windows 入口都使用“用户空间”。仓库提供独立 PoC，用于在会话目录创建同名快捷入口：
 
 ```powershell
 # Windows 管理员先迁移共享账号的 Known Folder、MountPoints2 和 Quick Access 旧状态
@@ -431,7 +431,7 @@ powershell -File scripts\windows\set-portal-session-filespace-entry.ps1 `
   -PortalSessionId PORTAL_SESSION_UUID
 ```
 
-迁移脚本将 restricted Windows 账号的 Desktop/Documents/Downloads 从历史 `\\tsclient\GuacDrive` 改为 `\\tsclient\UserFiles`，精确移除旧 MountPoints2，并重置 File Explorer Quick Access 缓存；该缓存重置会清除该账号其他快速访问记录，但不会删除业务文件，已有活动会话必须注销后重新进入。PoC 随后在按 Windows Session ID 和 Portal Session UUID 分隔的目录内创建“`{用户名}的文件空间.lnk`”。模块在创建和删除前会重新校验固定 UNC、会话目录、GUID、文件名与重解析点，删除时若目录存在非入口文件会停止。它只解决展示和并发命名冲突，不创建新的 Windows SID，也不是通用 Launcher 或文件硬隔离。真实目标软件的文件对话框、同账号并发和断线清理仍必须在 Windows RemoteApp 中验收。
+迁移脚本将 restricted Windows 账号的 Desktop/Documents/Downloads 从历史 UNC 改为 `\\tsclient\用户空间`，精确移除旧 MountPoints2 和 Quick Access 缓存；该缓存重置会清除该账号其他快速访问记录，但不会删除业务文件，已有活动会话必须注销后重新进入。PoC 随后按 Windows Session ID 和 Portal Session UUID 分隔目录，创建固定名称“用户空间.lnk”，metadata 另存 owner_name。它不是 Windows SID 隔离或通用 Launcher；第三方自定义文件选择器仍需单独验收。
 
 ## 10. 当前 Windows Server 试点配置
 
@@ -505,7 +505,7 @@ fDisableCdm=0
 - 禁用 Run、控制面板、任务管理器、注册表工具等常规入口。
 - 限制网络驱动器映射入口。
 - `GuacRemoteApp` 禁用 cmd；`GuacVscode` 保留受控终端能力。
-- Desktop、Documents、Downloads 指向或限制到当前会话 `\\tsclient\UserFiles` 的正常工作流。
+- Desktop、Documents、Downloads 指向或限制到当前会话 `\\tsclient\用户空间` 的正常工作流。
 - 保护关键策略注册表键，普通账号只能读取。
 
 这些策略主要控制 Explorer 和公共 UI，不替代 NTFS ACL。
@@ -632,7 +632,7 @@ GuacDrive Restricted Profile Cleanup
 - 记事本和计算器 RemoteApp 正常。
 - 个人文件空间中的文件可以打开、修改和保存。
 - Portal 用户 A/B 的个人文件空间内容互不可见。
-- 真实浏览器中的记事本“另存为”已验证协议内部名切换为 `UserFiles`；执行 Windows shell-state 迁移并建立新会话后，不再显示 `Guacamole RDP` 或 `GuacDrive`。
+- 真实浏览器中的记事本“另存为”已验证定制 guacd 能完整传输中文 RDPDR 名称；执行 Windows shell-state 迁移并建立新会话后，入口显示“用户空间”，不再显示 `Workspace`、`UserFiles`、`Guacamole RDP` 或 `GuacDrive`。
 - VSCode A/B 同时运行，最终命令行使用独立 profile/extensions 路径。
 - AppLocker Enforced 下允许程序正常，`cmd.exe` / `explorer.exe` 被阻止。
 - Windows 试点检查脚本通过，RDS 缺失作为 warning 保留。
@@ -682,7 +682,7 @@ VM 快照
 
 多个 RDS Session ID 可以隔离窗口、桌面和部分进程上下文，但共享账号意味着所有会话仍使用相同 Windows SID/access token。仅依赖以下机制不能满足严格文件隔离：
 
-- `/drive/portal_u{user_id}` 和固定名称 `\\tsclient\UserFiles`；
+- `/drive/portal_u{user_id}` 和固定名称 `\\tsclient\用户空间`；
 - RDP/RAIL/RemoteApp 会话；
 - 隐藏盘符、禁 Explorer、禁 Run；
 - 关闭剪贴板、浏览器上传/下载、打印；
@@ -784,7 +784,7 @@ flowchart LR
 | File Broker | 受信服务 | 按 Portal user capability 读取输入、写入结果 | 未实现 |
 | Per-session overlay | 隔离运行时管理 | 虚拟化 APPDATA、LOCALAPPDATA、TEMP、Recent 等 | 未实现 |
 | Local scratch | Windows 本地 NTFS | 复杂应用高速计算和中间文件 | 需标准化 |
-| 个人文件空间 | guacd/RDPDR，内部共享名 `UserFiles` | 当前用户文件交换和结果入口 | 已存在 |
+| 用户空间 | 定制 guacd/RDPDR，共享名“用户空间” | 当前用户文件交换和结果入口 | 已存在 |
 | AppLocker/Firewall | Windows policy | 程序和网络控制，作为纵深防御 | 部分已存在 |
 
 “当前是否存在”必须保留，避免把目标设计误写成现有能力。
@@ -848,7 +848,7 @@ revoked / expired / failed / cleanup_pending
 | `C:\PortalScratch\{session_id}` | Read/Write | 当前会话计算和中间文件 |
 | 当前 Portal 用户输入 | Broker-controlled Read | 启动前按 manifest staging |
 | 当前 Portal 用户输出 | Broker-controlled Write | 结束时按输出规则同步 |
-| 当前会话 `\\tsclient\UserFiles` | 按应用策略 | 简单应用可直接使用；复杂应用优先 broker staging |
+| 当前会话 `\\tsclient\用户空间` | 按应用策略 | 简单应用可直接使用；复杂应用优先 broker staging |
 | 其他用户 scratch/profile | Deny | 即使共享 SID 也由隔离运行时拒绝 |
 | `C:\Users` 真实共享 profile | 默认 Deny/Redirect | 必需文件重定向到 overlay |
 | 未登记 ProgramData/数据卷 | Deny | 逐应用增加只读或可写能力 |
@@ -909,7 +909,7 @@ File Broker 必须：
 - 保存 manifest、SHA-256、来源、目标、操作人和 session 审计。
 - 输出同步具有幂等键，断线重试不能产生重复或覆盖错误版本。
 
-RemoteApp 直接操作 `\\tsclient\UserFiles` 会绕过 Portal 文件 API 的配额和审计。严格模式下应优先使用 Broker staging；需要直接访问个人文件空间的简单应用必须单独登记并经过隔离运行时验证。
+RemoteApp 直接操作 `\\tsclient\用户空间` 会绕过 Portal 文件 API 的配额和审计。严格模式下应优先使用 Broker staging；需要直接访问用户空间的简单应用必须单独登记并经过隔离运行时验证。
 
 ### 11.10 Local scratch 生命周期
 
@@ -1302,7 +1302,7 @@ database/migrate_dynamic_user_drive_names.sql
 database/migrate_neutral_rdp_labels.sql
 ```
 
-迁移依次建立安全模式、保留历史盘名过渡记录，最后将协议标签收敛为中性 ASCII `Workspace/UserFiles`、清理历史自动工作目录并失效旧 Guacamole token。现有数据库不会自动执行增量迁移；迁移后还要重启 `portal-backend` 并结束旧 Windows 会话。
+迁移依次建立安全模式、保留历史盘名过渡记录，最后将协议标签收敛为“用户空间”、清理历史自动工作目录并失效旧 Guacamole token。中文协议名只与 `nercar-portal-guacd:1.6.0-user-space` 配套；回退官方 guacd 镜像时必须同时恢复 `Workspace/UserFiles`。现有数据库不会自动执行增量迁移；迁移后还要重启 `portal-backend` 并结束旧 Windows 会话。
 
 ## 15. 验证命令
 

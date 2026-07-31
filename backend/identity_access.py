@@ -22,7 +22,7 @@ BASE_MENU_TREE = [
         "key": "my",
         "title": "我的",
         "children": [
-            {"key": "my-workspace", "title": "个人空间", "path": "/my/workspace"},
+            {"key": "my-workspace", "title": "用户空间", "path": "/my/workspace"},
             {"key": "my-tasks", "title": "App任务", "path": "/my/tasks"},
             {"key": "my-bookings", "title": "预约登记", "path": "/my/bookings"},
         ],

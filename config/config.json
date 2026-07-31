@@ -20,10 +20,10 @@
     "internal_url": "http://localhost:8080",
     "external_url": "http://localhost:8080",
     "token_expire_minutes": 480,
-    "client_name": "Workspace",
+    "client_name": "用户空间",
     "drive": {
       "enabled": true,
-      "name": "UserFiles",
+      "name": "用户空间",
       "base_path": "/drive",
       "results_root": "Output",
       "create_path": true,

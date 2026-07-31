@@ -1,7 +1,7 @@
 <template>
   <section class="file-browser">
     <header class="file-browser__toolbar">
-      <nav class="file-browser__breadcrumbs" aria-label="个人空间路径">
+      <nav class="file-browser__breadcrumbs" aria-label="用户空间路径">
         <button type="button" data-testid="breadcrumb-root" @click="$emit('navigate', '')">根目录</button>
         <template v-for="crumb in breadcrumbs" :key="crumb.path">
           <span>/</span>

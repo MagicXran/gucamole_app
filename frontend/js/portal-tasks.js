@@ -205,7 +205,7 @@
             '<div class="modal-overlay" onclick="closePortalModal(event)">' +
             '<div class="modal" onclick="event.stopPropagation()">' +
             '<div class="modal__title">脚本模式 · ' + escapeHtml(appName) + '</div>' +
-            '<div class="modal__subtitle">从“我的空间”里选择入口脚本。系统会自动冻结它所在目录的快照，再提交成平台任务。</div>' +
+            '<div class="modal__subtitle">从“用户空间”里选择入口脚本。系统会自动冻结它所在目录的快照，再提交成平台任务。</div>' +
             '<div class="script-preflight">' +
                 '<div class="script-preflight__summary" id="script-preflight-summary">正在检查节点调度能力...</div>' +
                 '<ul class="script-preflight__reasons" id="script-preflight-reasons"></ul>' +
@@ -359,7 +359,7 @@
                 '<div class="modal-overlay" onclick="closePortalModal(event)">' +
                 '<div class="modal" onclick="event.stopPropagation()">' +
                 '<div class="modal__title">任务结果 · ' + escapeHtml(taskId) + '</div>' +
-                '<div class="modal__subtitle">当前显示的是平台记录到的结果索引。实际文件请结合“我的空间 / Output”使用。</div>' +
+                '<div class="modal__subtitle">当前显示的是平台记录到的结果索引。实际文件请结合“用户空间 / Output”使用。</div>' +
                 '<ul style="padding-left:1.2rem;">' + listHtml + '</ul>' +
                 '<div class="modal__actions"><button type="button" class="btn btn--outline" onclick="closePortalModal()">关闭</button></div>' +
                 '</div></div>';

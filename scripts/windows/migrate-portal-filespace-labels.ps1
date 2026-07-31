@@ -2,11 +2,12 @@
 param(
     [string[]]$Users = @('GuacRemoteApp', 'GuacVscode'),
 
-    [string]$TargetPath = '\\tsclient\UserFiles',
+    [string]$TargetPath = '\\tsclient\用户空间',
 
     [string[]]$LegacyPaths = @(
         '\\tsclient\GuacDrive',
-        '\\tsclient\用户数据目录'
+        '\\tsclient\用户数据目录',
+        '\\tsclient\UserFiles'
     ),
 
     [switch]$PlanOnly
@@ -23,10 +24,13 @@ catch {
 }
 $OutputEncoding = $utf8WithoutBom
 
-$expectedTargetPath = '\\tsclient\UserFiles'
+$expectedTargetPath = '\\tsclient\用户空间'
+$userVisibleName = '用户空间'
+$currentMountPointName = '##tsclient#用户空间'
 $allowedLegacyPaths = @(
     '\\tsclient\GuacDrive',
-    '\\tsclient\用户数据目录'
+    '\\tsclient\用户数据目录',
+    '\\tsclient\UserFiles'
 )
 $quickAccessAppId = 'f01b4d95cf55d32a'
 $userShellFolderNames = @(
@@ -189,6 +193,46 @@ function Remove-LegacyMountPoints {
     return @($removed)
 }
 
+function Set-CurrentMountPointLabel {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$HiveName
+    )
+
+    $mountPoints = "Registry::HKEY_USERS\$HiveName\Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2"
+    $currentMountPoint = Join-Path $mountPoints $currentMountPointName
+    if (-not (Test-Path -LiteralPath $mountPoints)) {
+        New-Item -Path $mountPoints -Force | Out-Null
+    }
+    if (-not (Test-Path -LiteralPath $currentMountPoint)) {
+        New-Item -Path $currentMountPoint -Force | Out-Null
+    }
+
+    $mountPointProperties = Get-ItemProperty -LiteralPath $currentMountPoint
+    $labelProperty = $mountPointProperties.PSObject.Properties |
+        Where-Object { $_.Name -eq '_LabelFromReg' } |
+        Select-Object -First 1
+    $currentLabel = if ($labelProperty) { [string]$labelProperty.Value } else { '' }
+    $normalizedCurrentLabel = $currentLabel.Normalize([System.Text.NormalizationForm]::FormC)
+    $normalizedExpectedLabel = $userVisibleName.Normalize([System.Text.NormalizationForm]::FormC)
+    $changed = $normalizedCurrentLabel -cne $normalizedExpectedLabel
+
+    if ($changed) {
+        New-ItemProperty `
+            -LiteralPath $currentMountPoint `
+            -Name '_LabelFromReg' `
+            -Value $userVisibleName `
+            -PropertyType String `
+            -Force | Out-Null
+    }
+    return [ordered]@{
+        registry_path = "$currentMountPointName\_LabelFromReg"
+        previous_label = $currentLabel
+        current_label = $userVisibleName
+        changed = $changed
+    }
+}
+
 function Remove-LegacyRecentState {
     param(
         [Parameter(Mandatory = $true)]
@@ -260,6 +304,8 @@ try {
     $plan = [ordered]@{
         action = if ($PlanOnly) { 'planned' } else { 'migrated' }
         target_path = $expectedTargetPath
+        user_visible_name = $userVisibleName
+        current_mount_point_name = $currentMountPointName
         legacy_paths = @($LegacyPaths)
         users = @($Users)
         quick_access_app_id = $quickAccessAppId
@@ -292,10 +338,13 @@ try {
             $hive = Open-UserRegistryHive -Sid $sid -ProfilePath $profilePath
             $shellFolderChanges = @(Update-UserShellFolders -HiveName $hive.hive_name)
             $mountPointChanges = @(Remove-LegacyMountPoints -HiveName $hive.hive_name)
+            $mountPointLabelResult = Set-CurrentMountPointLabel -HiveName $hive.hive_name
+            $mountPointLabelChangeCount = if ($mountPointLabelResult.changed) { 1 } else { 0 }
             $recentStateChanges = @(Remove-LegacyRecentState -ProfilePath $profilePath)
             $changeCount = (
                 $shellFolderChanges.Count +
                 $mountPointChanges.Count +
+                $mountPointLabelChangeCount +
                 $recentStateChanges.Count
             )
             $hasActiveSession = Test-UserHasSession -Username $username
@@ -307,6 +356,7 @@ try {
                 requires_logoff = ($changeCount -gt 0 -and $hasActiveSession)
                 user_shell_folders = $shellFolderChanges
                 mount_points = $mountPointChanges
+                mount_point_label = $mountPointLabelResult
                 recent_state = $recentStateChanges
             }
         }

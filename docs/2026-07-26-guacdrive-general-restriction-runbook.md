@@ -2,7 +2,7 @@
 
 ## 1. 结论边界
 
-本方案限制普通用户的正常操作和常见绕过路径，使业务文件只通过个人文件空间进出。RDPDR 内部 UNC 固定为 `\\tsclient\UserFiles`；Windows 侧 PoC 可以创建“`{用户名}的文件空间`”入口，但生产 Launcher/Agent 尚未接入该入口。驱动器隐藏和友好命名本身不是安全边界；最终拒绝依赖标准用户权限、NTFS、AppLocker、Firewall 和应用白名单。
+本方案限制普通用户的正常操作和常见绕过路径，使业务文件只通过用户空间进出。当前 `nercar-portal-guacd:1.6.0-user-space` 将 RDPDR 名称固定为“用户空间”，对应 UNC 为 `\\tsclient\用户空间`；Windows 侧 PoC 创建同名入口，但生产 Launcher/Agent 尚未接入该入口。驱动器隐藏和友好命名本身不是安全边界；最终拒绝依赖标准用户权限、NTFS、AppLocker、Firewall 和应用白名单。
 
 ## 2. 实施顺序
 
@@ -13,7 +13,7 @@
 - 已启用 RDP drive redirection 和同账号多会话；记事本、计算器、VSCode 已发布为 RemoteApp。
 - AppLocker 的 EXE/Script/MSI 已从 AuditOnly 切换为 Enforced，DLL 仍保持 AuditOnly；实际负向测试已阻止 `cmd.exe` 和 `explorer.exe`。
 - `security.allowedUNCHosts=["tsclient"]` 已写入 Portal 用户 1、2、3 的独立 VSCode profile，Portal 启动参数加入 `--disable-workspace-trust`。
-- 真实浏览器已验证用户 A/B 同时运行 VSCode，分别使用 `C:\PortalProfiles\2` / `C:\PortalProfiles\3` 与独立 extensions 目录，并只看到各自个人文件空间的内容；文件对话框的中性 `UserFiles` 标签已验证，精确用户名入口仍是独立 PoC。
+- 真实浏览器已验证用户 A/B 同时运行 VSCode，分别使用 `C:\PortalProfiles\2` / `C:\PortalProfiles\3` 与独立 extensions 目录，并只看到各自用户空间的内容；中文 RDPDR 名称由固定 guacd 补丁提供，不改变 `/drive/portal_u{id}` 隔离路径。
 - 未完成项：正式 RDS Session Host/RDS CAL、Defender 恢复、2026-07 累积更新、精确出站 allowlist、真实仿真应用依赖和完整逃逸矩阵。
 - 当前 `TermService` 的 `ServiceDll` 指向 RDP Wrapper。它不是正式 RDS 授权方案，并可能在 Windows 累积更新或 Defender 恢复后失效。
 
@@ -30,8 +30,8 @@
 6. 策略有效后启用并绑定 VSCode。
 7. 修改应用、ACL 或策略后确认 Guacamole token cache 已失效。
 8. 修改 VSCode 启动参数代码后，清空数据库 `token_cache` 并重启 `portal-backend`，同时结束旧 Windows 会话后再验收最终命令行。
-9. 使用匹配的 Guacamole 1.6.0 `guac-web`/`guacd` 镜像重建并重启相关容器，避免前后端协议实现版本漂移。
-10. 确认最终 JSON Auth 参数使用 `client-name=Workspace`、`drive-name=UserFiles`；不得继续出现 `Guacamole RDP` 或 `GuacDrive`。
+9. 使用 Guacamole 1.6.0 `guac-web` 和 `nercar-portal-guacd:1.6.0-user-space` 重建并重启相关容器；构建会校验官方 RDP 库 SHA-256 和补丁位置，任何上游二进制漂移都会失败。
+10. 确认最终 JSON Auth 参数使用 `client-name=用户空间`、`drive-name=用户空间`、`remote-app-dir=\\tsclient\用户空间`；不得继续出现 `Workspace`、`UserFiles`、`Guacamole RDP` 或 `GuacDrive`。
 
 ### 阶段 B：Windows 只读盘点
 
@@ -91,8 +91,8 @@ powershell -File scripts\windows\set-portal-session-filespace-entry.ps1 `
   -PortalSessionId PORTAL_SESSION_UUID
 ```
 
-- 脚本在 Windows Session ID + Portal Session UUID 独立目录内创建“`{用户名}的文件空间.lnk`”。
-- 链接目标固定为 `\\tsclient\UserFiles`，不接受任意本地路径或命令。
+- 脚本在 Windows Session ID + Portal Session UUID 独立目录内创建“用户空间.lnk”，用户名仅保留在 `entry.json` 的 `owner_name`。
+- 链接目标固定为 `\\tsclient\用户空间`，不接受任意本地路径或命令。
 - 该 PoC 只验证名称展示、幂等和并发不覆盖；共享 Windows SID 下它不是文件授权边界。
 - 正式接入必须由后续受控 Launcher/Agent 传入可信 Portal Session ID，不能让最终用户自行伪造启动参数。
 
@@ -100,9 +100,9 @@ powershell -File scripts\windows\set-portal-session-filespace-entry.ps1 `
 
 ### 正向场景
 
-- `\\tsclient\UserFiles` 新建、打开、保存、覆盖、重命名、删除。
-- 文件对话框不再出现 `Guacamole RDP` 或 `GuacDrive`，底层中性条目最多显示为 `Workspace/UserFiles`。
-- PoC 中两个并发会话分别创建“张三的文件空间”和“李四的文件空间”，入口目录不覆盖，均打开各自会话映射的 `\\tsclient\UserFiles`；正式入口仍需 Launcher/Agent 接入后重新验收。
+- `\\tsclient\用户空间` 新建、打开、保存、覆盖、重命名、删除。
+- 文件对话框显示“用户空间”，不再出现 `Workspace`、`UserFiles`、`Guacamole RDP` 或 `GuacDrive`。
+- PoC 中两个并发会话均创建“用户空间.lnk”，但入口目录按 Windows Session ID + Portal Session UUID 隔离，`owner_name` 分别保留“张三”和“李四”，均打开各自会话映射的 `\\tsclient\用户空间`。
 - 大文件读写与断线恢复。
 - 用户 A/B 的 VSCode `--user-data-dir` 和 `--extensions-dir` 不同。
 - VSCode 默认打开当前用户的个人文件空间工作区。
@@ -130,7 +130,7 @@ powershell -File scripts\windows\set-portal-session-filespace-entry.ps1 `
 
 - Portal：按提交或目标文件回滚，不自动整体 hard reset。
 - 数据库：从 `database/migrate_neutral_rdp_labels.sql` 执行前的备份恢复 `remote_app.remote_app_dir`；`token_cache` 不恢复旧 token，恢复前停止 Portal 写入。
-- RDP 标签回滚后必须再次清空 `token_cache`，恢复上一版配置/镜像，依次重启 `guacd`、`guac-web`、`portal-backend`，并结束旧 Windows 会话。
+- RDP 标签回滚后必须再次清空 `token_cache`。若恢复官方 `guacamole/guacd:1.6.0`，必须同时恢复 `client-name=Workspace`、`drive-name=UserFiles` 和 `\\tsclient\UserFiles`，再依次重启 `guacd`、`guac-web`、`portal-backend` 并结束旧 Windows 会话。
 - PoC 回滚只删除对应 `session_{windows_session_id}_{portal_session_id}` 目录，不删除父目录或业务文件。
 - AppLocker：Enforced 回退 Audit。
 - GPO/NTFS/Firewall：只回滚试点 OU 和普通连接域，不影响管理员连接域。

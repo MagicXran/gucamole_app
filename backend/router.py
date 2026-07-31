@@ -36,9 +36,11 @@ _AUTO_REMOTE_APP_DIRS = {
     r"\\tsclient\GuacDrive",
     r"\\tsclient\用户数据目录",
     r"\\tsclient\UserFiles",
+    r"\\tsclient\用户空间",
 }
 _CLIENT_NAME_MAX_LENGTH = 31
 _DRIVE_NAME_MAX_LENGTH = 64
+_USER_SPACE_LABEL = "用户空间"
 
 router = APIRouter(
     prefix=CONFIG["api"]["prefix"],
@@ -72,33 +74,39 @@ def _resolve_transfer_policy(override_value, global_value: bool) -> bool:
     return bool(override_value)
 
 
-def _build_ascii_rdp_label(
+def _build_compatible_rdp_label(
     label: object,
     *,
     fallback: str,
     max_length: int,
 ) -> str:
-    """生成稳定的 ASCII RDP 标签，规避 guacd 多字节截断和协议边界。"""
+    """清理自定义 RDP 标签；固定中文回退值由定制 guacd 提供兼容。"""
     candidate = str(label or fallback).strip()
     safe_name = _RDP_LABEL_BAD_CHARS.sub("_", candidate).strip("._-")
     safe_name = safe_name[:max_length].rstrip("._-")
     return safe_name or fallback
 
 
-def _build_rdp_client_name(client_label: object = "Workspace") -> str:
-    """生成不暴露 Guacamole 品牌且不超过 31 字节的 RDP 客户端名。"""
-    return _build_ascii_rdp_label(
+def _build_rdp_client_name(client_label: object = _USER_SPACE_LABEL) -> str:
+    """生成用户可见 RDP 客户端名，兼容协议长度边界。"""
+    if str(client_label or "").strip() == _USER_SPACE_LABEL:
+        if len(_USER_SPACE_LABEL.encode("utf-8")) <= _CLIENT_NAME_MAX_LENGTH:
+            return _USER_SPACE_LABEL
+    return _build_compatible_rdp_label(
         client_label,
-        fallback="Workspace",
+        fallback=_USER_SPACE_LABEL,
         max_length=_CLIENT_NAME_MAX_LENGTH,
     )
 
 
-def _build_rdp_drive_name(drive_label: object = "UserFiles") -> str:
-    """生成仅含 ASCII 的 RDPDR 共享名，规避 guacd 多字节名称截断。"""
-    return _build_ascii_rdp_label(
+def _build_rdp_drive_name(drive_label: object = _USER_SPACE_LABEL) -> str:
+    """生成用户可见 RDPDR 共享名；中文仅允许固定的兼容标签。"""
+    if str(drive_label or "").strip() == _USER_SPACE_LABEL:
+        if len(_USER_SPACE_LABEL.encode("utf-8")) <= _DRIVE_NAME_MAX_LENGTH:
+            return _USER_SPACE_LABEL
+    return _build_compatible_rdp_label(
         drive_label,
-        fallback="UserFiles",
+        fallback=_USER_SPACE_LABEL,
         max_length=_DRIVE_NAME_MAX_LENGTH,
     )
 
@@ -152,10 +160,10 @@ def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, st
     guacamole_cfg = CONFIG.get("guacamole", {})
     drive_cfg = guacamole_cfg.get("drive", {})
     client_name = _build_rdp_client_name(
-        guacamole_cfg.get("client_name", "Workspace")
+        guacamole_cfg.get("client_name", _USER_SPACE_LABEL)
     )
     drive_enabled = drive_cfg.get("enabled", False)
-    drive_name = _build_rdp_drive_name(drive_cfg.get("name", "UserFiles"))
+    drive_name = _build_rdp_drive_name(drive_cfg.get("name", _USER_SPACE_LABEL))
     drive_base = drive_cfg.get("base_path", "/drive")
     drive_create = drive_cfg.get("create_path", True)
     drive_disable_download = bool(drive_cfg.get("disable_download", False))

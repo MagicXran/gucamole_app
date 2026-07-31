@@ -1,6 +1,6 @@
 # Portal 个人空间管理系统 — 双向传输详解
 
-> 当前状态（2026-07-27）：权威运行逻辑以根目录 `README.md` 和代码为准。RDPDR 使用中性 ASCII `client-name=Workspace`、`drive-name=UserFiles`，底层仍是 `/drive/portal_u{user_id}`；“`{用户名}的文件空间`”由 Windows 会话级友好入口 PoC 展示，不再把中文用户名写入 RDPDR 设备名。本文后续保留个人空间最初设计过程和文件传输原理。
+> 当前状态（2026-07-31）：权威运行逻辑以根目录 `README.md` 和代码为准。RDPDR 使用经固定 guacd 字节长度补丁支持的中文 `client-name=用户空间`、`drive-name=用户空间`，底层仍是 `/drive/portal_u{user_id}`；Windows 会话入口也固定显示“用户空间”。本文后续保留个人空间最初设计过程和文件传输原理。
 
 ## 一句话概括
 
@@ -22,7 +22,7 @@
 │  │                                    │                                   │
 │  │  Volume 挂载: guacd_drive → /drive │        RDP 协议 (RDPDR)          │
 │  │                                    │ ─────────────────────────────→    │
-│  │  /drive/portal_u1/                 │   "我有一块磁盘叫 UserFiles,     │
+│  │  /drive/portal_u1/                 │   "我有一块磁盘叫 用户空间,     │
 │  │  /drive/portal_u2/                 │    内容是 /drive/portal_u1/"      │
 │  │  /drive/portal_u3/                 │                                   │
 │  └────────────────────────────────────┘                                   │
@@ -33,7 +33,7 @@
 │                                           │  "哦，有个远程磁盘"       │    │
 │                                           │                          │    │
 │                                           │  映射为:                  │    │
-│                                           │  \\tsclient\UserFiles\    │    │
+│                                           │  \\tsclient\用户空间\    │    │
 │                                           │                          │    │
 │                                           │  RemoteApp (如 Excel)    │    │
 │                                           │  可以像本地磁盘一样       │    │
@@ -46,25 +46,25 @@
 
 - `guacd` 是 Guacamole 的协议代理，它跟 RDP Server 建立连接
 - FreeRDP（guacd 内置）支持 **Drive Redirection (RDPDR)**，可以把一个本地目录"假装"成一块磁盘
-- RDP Server (Windows) 看到这块"远程磁盘"后，自动映射为 `\\tsclient\UserFiles\`
-- 所以 RemoteApp 中 **文件→另存为→`\\tsclient\UserFiles\report.xlsx`**，实际写入的是 guacd 容器里的 `/drive/portal_u{user_id}/report.xlsx`
+- RDP Server (Windows) 看到这块"远程磁盘"后，自动映射为 `\\tsclient\用户空间\`
+- 所以 RemoteApp 中 **文件→另存为→`\\tsclient\用户空间\report.xlsx`**，实际写入的是 guacd 容器里的 `/drive/portal_u{user_id}/report.xlsx`
 
 ### 1.2 当前的参数传递链
 
 ```
 config.json / env                    router.py                       guacamole_crypto.py
 ─────────────────────────            ─────────                       ────────────────────
-client_name="Workspace"               user_drive_path =               build_rdp_connection(
-drive.enabled=true          →            f"/drive/portal_u{uid}"  →      client_name="Workspace",
-drive.base_path="/drive"               client_name="Workspace"          drive_path=user_drive_path,
-drive.name="UserFiles"                 drive_name="UserFiles"            drive_name="UserFiles",
+client_name="用户空间"               user_drive_path =               build_rdp_connection(
+drive.enabled=true          →            f"/drive/portal_u{uid}"  →      client_name="用户空间",
+drive.base_path="/drive"               client_name="用户空间"          drive_path=user_drive_path,
+drive.name="用户空间"                 drive_name="用户空间"            drive_name="用户空间",
                                                                          enable_drive=True
                                                                      )
                                                                           ↓
                                                                      RDP 参数:
                                                                        enable-drive: true
-                                                                       client-name: Workspace
-                                                                       drive-name: UserFiles
+                                                                       client-name: 用户空间
+                                                                       drive-name: 用户空间
                                                                        drive-path: /drive/portal_u1
                                                                        create-drive-path: true
 ```
@@ -190,10 +190,10 @@ nginx:
         ▼
 ┌── guacd 容器 ───────────────────────────────────────────────────────────┐
 │  FreeRDP Drive Redirection:                                             │
-│  /drive/portal_u{id}/data.zip  →  \\tsclient\UserFiles\data.zip        │
+│  /drive/portal_u{id}/data.zip  →  \\tsclient\用户空间\data.zip        │
 │                                                                         │
 │  RemoteApp 打开资源管理器或 "文件→打开"                                 │
-│  导航到 \\tsclient\UserFiles\ → 看到 data.zip → 可以直接使用            │
+│  导航到 \\tsclient\用户空间\ → 看到 data.zip → 可以直接使用            │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -233,13 +233,13 @@ nginx:
 
 ```
 RemoteApp 中:
-  用户点 "文件→另存为→ \\tsclient\UserFiles\result.xlsx"
+  用户点 "文件→另存为→ \\tsclient\用户空间\result.xlsx"
         │
         │ RDP RDPDR 协议
         ▼
 ┌── guacd 容器 ───────────────────────────────────────────────────────────┐
 │  FreeRDP 将 RDPDR 写操作翻译为本地文件系统写入:                          │
-│  \\tsclient\UserFiles\result.xlsx  →  /drive/portal_u{id}/result.xlsx   │
+│  \\tsclient\用户空间\result.xlsx  →  /drive/portal_u{id}/result.xlsx   │
 │  (对 RDP Server 来说, 这就像写了一块网络磁盘)                            │
 │  (对 guacd 来说, 这就是写了本地 /drive/ 目录下的一个文件)                │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -322,7 +322,7 @@ RemoteApp 中:
 │                                                                          │
 │  RemoteApp 窗口 (about:blank + iframe)                                   │
 │  └── Guacamole 客户端 → WebSocket → guacd → RDP → 远程应用              │
-│       远程应用内: "另存为" → \\tsclient\UserFiles\                       │
+│       远程应用内: "另存为" → \\tsclient\用户空间\                       │
 │                                                                          │
 └──────────────┬────────────────────────────────────────────────────────────┘
                │ HTTP/WebSocket (端口 80/8880)
@@ -363,7 +363,7 @@ RemoteApp 中:
 ┌─ guac-sql ────┐      │  Drive Redirect:  │       │
 │  MySQL 8.0    │      │  /drive/portal_u1  │       │
 │               │      │  → \\tsclient\     │       │
-│  portal_user  │      │    UserFiles\     │       │
+│  portal_user  │      │    用户空间\     │       │
 │  (quota_bytes)│      │                    │       │
 │               │      │  RDP → Windows    │       │
 │  remote_app   │      └────────────────────┘       │
@@ -428,7 +428,7 @@ mount --bind /var/lib/docker/volumes/guacamole_guacd_drive/_data  /容器rootfs/
 
 ### 问题
 
-RemoteApp 内用户可以直接操作 `\\tsclient\UserFiles\`——创建文件、删除文件、复制粘贴——这些操作**完全绕过 Portal API**。如果我们在数据库里维护 `used_bytes` 字段，RemoteApp 端的任何文件操作都不会更新这个字段，数据必然失准。
+RemoteApp 内用户可以直接操作 `\\tsclient\用户空间\`——创建文件、删除文件、复制粘贴——这些操作**完全绕过 Portal API**。如果我们在数据库里维护 `used_bytes` 字段，RemoteApp 端的任何文件操作都不会更新这个字段，数据必然失准。
 
 ### 方案
 
@@ -580,10 +580,10 @@ Portal 首页新增 Tab 切换：**应用** | **我的空间**
 2. 出现进度条，显示百分比 + 速度
 3. 完成后文件出现在列表中
 4. 配额进度条实时更新
-5. 切换到 RemoteApp → `\\tsclient\UserFiles\` 里已经有了
+5. 切换到 RemoteApp → `\\tsclient\用户空间\` 里已经有了
 
 **下载文件**：
-1. 在 RemoteApp 中 "另存为" 到 `\\tsclient\UserFiles\`
+1. 在 RemoteApp 中 "另存为" 到 `\\tsclient\用户空间\`
 2. 回到 Portal "我的空间" Tab
 3. 刷新看到文件（或等 60 秒自动出现）
 4. 点击下载按钮 → 浏览器标准下载，支持暂停/恢复

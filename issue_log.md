@@ -308,3 +308,41 @@
 - 共享 Windows 账号下禁止使用静态 Desktop、Quick Access 或 HKCU 重命名保存每个 Portal 用户名称，否则并发会话会互相覆盖。
 - 在真实 RDS/RemoteApp 与目标第三方软件验证完成前，不能宣称所有文件对话框都只显示“`{用户名}的文件空间`”。
 - 旧版或未提交的 Windows 限制安装脚本如果仍把 Known Folder 写成 `\\tsclient\GuacDrive`，会重新制造缓存项；纳入正式部署前必须同步改为 `UserFiles` 或强制执行迁移脚本。
+
+## ISSUE-010：`Workspace/UserFiles` 仍暴露英文，直接改中文会被 guacd 截断
+
+状态：已修复并完成真实浏览器 RemoteApp 读写验证
+
+发现日期：2026-07-31
+
+### 现象与根因
+
+- ISSUE-009 使用 `Workspace/UserFiles` 避开了技术品牌，但 Windows 文件对话框仍显示英文，不符合最终产品文案“用户空间”。
+- 官方 Guacamole 1.6.0 的 `guac_rdpdr_register_fs()` 使用 `guac_utf8_strlen()` 计算设备名长度，却按该长度直接写 UTF-8 字节；中文字符数小于实际字节数，因此名称会被截断、UNC 也无法访问。
+- 单改 Portal 配置会重现 ISSUE-008；问题在 guacd RDPDR 设备公告，不在 MySQL、JSON Auth、浏览器编码或 Windows 中文支持。
+
+### 解决办法
+
+1. 新增 `deploy/guacd-utf8-rdpdr.Dockerfile` 和 `scripts/patch-guacd-rdpdr-drive-name.py`，只把固定 Guacamole 1.6.0 RDP 库中该调用改为按字节计数。
+2. 构建先校验官方库 SHA-256 `00e12f...e729`、固定补丁偏移和原始调用字节；上游二进制变化、未知字节或重复补丁都会立即失败。
+3. 定制镜像固定为 `nercar-portal-guacd:1.6.0-user-space`。Portal 的 `client-name`、`drive-name` 和自动 `remote-app-dir` 统一为“用户空间” / `\\tsclient\用户空间`。
+4. `/drive/portal_u{user_id}`、token 复用、ACL、配额、文件 API 和 Nginx 下载路径不变；中文名称只改变 RDPDR 协议显示和 UNC 名称。
+5. Portal/Vue/旧静态页面、Windows 会话入口、迁移脚本和管理员提示同步使用“用户空间”；旧 `Workspace/UserFiles` 继续作为迁移兼容值。
+
+### 验证证据
+
+- Python 全量回归：排除仓库已知不规范的 `tests/test_file_router.py` 后 `136 passed`。
+- Vue：`108 passed`，typecheck 和生产 build 通过；旧静态 Portal Node 测试串行 `78 passed`，viewer bundle 重建 `1 passed`。
+- guacd 无缓存构建成功，补丁后库 SHA-256 为 `0b5ac5...cd3e`；`nercar-portal` 的 guacd、backend、Nginx、MySQL 均健康，`/health/ready` 返回 ready。
+- 实时连接参数确认用户 1/2 均为 `client-name=用户空间`、`drive-name=用户空间`，底层分别保持 `/drive/portal_u1` 和 `/drive/portal_u2`。
+- 真实 Chromium 登录 Portal 后，页面和导航显示“用户空间”；启动 Windows Server 2019 记事本 RemoteApp，“另存为”显示 `此电脑 > 用户空间` 并可枚举目录。
+- 在该对话框保存 `user-space-live-smoke.txt` 后，Portal 容器确认文件落到 `/drive/portal_u1`；验证后已删除测试文件。
+
+### 防止重复犯错与回滚
+
+- 中文协议名只允许与 `nercar-portal-guacd:1.6.0-user-space` 配套。回退官方 `guacamole/guacd:1.6.0` 时，必须同时恢复 `Workspace/UserFiles/\\tsclient\UserFiles`，清空 token cache，并结束旧 Windows 会话。
+- 升级 Guacamole/guacd 时不得直接搬用二进制偏移；先核对上游源码是否已修复，再重新验证库哈希、反汇编调用、中文 UNC 读写和两用户目录隔离。
+- 当前库哈希和偏移针对本次 Docker 平台的 Guacamole 1.6.0 amd64 二进制；切换 ARM 或其他架构会被构建校验阻止，需要单独生成并审查补丁。
+- 重建 `portal-backend` 后若 Nginx 返回 502，应重启 `nercar-portal-nginx-1` 刷新启动时解析的 upstream 地址，不能把健康 backend 误判为启动失败。
+- 本次 Docker 构建中的 `npm ci` 仍报告 9 个依赖漏洞（8 high、1 critical），与本次名称改动无关，需单独依赖审计，不能在本任务中盲目执行 `npm audit fix`。
+- Windows 试点首次复制脚本时发现 PowerShell 5.1 会按 ANSI 解析无 BOM 的 UTF-8 中文，表现为 `LegacyPaths` 语法解析错误；已将三个含中文的 `.ps1/.psm1` 改为 UTF-8 BOM，并加入编码回归测试。修复后远程 `PlanOnly` 正确返回中文，正式迁移和重复迁移均为 `unchanged`，`##tsclient#用户空间\_LabelFromReg=用户空间`、`requires_logoff=false`。

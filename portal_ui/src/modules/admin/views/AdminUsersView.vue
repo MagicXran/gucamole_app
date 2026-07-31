@@ -17,7 +17,7 @@
           <th>用户名</th>
           <th>显示名称</th>
           <th>角色</th>
-          <th>个人空间</th>
+          <th>用户空间</th>
           <th>状态</th>
           <th>操作</th>
         </tr>
@@ -56,7 +56,7 @@
           <label><span>{{ dialogMode === 'edit' ? '新密码（留空不改）' : '密码' }}</span><input v-model="form.password" type="password" autocomplete="new-password" data-testid="admin-user-password"></label>
           <label><span>显示名称</span><input v-model="form.display_name" data-testid="admin-user-display"></label>
           <label>
-            <span>个人空间配额</span>
+            <span>用户空间配额</span>
             <select v-model="form.quotaLabel" data-testid="admin-user-quota">
               <option v-for="option in quotaOptions" :key="option" :value="option">{{ option }}</option>
             </select>

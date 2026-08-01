@@ -45,3 +45,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: FreeCAD 固定用户空间入口试点
+
+**Date**: 2026-08-02
+**Task**: FreeCAD 固定用户空间入口试点
+**Branch**: `main`
+
+### Summary
+
+部署 portal-freecad 原生 Launcher，将 FreeCAD 打开/保存默认固定到用户空间 U:；修复部分部署幂等误判，完成真实保存、双用户隔离、回滚与全量回归。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `31d36a6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

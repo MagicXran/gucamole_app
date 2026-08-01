@@ -18,7 +18,9 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [],
+  "children": [
+    "08-01-freecad-fixed-user-space-entry"
+  ],
   "parent": "07-25-guacdrive-access-isolation",
   "relatedFiles": [],
   "notes": "",

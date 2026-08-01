@@ -247,6 +247,26 @@ def test_remoteapp_preserves_explicit_application_directory():
     assert params["remote-app-dir"] == r"C:\ApprovedWorkspace"
 
 
+def test_freecad_launcher_alias_keeps_per_user_drive_contract():
+    router_module = _load_router_module(
+        0,
+        0,
+        row_overrides={
+            "security_mode": "restricted_remoteapp",
+            "remote_app": "||portal-freecad",
+            "remote_app_dir": "",
+            "remote_app_args": "",
+        },
+    )
+
+    params = router_module._build_all_connections(7)["app_1"]["parameters"]
+
+    assert params["remote-app"] == "||portal-freecad"
+    assert params["remote-app-dir"] == r"\\tsclient\用户空间"
+    assert "remote-app-args" not in params
+    assert params["drive-path"] == "/drive/portal_u7"
+
+
 def test_restricted_vscode_expands_user_paths_and_uses_profile_channels():
     router_module = _load_router_module(
         1,

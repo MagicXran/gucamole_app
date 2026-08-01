@@ -346,3 +346,49 @@
 - 重建 `portal-backend` 后若 Nginx 返回 502，应重启 `nercar-portal-nginx-1` 刷新启动时解析的 upstream 地址，不能把健康 backend 误判为启动失败。
 - 本次 Docker 构建中的 `npm ci` 仍报告 9 个依赖漏洞（8 high、1 critical），与本次名称改动无关，需单独依赖审计，不能在本任务中盲目执行 `npm audit fix`。
 - Windows 试点首次复制脚本时发现 PowerShell 5.1 会按 ANSI 解析无 BOM 的 UTF-8 中文，表现为 `LegacyPaths` 语法解析错误；已将三个含中文的 `.ps1/.psm1` 改为 UTF-8 BOM，并加入编码回归测试。修复后远程 `PlanOnly` 正确返回中文，正式迁移和重复迁移均为 `unchanged`，`##tsclient#用户空间\_LabelFromReg=用户空间`、`requires_logoff=false`。
+
+## ISSUE-011：FreeCAD 仍显示乱码组合设备名，且安装器误判部分部署为幂等
+
+状态：方案 2 已完成试点部署、真实打开/保存和双用户目录验证
+
+发现日期：2026-08-01
+
+### 现象
+
+- FreeCAD 文件对话框中的 Windows 原始设备项显示为“乱码 client-name 上的 用户空间”；后半段 `drive-name` 已正确，前半段来自 RDP client-name 的错误解码。
+- 给 Xran 写入 MountPoints2 `_LabelFromReg=用户空间` 并重建会话后，原始组合标题仍不变。
+- FreeCAD 会忽略 `remote-app-dir`，并把打开/保存目录记忆为 `C:/Users/Xran`，因此仅改 Portal 工作目录不能形成稳定业务入口。
+
+### 已排除并回滚的试点
+
+- `.lnk` 入口最终仍解析到原生 RDPDR 组合标题，不能替代 FreeCAD 自己的文件对话框目录。
+- 本地符号链接需要提升权限；HKCU `Run` 不在当前 RemoteApp 登录链执行；FreeCAD 用户模块也没有在现有发布方式下加载。
+- 上述临时脚本、映射和会话配置均已撤销，没有改动原 `freecad` alias。
+
+### 解决办法
+
+1. 新增原生 `PortalFreeCADLauncher.exe`，固定等待 `\\tsclient\用户空间`，映射为 `U:`，设置 FreeCAD `FileOpenSavePath=U:/`，再从 `U:\` 启动 FreeCAD；不再写入已证明无效的 MountPoints2 `_LabelFromReg`。
+2. Launcher 不接受外部参数；若 `U:` 已指向其他目标则 fail closed，只清理自己创建的映射，并记录不含凭据的本地阶段日志。
+3. 新增管理员安装器，发布独立 `portal-freecad` RemoteApp alias，原 `freecad` 保持不变；app6 只切换为 `||portal-freecad`，per-user `drive-path`、ACL、资源池和 RDP 凭据不变。
+4. 安装器支持 PlanOnly、备份、重复安装和安全移除；alias 的 Path/VPath/Name/图标/命令行策略全部精确校验，未知配置拒绝覆盖。
+
+### 调试中发现的第二根因
+
+- 一次管理员部署在复制新 C# 源码后、替换 EXE 前失败，留下“源码已更新、EXE 仍为旧版”的中间状态。
+- 旧幂等判断只比较部署源码与仓库源码，因此后续错误返回 `changed=false`；运行日志没有新版本应出现的 `stage=freecad_path_set`，真实文件对话框仍落在 Xran 主目录。
+- 安装器现先把仓库源码编译为临时 EXE，再修改部署文件；manifest 同时保存源码和 EXE SHA-256。重复安装会核对部署源码、EXE、manifest 和完整 alias，任何部分部署都会重新安装。
+- 安全移除先完成完整性检查，再删除 alias、源码、EXE、旧 PowerShell Launcher 和 manifest，避免先删注册表后报错的半移除。
+
+### 验证证据
+
+- 聚焦回归覆盖 C# 编译、PowerShell 解析、PlanOnly、部分部署识别、alias 属性、映射冲突和连接参数。
+- 管理员 `-Remove` 已实际删除受管 alias、源码、EXE 和 manifest；最终版本重新安装生成备份 `C:\ProgramData\NercarPortal\backups\20260801-235255`，第二次部署 EXE hash 保持 `E664B5C1...CF95853` 且不创建新备份。
+- 把 FreeCAD 配置明确重置为 `C:/Users/Xran` 后重新从 Portal 启动，日志出现 `mapped`、`freecad_path_set=U:/`、`child_started`；打开对话框显示 `此电脑 > 用户空间 (U:)`。
+- 真实新建空 FreeCAD 文档并另存为 `portal-launcher-save-test.FCStd`，Portal 容器确认文件只落到 `/drive/portal_u1`，大小 1831 字节，验证后已删除。
+- 临时恢复并随后还原 test 用户原密码哈希后，第二用户 FreeCAD 对话框只显示 `/drive/portal_u2` 内容和 `portal-u2-isolation-proof.txt`，不出现用户 1 标记；测试标记和会话均已清理。
+
+### 边界与回滚
+
+- 原生乱码 RDPDR 设备项仍可能在“此电脑”深层可见；固定 `U:` 是 FreeCAD 正常入口，不是系统级隐藏、独立 Windows SID 或硬多租户隔离。
+- 回滚时先停止 app6 新会话并注销 Xran，恢复 app6 `remote_app=||freecad` 和原工作目录，清空 token cache，再以管理员运行安装器 `-Remove`。原 `freecad` alias 和备份目录始终保留。
+- 不要再用 `_LabelFromReg`、`remote-app-dir` 或仅比较源码哈希来推断 FreeCAD 入口已生效；必须同时检查 Launcher 日志、实际 EXE hash、真实打开/保存对话框和 `/drive/portal_u{id}` 落盘。

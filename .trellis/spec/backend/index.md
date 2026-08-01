@@ -20,6 +20,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
 | [VSCode Control Policy](./vscode-control-policy.md) | Security modes, policy API, validation, launch contract | Active |
+| [Windows RemoteApp Launchers](./windows-remoteapp-launchers.md) | Native launcher, RDS alias, deployment integrity, and runtime mapping contract | Active |
 
 ---
 

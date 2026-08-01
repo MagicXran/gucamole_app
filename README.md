@@ -337,7 +337,28 @@ guacd 只把当前 Portal 用户的目录映射给本次连接。Windows 侧统�
 - 每个 Portal 用户的 guacd `drive-path` 仍固定指向各自 `/drive/portal_u{user_id}`，隔离依据是底层路径而不是共享名。
 - Guacamole 的 `remote-app-dir` 只定义 RemoteApp 进程的启动工作目录。第三方软件可以忽略当前目录，Windows/应用自己的“打开/另存为”对话框也可能记忆其他位置；需要强制文件对话框或打开特定文件时，应使用应用参数或受控 Launcher，而不是把 `remote-app-dir` 当成硬限制。
 
-### 8.3 隔离层次
+### 8.3 FreeCAD 固定用户空间 Launcher
+
+FreeCAD 1.1 会忽略单纯的 `remote-app-dir`，并记忆自己的文件对话框目录。app6 因此不再直接发布 `||freecad`，而是使用独立 alias `||portal-freecad`：
+
+```text
+Portal app6
+  -> ||portal-freecad
+  -> C:\ProgramData\NercarPortal\PortalFreeCADLauncher.exe
+  -> 等待 \\tsclient\用户空间
+  -> 映射 U: -> \\tsclient\用户空间
+  -> 把 FreeCAD FileOpenSavePath 设置为 U:/
+  -> 从 U:\ 启动 FreeCAD
+  -> FreeCAD 退出后只清理本 Launcher 创建的映射
+```
+
+Launcher 是固定参数的 C# 原生程序，不接受外部命令行。若 `U:` 已指向其他目标、RDPDR 目录未出现、FreeCAD/FreeCADCmd 缺失或映射失败，会停止启动并写入 `%LOCALAPPDATA%\NercarPortal\portal-freecad-launcher.log`。每个 RDP 会话中的 `\\tsclient\用户空间` 仍来自当前 Portal 用户的 `/drive/portal_u{user_id}`；`U:` 只是正常工作流入口，不是新的授权边界。
+
+管理员安装器位于 `scripts/windows/install-portal-freecad-launcher.ps1`，支持 `-PlanOnly`、安装和 `-Remove`。它不会修改原 `freecad` alias；安装前备份现有文件和注册表，校验 alias 全部属性、部署源码/EXE 哈希与 manifest，源码已更新但 EXE 未替换的中间状态也会被识别并重建。未知同名 alias、被修改或不完整的部署在覆盖/移除前直接停止。
+
+真实 Windows Server 2019 + Chromium 验收确认：FreeCAD 的打开和保存对话框默认进入 `此电脑 > 用户空间 (U:)`，保存的 `.FCStd` 落到 `/drive/portal_u1`；第二个 Portal 用户只看到 `/drive/portal_u2` 的测试标记。Windows 原始 RDPDR 组合设备项仍可能显示乱码前缀并在左侧深层可见，本方案不宣称系统级隐藏它。
+
+### 8.4 隔离层次
 
 | 层次 | 技术手段 | 当前作用 | 是否构成 Windows 硬隔离 |
 |---|---|---|---|
@@ -355,7 +376,7 @@ guacd 只把当前 Portal 用户的目录映射给本次连接。Windows 侧统�
 | Firewall | SMB/WebDAV/非必要出口限制 | 阻止网络共享和外部通道 | 网络边界 |
 | 会话清理 | Scheduled Task 清理 Temp/Recent/缓存 | 减少共享账号残留 | 事后清理，不是实时授权 |
 
-### 8.4 Portal API 隔离和 Windows 会话隔离不是一回事
+### 8.5 Portal API 隔离和 Windows 会话隔离不是一回事
 
 Portal 文件 API 会把所有路径限制在当前用户目录内，这个边界只对：
 
@@ -416,7 +437,7 @@ Windows 主机还要为对应 Portal 用户写入：
 
 否则 VSCode 会因为 UNC host 或 Workspace Trust 提示阻断正常启动。
 
-### 8.5 会话级友好名称 PoC
+### 8.6 会话级友好名称 PoC
 
 协议层与 Windows 入口都使用“用户空间”。仓库提供独立 PoC，用于在会话目录创建同名快捷入口：
 

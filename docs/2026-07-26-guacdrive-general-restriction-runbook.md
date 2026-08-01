@@ -2,7 +2,7 @@
 
 ## 1. 结论边界
 
-本方案限制普通用户的正常操作和常见绕过路径，使业务文件只通过用户空间进出。当前 `nercar-portal-guacd:1.6.0-user-space` 将 RDPDR 名称固定为“用户空间”，对应 UNC 为 `\\tsclient\用户空间`；Windows 侧 PoC 创建同名入口，但生产 Launcher/Agent 尚未接入该入口。驱动器隐藏和友好命名本身不是安全边界；最终拒绝依赖标准用户权限、NTFS、AppLocker、Firewall 和应用白名单。
+本方案限制普通用户的正常操作和常见绕过路径，使业务文件只通过用户空间进出。当前 `nercar-portal-guacd:1.6.0-user-space` 将 RDPDR 名称固定为“用户空间”，对应 UNC 为 `\\tsclient\用户空间`；Windows 侧 PoC 创建同名入口，app6/FreeCAD 已接入独立 `portal-freecad` Launcher，其他应用的通用 Launcher/Agent 尚未完成。驱动器隐藏和友好命名本身不是安全边界；最终拒绝依赖标准用户权限、NTFS、AppLocker、Firewall 和应用白名单。
 
 ## 2. 实施顺序
 
@@ -14,6 +14,7 @@
 - AppLocker 的 EXE/Script/MSI 已从 AuditOnly 切换为 Enforced，DLL 仍保持 AuditOnly；实际负向测试已阻止 `cmd.exe` 和 `explorer.exe`。
 - `security.allowedUNCHosts=["tsclient"]` 已写入 Portal 用户 1、2、3 的独立 VSCode profile，Portal 启动参数加入 `--disable-workspace-trust`。
 - 真实浏览器已验证用户 A/B 同时运行 VSCode，分别使用 `C:\PortalProfiles\2` / `C:\PortalProfiles\3` 与独立 extensions 目录，并只看到各自用户空间的内容；中文 RDPDR 名称由固定 guacd 补丁提供，不改变 `/drive/portal_u{id}` 隔离路径。
+- 2026-08-01 已为 app6/FreeCAD 部署 `PortalFreeCADLauncher.exe`：会话内映射固定 `用户空间 (U:)`，FreeCAD 打开/保存默认进入 U:；真实保存和 Portal 用户 1/2 目录隔离已验证。原生乱码 RDPDR 组合设备项仍可能深层可见。
 - 未完成项：正式 RDS Session Host/RDS CAL、Defender 恢复、2026-07 累积更新、精确出站 allowlist、真实仿真应用依赖和完整逃逸矩阵。
 - 当前 `TermService` 的 `ServiceDll` 指向 RDP Wrapper。它不是正式 RDS 授权方案，并可能在 Windows 累积更新或 Defender 恢复后失效。
 
@@ -96,6 +97,14 @@ powershell -File scripts\windows\set-portal-session-filespace-entry.ps1 `
 - 该 PoC 只验证名称展示、幂等和并发不覆盖；共享 Windows SID 下它不是文件授权边界。
 - 正式接入必须由后续受控 Launcher/Agent 传入可信 Portal Session ID，不能让最终用户自行伪造启动参数。
 
+### 阶段 G：FreeCAD 固定入口试点
+
+1. 先运行 `powershell -File scripts\windows\install-portal-freecad-launcher.ps1 -PlanOnly` 检查固定 alias、目标路径和现有部署状态。
+2. 结束 Xran/FreeCAD 旧会话后，以管理员权限运行安装器；确认 `portal-freecad` 精确指向 `C:\ProgramData\NercarPortal\PortalFreeCADLauncher.exe`，原 `freecad` alias 不变。
+3. 备份 app6 数据库行，仅把 `remote_app` 切换为 `||portal-freecad`，`remote_app_dir` 保持空值；清空 token cache 并注销旧会话。
+4. Launcher 固定映射 `U:` 到 `\\tsclient\用户空间`，设置 FreeCAD `FileOpenSavePath=U:/`。若 U: 已被其他目标占用、目标 UNC 不存在或部署完整性异常，停止启动而不是覆盖未知状态。
+5. 原始 RDPDR 组合项仍可能显示乱码前缀；验收对象是 FreeCAD 正常打开/保存流程中的 `用户空间 (U:)`，不能把本试点描述为系统级隐藏或 Windows 授权隔离。
+
 ## 3. 验收矩阵
 
 ### 正向场景
@@ -109,6 +118,7 @@ powershell -File scripts\windows\set-portal-session-filespace-entry.ps1 `
 - 允许的终端、Tasks、Run、Build、Debug、Git、包管理和扩展正常。
 - 管理员桌面仍通过独立账号和资源域可用。
 - AppLocker Enforced 下允许的记事本、计算器和 VSCode 仍能启动。
+- FreeCAD 打开/另存为默认进入 `此电脑 > 用户空间 (U:)`，保存 `.FCStd` 后只落到当前 Portal 用户的 `/drive/portal_u{id}`。
 
 ### 阻断场景
 
@@ -132,6 +142,7 @@ powershell -File scripts\windows\set-portal-session-filespace-entry.ps1 `
 - 数据库：从 `database/migrate_neutral_rdp_labels.sql` 执行前的备份恢复 `remote_app.remote_app_dir`；`token_cache` 不恢复旧 token，恢复前停止 Portal 写入。
 - RDP 标签回滚后必须再次清空 `token_cache`。若恢复官方 `guacamole/guacd:1.6.0`，必须同时恢复 `client-name=Workspace`、`drive-name=UserFiles` 和 `\\tsclient\UserFiles`，再依次重启 `guacd`、`guac-web`、`portal-backend` 并结束旧 Windows 会话。
 - PoC 回滚只删除对应 `session_{windows_session_id}_{portal_session_id}` 目录，不删除父目录或业务文件。
+- FreeCAD 回滚：停止 app6 新会话并注销 Xran，恢复 app6 `remote_app=||freecad`，清空 token cache，再以管理员运行 `install-portal-freecad-launcher.ps1 -Remove`；保留原 `freecad` alias、安装备份和 Launcher 日志。
 - AppLocker：Enforced 回退 Audit。
 - GPO/NTFS/Firewall：只回滚试点 OU 和普通连接域，不影响管理员连接域。
 - 保留带外管理员通道，避免策略错误把管理员锁在主机外。

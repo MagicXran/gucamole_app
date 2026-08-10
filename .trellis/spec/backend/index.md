@@ -21,6 +21,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
 | [VSCode Control Policy](./vscode-control-policy.md) | Security modes, policy API, validation, launch contract | Active |
 | [Windows RemoteApp Launchers](./windows-remoteapp-launchers.md) | Native launcher, RDS alias, deployment integrity, and runtime mapping contract | Active |
+| [RDP Labels](./rdp-labels.md) | Global client/share names, normalization, cache invalidation, and native Windows display contract | Active |
 
 ---
 

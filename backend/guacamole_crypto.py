@@ -110,7 +110,7 @@ class GuacamoleCrypto:
         domain: str = "",
         security: str = "nla",
         ignore_cert: bool = True,
-        client_name: str = "用户空间",
+        client_name: str = "Workspace",
         remote_app: str = "",
         remote_app_dir: str = "",
         remote_app_args: str = "",
@@ -167,7 +167,7 @@ class GuacamoleCrypto:
             "security": security,
             "ignore-cert": "true" if ignore_cert else "false",
             "resize-method": resize_method,
-            "client-name": client_name or "用户空间",
+            "client-name": client_name or "Workspace",
         }
 
         if username:

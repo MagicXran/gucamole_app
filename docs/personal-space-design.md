@@ -1,6 +1,6 @@
 # Portal 个人空间管理系统 — 双向传输详解
 
-> 当前状态（2026-07-31）：权威运行逻辑以根目录 `README.md` 和代码为准。RDPDR 使用经固定 guacd 字节长度补丁支持的中文 `client-name=用户空间`、`drive-name=用户空间`，底层仍是 `/drive/portal_u{user_id}`；Windows 会话入口也固定显示“用户空间”。本文后续保留个人空间最初设计过程和文件传输原理。
+> 当前状态（2026-08-10）：权威运行逻辑以根目录 `README.md` 和代码为准。RDPDR 使用 ASCII `client-name=Workspace` 避免 Windows 组合标题乱码，中文 `drive-name=用户空间` 由固定 guacd 字节长度补丁支持，底层仍是 `/drive/portal_u{user_id}`。本文后续保留个人空间最初设计过程和文件传输原理。
 
 ## 一句话概括
 
@@ -54,9 +54,9 @@
 ```
 config.json / env                    router.py                       guacamole_crypto.py
 ─────────────────────────            ─────────                       ────────────────────
-client_name="用户空间"               user_drive_path =               build_rdp_connection(
-drive.enabled=true          →            f"/drive/portal_u{uid}"  →      client_name="用户空间",
-drive.base_path="/drive"               client_name="用户空间"          drive_path=user_drive_path,
+client_name="Workspace"                user_drive_path =               build_rdp_connection(
+drive.enabled=true          →            f"/drive/portal_u{uid}"  →      client_name="Workspace",
+drive.base_path="/drive"               client_name="Workspace"         drive_path=user_drive_path,
 drive.name="用户空间"                 drive_name="用户空间"            drive_name="用户空间",
                                                                          enable_drive=True
                                                                      )

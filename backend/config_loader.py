@@ -44,7 +44,7 @@ def load_config() -> dict:
     )
     config["guacamole"]["client_name"] = os.environ.get(
         "GUACAMOLE_CLIENT_NAME",
-        config["guacamole"].get("client_name", "用户空间"),
+        config["guacamole"].get("client_name", "Workspace"),
     )
     drive_cfg = config.setdefault("guacamole", {}).setdefault("drive", {})
     drive_cfg["name"] = os.environ.get(

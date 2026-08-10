@@ -20,7 +20,7 @@
     "internal_url": "http://localhost:8080",
     "external_url": "http://localhost:8080",
     "token_expire_minutes": 480,
-    "client_name": "用户空间",
+    "client_name": "Workspace",
     "drive": {
       "enabled": true,
       "name": "用户空间",

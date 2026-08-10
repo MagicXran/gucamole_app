@@ -40,6 +40,7 @@ _AUTO_REMOTE_APP_DIRS = {
 }
 _CLIENT_NAME_MAX_LENGTH = 31
 _DRIVE_NAME_MAX_LENGTH = 64
+_DEFAULT_CLIENT_NAME = "Workspace"
 _USER_SPACE_LABEL = "用户空间"
 
 router = APIRouter(
@@ -87,14 +88,14 @@ def _build_compatible_rdp_label(
     return safe_name or fallback
 
 
-def _build_rdp_client_name(client_label: object = _USER_SPACE_LABEL) -> str:
-    """生成用户可见 RDP 客户端名，兼容协议长度边界。"""
-    if str(client_label or "").strip() == _USER_SPACE_LABEL:
-        if len(_USER_SPACE_LABEL.encode("utf-8")) <= _CLIENT_NAME_MAX_LENGTH:
-            return _USER_SPACE_LABEL
+def _build_rdp_client_name(client_label: object = _DEFAULT_CLIENT_NAME) -> str:
+    """生成稳定 ASCII RDP 客户端名，避免 Windows 组合标题乱码。"""
+    candidate = str(client_label or "").strip()
+    if not candidate or candidate == _USER_SPACE_LABEL:
+        return _DEFAULT_CLIENT_NAME
     return _build_compatible_rdp_label(
-        client_label,
-        fallback=_USER_SPACE_LABEL,
+        candidate,
+        fallback=_DEFAULT_CLIENT_NAME,
         max_length=_CLIENT_NAME_MAX_LENGTH,
     )
 
@@ -160,7 +161,7 @@ def _build_all_connections_with_errors(user_id: int) -> tuple[dict, dict[str, st
     guacamole_cfg = CONFIG.get("guacamole", {})
     drive_cfg = guacamole_cfg.get("drive", {})
     client_name = _build_rdp_client_name(
-        guacamole_cfg.get("client_name", _USER_SPACE_LABEL)
+        guacamole_cfg.get("client_name", _DEFAULT_CLIENT_NAME)
     )
     drive_enabled = drive_cfg.get("enabled", False)
     drive_name = _build_rdp_drive_name(drive_cfg.get("name", _USER_SPACE_LABEL))

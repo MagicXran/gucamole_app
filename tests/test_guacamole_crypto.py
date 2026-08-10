@@ -17,7 +17,7 @@ def test_build_rdp_connection_sets_transfer_disable_flags():
     assert params["disable-upload"] == "true"
 
 
-def test_build_rdp_connection_uses_user_space_labels_by_default():
+def test_build_rdp_connection_uses_ascii_client_and_user_space_drive_by_default():
     connection = GuacamoleCrypto.build_rdp_connection(
         name="app_neutral",
         hostname="rdp.example.local",
@@ -26,9 +26,9 @@ def test_build_rdp_connection_uses_user_space_labels_by_default():
     )
 
     params = connection["app_neutral"]["parameters"]
-    assert params["client-name"] == "用户空间"
+    assert params["client-name"] == "Workspace"
     assert params["drive-name"] == "用户空间"
-    assert params["client-name"].isascii() is False
+    assert params["client-name"].isascii() is True
     assert params["drive-name"].isascii() is False
 
 

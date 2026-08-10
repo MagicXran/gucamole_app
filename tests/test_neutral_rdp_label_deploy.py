@@ -27,7 +27,7 @@ def test_guacd_uses_pinned_utf8_rdpdr_patch_image():
 def test_compose_passes_user_space_label_overrides_to_backend():
     compose = (REPO_ROOT / "deploy" / "docker-compose.yml").read_text(encoding="utf-8")
 
-    assert "GUACAMOLE_CLIENT_NAME: ${GUACAMOLE_CLIENT_NAME:-用户空间}" in compose
+    assert "GUACAMOLE_CLIENT_NAME: ${GUACAMOLE_CLIENT_NAME:-Workspace}" in compose
     assert "GUACAMOLE_DRIVE_NAME: ${GUACAMOLE_DRIVE_NAME:-用户空间}" in compose
 
 

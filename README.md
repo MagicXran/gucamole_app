@@ -328,7 +328,7 @@ guacd 只把当前 Portal 用户的目录映射给本次连接。Windows 侧统�
 
 不同 Portal 用户虽然看到相同共享名，但各自会话背后仍分别对应 `/drive/portal_u{user_id}`，不会因此合并目录。
 
-官方 Guacamole 1.6.0 的 RDPDR 设备声明曾按 Unicode 字符数计算 UTF-8 字节长度，直接写入中文会截断。当前部署使用 `nercar-portal-guacd:1.6.0-user-space`，只把该调用修正为按实际字节长度写入；`client-name` 和 `drive-name` 默认均为“用户空间”。若回退到未打补丁的官方 guacd 镜像，必须恢复 ASCII 名称，不能混用。
+官方 Guacamole 1.6.0 的 RDPDR 设备声明曾按 Unicode 字符数计算 UTF-8 字节长度，直接写入中文会截断。当前部署使用 `nercar-portal-guacd:1.6.0-user-space`，只把共享设备名的长度计算修正为实际 UTF-8 字节数；`drive-name` 固定为“用户空间”，`client-name` 固定为 ASCII `Workspace`，避免 Windows 原生文件对话框把中文 client-name 按本地代码页解码成乱码。原生组合标题因此为 `Workspace 上的 用户空间`。若回退到未打补丁的官方 guacd 镜像，必须把 drive-name 和 UNC 恢复为 `UserFiles` / `\\tsclient\UserFiles`。
 
 ### 8.2 RemoteApp 默认工作目录
 
@@ -368,7 +368,7 @@ Launcher 是固定参数的 C# 原生程序，不接受外部命令行。它在�
 | 文件 API | `_safe_resolve()`、路径规范化、Windows 文件名校验 | 阻止 `..`、绝对路径和越出个人目录 | 仅保护 Portal API |
 | 存储目录 | `/drive/portal_u{user_id}` | 每个 Portal 用户独立目录 | 保护 Linux/Portal 侧路径 |
 | Guacamole token | 每用户连接集合和 token | 防止拿到未授权连接 | 否 |
-| RDPDR | per-user `drive-path` + `client-name=用户空间` + `drive-name=用户空间` | 只映射当前用户目录；guacd 使用固定字节长度补丁支持中文共享名 | 否 |
+| RDPDR | per-user `drive-path` + `client-name=Workspace` + `drive-name=用户空间` | 只映射当前用户目录；ASCII client-name 避免乱码，guacd 补丁支持中文共享名 | 否 |
 | 通道控制 | 禁剪贴板、浏览器传输、打印、音频输入 | 减少文件旁路和数据通道 | 否 |
 | Windows 入口限制 | NoDrives、NoViewOnDrive、禁 Run/控制面板/任务管理器等 | 阻止常规 UI 入口 | 否 |
 | Windows 身份 | 标准账号、管理员账号分域 | 限制系统权限 | 共享账号时不是租户隔离 |
@@ -654,7 +654,7 @@ GuacDrive Restricted Profile Cleanup
 - 记事本和计算器 RemoteApp 正常。
 - 个人文件空间中的文件可以打开、修改和保存。
 - Portal 用户 A/B 的个人文件空间内容互不可见。
-- 真实浏览器中的记事本“另存为”已验证定制 guacd 能完整传输中文 RDPDR 名称；执行 Windows shell-state 迁移并建立新会话后，入口显示“用户空间”，不再显示 `Workspace`、`UserFiles`、`Guacamole RDP` 或 `GuacDrive`。
+- 真实浏览器中的记事本“另存为”已验证定制 guacd 能完整传输中文 RDPDR 共享名；新会话的原生组合入口显示 `Workspace 上的 用户空间`，不再出现中文 client-name 乱码、`UserFiles`、`Guacamole RDP` 或 `GuacDrive`。
 - VSCode A/B 同时运行，最终命令行使用独立 profile/extensions 路径。
 - AppLocker Enforced 下允许程序正常，`cmd.exe` / `explorer.exe` 被阻止。
 - Windows 试点检查脚本通过，RDS 缺失作为 warning 保留。

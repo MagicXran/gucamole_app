@@ -32,7 +32,7 @@
 7. 修改应用、ACL 或策略后确认 Guacamole token cache 已失效。
 8. 修改 VSCode 启动参数代码后，清空数据库 `token_cache` 并重启 `portal-backend`，同时结束旧 Windows 会话后再验收最终命令行。
 9. 使用 Guacamole 1.6.0 `guac-web` 和 `nercar-portal-guacd:1.6.0-user-space` 重建并重启相关容器；构建会校验官方 RDP 库 SHA-256 和补丁位置，任何上游二进制漂移都会失败。
-10. 确认最终 JSON Auth 参数使用 `client-name=用户空间`、`drive-name=用户空间`、`remote-app-dir=\\tsclient\用户空间`；不得继续出现 `Workspace`、`UserFiles`、`Guacamole RDP` 或 `GuacDrive`。
+10. 确认最终 JSON Auth 参数使用 `client-name=Workspace`、`drive-name=用户空间`、`remote-app-dir=\\tsclient\用户空间`；原生文件对话框应显示 `Workspace 上的 用户空间`，不得继续出现中文 client-name 乱码、`UserFiles`、`Guacamole RDP` 或 `GuacDrive`。
 
 ### 阶段 B：Windows 只读盘点
 

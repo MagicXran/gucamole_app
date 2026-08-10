@@ -2,6 +2,16 @@ from backend.config_loader import load_config
 from backend.router import _build_rdp_client_name, _build_rdp_drive_name
 
 
+def test_rdp_label_defaults_use_ascii_client_and_chinese_drive(monkeypatch):
+    monkeypatch.delenv("GUACAMOLE_CLIENT_NAME", raising=False)
+    monkeypatch.delenv("GUACAMOLE_DRIVE_NAME", raising=False)
+
+    config = load_config()
+
+    assert config["guacamole"]["client_name"] == "Workspace"
+    assert config["guacamole"]["drive"]["name"] == "用户空间"
+
+
 def test_rdp_label_environment_overrides(monkeypatch):
     monkeypatch.setenv("GUACAMOLE_CLIENT_NAME", "EnvironmentWorkspace")
     monkeypatch.setenv("GUACAMOLE_DRIVE_NAME", "EnvironmentFiles")

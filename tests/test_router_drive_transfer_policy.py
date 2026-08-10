@@ -67,7 +67,7 @@ def _load_router_module(
             "internal_url": "http://guac-web:8080/guacamole",
             "external_url": "http://portal.example/guacamole",
             "token_expire_minutes": 60,
-            "client_name": "用户空间",
+            "client_name": "Workspace",
             "drive": {
                 "enabled": True,
                 "name": "用户空间",
@@ -173,7 +173,7 @@ def test_restricted_remoteapp_forces_strict_channels():
     assert "enable-audio-input" not in params
 
 
-def test_remoteapp_uses_neutral_ascii_labels_for_default_directory():
+def test_remoteapp_uses_ascii_client_and_chinese_drive_for_default_directory():
     router_module = _load_router_module(
         0,
         0,
@@ -186,7 +186,7 @@ def test_remoteapp_uses_neutral_ascii_labels_for_default_directory():
 
     params = router_module._build_all_connections(7)["app_1"]["parameters"]
 
-    assert params["client-name"] == "用户空间"
+    assert params["client-name"] == "Workspace"
     assert params["drive-name"] == "用户空间"
     assert params["drive-path"] == "/drive/portal_u7"
     assert params["remote-app-dir"] == r"\\tsclient\用户空间"
@@ -203,7 +203,8 @@ def test_rdp_drive_name_falls_back_to_ascii_for_unicode_or_unsafe_labels():
 def test_rdp_client_name_is_ascii_and_limited_to_31_characters():
     router_module = _load_router_module(0, 0)
 
-    assert router_module._build_rdp_client_name("远程工作区") == "用户空间"
+    assert router_module._build_rdp_client_name("用户空间") == "Workspace"
+    assert router_module._build_rdp_client_name("远程工作区") == "Workspace"
     assert router_module._build_rdp_client_name(" Engineering Workspace ") == "Engineering_Workspace"
     assert router_module._build_rdp_client_name("x" * 40) == "x" * 31
 

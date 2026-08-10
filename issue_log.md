@@ -372,6 +372,7 @@
 3. 新增管理员安装器，发布独立 `portal-freecad` RemoteApp alias，原 `freecad` 保持不变；app6 只切换为 `||portal-freecad`，per-user `drive-path`、ACL、资源池和 RDP 凭据不变。
 4. 安装器支持 PlanOnly、备份、重复安装和安全移除；alias 的 Path/VPath/Name/图标/命令行策略全部精确校验，未知配置拒绝覆盖。
 5. 2026-08-10 确认乱码项来自 Windows 原生文件对话框枚举 `RDPNP/RDPDR` 设备。Launcher 增加 `BaseApp/Preferences/Dialog/DontUseNativeDialog=true`，强制 FreeCAD 使用 Qt 文件对话框；其侧栏由 FreeCAD 显式构造并包含 `U:`，不再枚举无盘符的原生 RDPDR 项。
+6. 为覆盖后续新增 App，协议标签改为全局 `client-name=Workspace`、`drive-name=用户空间`。中文名称只保留在已修复字节长度的 RDPDR 共享名中；历史或环境中残留的中文 `client-name=用户空间` 也会在路由层规范化为 `Workspace`，避免重新引入乱码。
 
 ### 调试中发现的第二根因
 
@@ -389,6 +390,9 @@
 - 临时恢复并随后还原 test 用户原密码哈希后，第二用户 FreeCAD 对话框只显示 `/drive/portal_u2` 内容和 `portal-u2-isolation-proof.txt`，不出现用户 1 标记；测试标记和会话均已清理。
 - 2026-08-10 先从 Xran `user.cfg` 移除 `DontUseNativeDialog`，再部署新版 Launcher；新会话启动后该参数被 Launcher 自动写回。真实打开和另存为均显示 Qt 文件对话框，当前目录为 `U:\`，侧栏只有固定“用户空间”，截图中的乱码组合设备项消失。
 - 新建 `portal-dialog-pilot.FCStd` 后，Portal 容器确认文件只落到 `/drive/portal_u1`，大小 1829 字节，`/drive/portal_u2` 不存在同名文件。部署备份为 `C:\ProgramData\NercarPortal\backups\20260810-145242`，新版 EXE SHA-256 为 `18726D7D...7AC287A`。
+- 全局 client-name 调整后，运行容器环境为 `client=Workspace`、`drive=用户空间`；用户 1 的 7 个实时连接参数均保留 `/drive/portal_u1` 和 `\\tsclient\用户空间`，仅 client-name 变为 `Workspace`。
+- 使用 Xran 账号的 ElmerGUI 原生 Windows 文件对话框真实显示 `Workspace 上的 用户空间`，点击后可枚举当前 `/drive/portal_u1` 内容，未再出现 `鐢ㄦ埛绌洪棿`。验证结束后 Xran/GuacRemoteApp 会话均已注销，`token_cache=0`。
+- 本次主机完整 Docker 构建被 Docker Desktop BuildKit 的基础镜像 metadata size validation 异常阻断；未清理共享构建缓存，而是基于现有健康 backend 镜像覆盖 3 个 Python 文件和 `config.json`，生成并部署镜像 `sha256:e08a8f...82afec`。代码仓库和 Compose 已是完整正式配置，但该主机后续执行全量 `--build` 前仍需单独修复 Docker 基础镜像缓存。
 
 ### 边界与回滚
 

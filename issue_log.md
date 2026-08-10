@@ -349,7 +349,7 @@
 
 ## ISSUE-011：FreeCAD 仍显示乱码组合设备名，且安装器误判部分部署为幂等
 
-状态：方案 2 已完成试点部署、真实打开/保存和双用户目录验证
+状态：方案 2 已完成试点部署、真实打开/保存、双用户目录验证和 FreeCAD 内原生乱码项屏蔽
 
 发现日期：2026-08-01
 
@@ -371,6 +371,7 @@
 2. Launcher 不接受外部参数；若 `U:` 已指向其他目标则 fail closed，只清理自己创建的映射，并记录不含凭据的本地阶段日志。
 3. 新增管理员安装器，发布独立 `portal-freecad` RemoteApp alias，原 `freecad` 保持不变；app6 只切换为 `||portal-freecad`，per-user `drive-path`、ACL、资源池和 RDP 凭据不变。
 4. 安装器支持 PlanOnly、备份、重复安装和安全移除；alias 的 Path/VPath/Name/图标/命令行策略全部精确校验，未知配置拒绝覆盖。
+5. 2026-08-10 确认乱码项来自 Windows 原生文件对话框枚举 `RDPNP/RDPDR` 设备。Launcher 增加 `BaseApp/Preferences/Dialog/DontUseNativeDialog=true`，强制 FreeCAD 使用 Qt 文件对话框；其侧栏由 FreeCAD 显式构造并包含 `U:`，不再枚举无盘符的原生 RDPDR 项。
 
 ### 调试中发现的第二根因
 
@@ -386,9 +387,11 @@
 - 把 FreeCAD 配置明确重置为 `C:/Users/Xran` 后重新从 Portal 启动，日志出现 `mapped`、`freecad_path_set=U:/`、`child_started`；打开对话框显示 `此电脑 > 用户空间 (U:)`。
 - 真实新建空 FreeCAD 文档并另存为 `portal-launcher-save-test.FCStd`，Portal 容器确认文件只落到 `/drive/portal_u1`，大小 1831 字节，验证后已删除。
 - 临时恢复并随后还原 test 用户原密码哈希后，第二用户 FreeCAD 对话框只显示 `/drive/portal_u2` 内容和 `portal-u2-isolation-proof.txt`，不出现用户 1 标记；测试标记和会话均已清理。
+- 2026-08-10 先从 Xran `user.cfg` 移除 `DontUseNativeDialog`，再部署新版 Launcher；新会话启动后该参数被 Launcher 自动写回。真实打开和另存为均显示 Qt 文件对话框，当前目录为 `U:\`，侧栏只有固定“用户空间”，截图中的乱码组合设备项消失。
+- 新建 `portal-dialog-pilot.FCStd` 后，Portal 容器确认文件只落到 `/drive/portal_u1`，大小 1829 字节，`/drive/portal_u2` 不存在同名文件。部署备份为 `C:\ProgramData\NercarPortal\backups\20260810-145242`，新版 EXE SHA-256 为 `18726D7D...7AC287A`。
 
 ### 边界与回滚
 
-- 原生乱码 RDPDR 设备项仍可能在“此电脑”深层可见；固定 `U:` 是 FreeCAD 正常入口，不是系统级隐藏、独立 Windows SID 或硬多租户隔离。
+- FreeCAD 的 Qt 文件对话框不再显示原生乱码 RDPDR 项；Windows Explorer 或其他原生文件对话框仍可能显示它。固定 `U:` 和 Qt 对话框只是 FreeCAD 正常入口，不是系统级隐藏、独立 Windows SID 或硬多租户隔离。
 - 回滚时先停止 app6 新会话并注销 Xran，恢复 app6 `remote_app=||freecad` 和原工作目录，清空 token cache，再以管理员运行安装器 `-Remove`。原 `freecad` alias 和备份目录始终保留。
 - 不要再用 `_LabelFromReg`、`remote-app-dir` 或仅比较源码哈希来推断 FreeCAD 入口已生效；必须同时检查 Launcher 日志、实际 EXE hash、真实打开/保存对话框和 `/drive/portal_u{id}` 落盘。

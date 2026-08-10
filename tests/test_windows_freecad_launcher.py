@@ -70,6 +70,13 @@ def test_freecad_launcher_waits_maps_starts_and_cleans_up():
     assert "args.Length != 0" in source
 
 
+def test_freecad_launcher_uses_qt_file_dialog_to_hide_raw_rdpdr_entry():
+    source = LAUNCHER_PATH.read_text(encoding="utf-8")
+
+    assert "User parameter:BaseApp/Preferences/Dialog" in source
+    assert "SetBool('DontUseNativeDialog', True)" in source
+
+
 def test_freecad_launcher_installer_is_fail_closed_and_reversible():
     source = INSTALLER_PATH.read_text(encoding="utf-8-sig")
 

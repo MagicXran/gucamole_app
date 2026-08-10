@@ -102,8 +102,8 @@ powershell -File scripts\windows\set-portal-session-filespace-entry.ps1 `
 1. 先运行 `powershell -File scripts\windows\install-portal-freecad-launcher.ps1 -PlanOnly` 检查固定 alias、目标路径和现有部署状态。
 2. 结束 Xran/FreeCAD 旧会话后，以管理员权限运行安装器；确认 `portal-freecad` 精确指向 `C:\ProgramData\NercarPortal\PortalFreeCADLauncher.exe`，原 `freecad` alias 不变。
 3. 备份 app6 数据库行，仅把 `remote_app` 切换为 `||portal-freecad`，`remote_app_dir` 保持空值；清空 token cache 并注销旧会话。
-4. Launcher 固定映射 `U:` 到 `\\tsclient\用户空间`，设置 FreeCAD `FileOpenSavePath=U:/`。若 U: 已被其他目标占用、目标 UNC 不存在或部署完整性异常，停止启动而不是覆盖未知状态。
-5. 原始 RDPDR 组合项仍可能显示乱码前缀；验收对象是 FreeCAD 正常打开/保存流程中的 `用户空间 (U:)`，不能把本试点描述为系统级隐藏或 Windows 授权隔离。
+4. Launcher 固定映射 `U:` 到 `\\tsclient\用户空间`，设置 FreeCAD `FileOpenSavePath=U:/` 和 `BaseApp/Preferences/Dialog/DontUseNativeDialog=true`。若 U: 已被其他目标占用、目标 UNC 不存在或部署完整性异常，停止启动而不是覆盖未知状态。
+5. 验收时应看到 FreeCAD 自带 Qt 文件对话框：当前目录为 `U:\`，侧栏显示固定“用户空间”，不出现乱码 RDPDR 组合项。该机制不隐藏 Windows Explorer 或其他应用的系统级 RDPDR namespace，也不是 Windows 授权隔离。
 
 ## 3. 验收矩阵
 
@@ -118,7 +118,7 @@ powershell -File scripts\windows\set-portal-session-filespace-entry.ps1 `
 - 允许的终端、Tasks、Run、Build、Debug、Git、包管理和扩展正常。
 - 管理员桌面仍通过独立账号和资源域可用。
 - AppLocker Enforced 下允许的记事本、计算器和 VSCode 仍能启动。
-- FreeCAD 打开/另存为默认进入 `此电脑 > 用户空间 (U:)`，保存 `.FCStd` 后只落到当前 Portal 用户的 `/drive/portal_u{id}`。
+- FreeCAD 打开/另存为使用 Qt 文件对话框，默认进入 `U:\`，侧栏只显示固定“用户空间”且无乱码 RDPDR 项；保存 `.FCStd` 后只落到当前 Portal 用户的 `/drive/portal_u{id}`。
 
 ### 阻断场景
 

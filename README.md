@@ -348,15 +348,16 @@ Portal app6
   -> 等待 \\tsclient\用户空间
   -> 映射 U: -> \\tsclient\用户空间
   -> 把 FreeCAD FileOpenSavePath 设置为 U:/
+  -> 强制 FreeCAD 使用 Qt 文件对话框
   -> 从 U:\ 启动 FreeCAD
   -> FreeCAD 退出后只清理本 Launcher 创建的映射
 ```
 
-Launcher 是固定参数的 C# 原生程序，不接受外部命令行。若 `U:` 已指向其他目标、RDPDR 目录未出现、FreeCAD/FreeCADCmd 缺失或映射失败，会停止启动并写入 `%LOCALAPPDATA%\NercarPortal\portal-freecad-launcher.log`。每个 RDP 会话中的 `\\tsclient\用户空间` 仍来自当前 Portal 用户的 `/drive/portal_u{user_id}`；`U:` 只是正常工作流入口，不是新的授权边界。
+Launcher 是固定参数的 C# 原生程序，不接受外部命令行。它在启动 GUI 前同时设置 `FileOpenSavePath=U:/` 和 `BaseApp/Preferences/Dialog/DontUseNativeDialog=true`。FreeCAD 因此使用自己的 Qt 文件对话框和显式侧栏，不再枚举 Windows 原生 RDPDR 组合设备项；若 `U:` 已指向其他目标、RDPDR 目录未出现、FreeCAD/FreeCADCmd 缺失或映射失败，会停止启动并写入 `%LOCALAPPDATA%\NercarPortal\portal-freecad-launcher.log`。每个 RDP 会话中的 `\\tsclient\用户空间` 仍来自当前 Portal 用户的 `/drive/portal_u{user_id}`；`U:` 只是正常工作流入口，不是新的授权边界。
 
 管理员安装器位于 `scripts/windows/install-portal-freecad-launcher.ps1`，支持 `-PlanOnly`、安装和 `-Remove`。它不会修改原 `freecad` alias；安装前备份现有文件和注册表，校验 alias 全部属性、部署源码/EXE 哈希与 manifest，源码已更新但 EXE 未替换的中间状态也会被识别并重建。未知同名 alias、被修改或不完整的部署在覆盖/移除前直接停止。
 
-真实 Windows Server 2019 + Chromium 验收确认：FreeCAD 的打开和保存对话框默认进入 `此电脑 > 用户空间 (U:)`，保存的 `.FCStd` 落到 `/drive/portal_u1`；第二个 Portal 用户只看到 `/drive/portal_u2` 的测试标记。Windows 原始 RDPDR 组合设备项仍可能显示乱码前缀并在左侧深层可见，本方案不宣称系统级隐藏它。
+真实 Windows Server 2019 + Chromium 验收确认：FreeCAD 的 Qt 打开和保存对话框默认进入 `U:\`，侧栏只显示固定“用户空间”，不再出现乱码 RDPDR 项；保存的 `.FCStd` 落到 `/drive/portal_u1`，第二个 Portal 用户只看到 `/drive/portal_u2` 的测试标记。该处理只覆盖 FreeCAD 的文件对话框，Windows Explorer 或其他仍使用原生文件对话框的应用依然可能看到原始 RDPDR 组合设备项，不构成系统级隐藏。
 
 ### 8.4 隔离层次
 

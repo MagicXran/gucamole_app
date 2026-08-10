@@ -205,7 +205,8 @@ namespace NercarPortal
             string scriptPath = Path.Combine(root, "set-freecad-open-save-path.py");
             const string source =
                 "import FreeCAD\n" +
-                "FreeCAD.ParamGet('User parameter:BaseApp/Preferences/General').SetString('FileOpenSavePath', 'U:/')\n";
+                "FreeCAD.ParamGet('User parameter:BaseApp/Preferences/General').SetString('FileOpenSavePath', 'U:/')\n" +
+                "FreeCAD.ParamGet('User parameter:BaseApp/Preferences/Dialog').SetBool('DontUseNativeDialog', True)\n";
             File.WriteAllText(scriptPath, source, new System.Text.UTF8Encoding(false));
 
             try

@@ -359,6 +359,38 @@ Launcher 是固定参数的 C# 原生程序，不接受外部命令行。它在�
 
 真实 Windows Server 2019 + Chromium 验收确认：FreeCAD 的 Qt 打开和保存对话框默认进入 `U:\`，侧栏只显示固定“用户空间”，不再出现乱码 RDPDR 项；保存的 `.FCStd` 落到 `/drive/portal_u1`，第二个 Portal 用户只看到 `/drive/portal_u2` 的测试标记。该处理只覆盖 FreeCAD 的文件对话框，Windows Explorer 或其他仍使用原生文件对话框的应用依然可能看到原始 RDPDR 组合设备项，不构成系统级隐藏。
 
+#### 新增 App 的用户空间名称与文件对话框适配规则
+
+新增 App 默认不需要名称适配。协议层必须继续使用以下固定组合：
+
+```text
+client-name = Workspace
+drive-name = 用户空间
+drive-path = /drive/portal_u{user_id}
+UNC = \\tsclient\用户空间
+Windows 原生组合标题 = Workspace 上的 用户空间
+```
+
+四个值职责不同，不能混用：`client-name` 只控制 Windows 组合标题的左半部分；`drive-name` 控制右半部分和 `\\tsclient\{drive-name}` UNC；`drive-path` 才决定当前 Portal 用户实际映射到哪个目录；`remote-app-dir` 只是应用启动工作目录。用户姓名、`display_name` 和 `username` 不得再进入 `client-name` 或 `drive-name`，否则会重新引入编码、缓存、路径变化和多用户一致性问题。
+
+接入新 App 时按以下顺序验收：
+
+1. `remote_app_dir` 先留空，让路由统一展开为 `\\tsclient\用户空间`；不要在数据库中复制固定用户目录。
+2. 用全新 token 和全新 Windows 会话启动 App，打开真实“打开/另存为”窗口；如果原生窗口显示 `Workspace 上的 用户空间` 且默认目录可接受，则无需专用 Launcher。
+3. 如果 App 忽略工作目录、记忆本地盘、必须显示纯“用户空间”或业务要求固定盘符，再增加 App 专用受控 Launcher：等待 `\\tsclient\用户空间`、映射固定盘符、设置应用自己的默认目录，并在应用支持时切换为非原生文件对话框。
+4. 仅映射 `U:` 不会隐藏原始 RDPDR 项；FreeCAD 能只显示“用户空间”，关键是同时启用了 Qt 文件对话框。没有非原生文件对话框能力的 App，正常预期仍是 `Workspace 上的 用户空间`。
+5. Launcher 必须固定目标、拒绝外部任意参数、检测盘符冲突、只清理自己创建的映射，并提供安装备份、完整性校验和回滚。
+
+以下做法禁止再次使用：
+
+- 把中文、Portal 用户名或动态显示名写入 `client-name`；
+- 把 `client-name` 置空、空格或零宽字符来尝试隐藏“上的”前缀；
+- 只改 `drive-name` 而不同步 UNC、默认工作目录、VSCode 参数、Launcher、迁移脚本和测试；
+- 依赖 MountPoints2 `_LabelFromReg`、快捷方式或 `remote-app-dir` 推断原生文件对话框标题已被替换；
+- 复用旧 token 或旧 Windows 会话验证新名称。
+
+名称或 Launcher 变更后的最小验收矩阵是：实时连接 JSON 中 `Workspace` / `用户空间` / `/drive/portal_u{id}` 正确；原生文件对话框无乱码；可浏览并保存当前用户目录；第二个 Portal 用户看不到第一个用户的文件；应用退出后映射和会话按约定清理。变更 `client-name` 或 `drive-name` 后必须重建 `portal-backend`、清空 `token_cache` 并注销旧 Windows 会话。
+
 ### 8.4 隔离层次
 
 | 层次 | 技术手段 | 当前作用 | 是否构成 Windows 硬隔离 |

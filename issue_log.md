@@ -394,6 +394,17 @@
 - 使用 Xran 账号的 ElmerGUI 原生 Windows 文件对话框真实显示 `Workspace 上的 用户空间`，点击后可枚举当前 `/drive/portal_u1` 内容，未再出现 `鐢ㄦ埛绌洪棿`。验证结束后 Xran/GuacRemoteApp 会话均已注销，`token_cache=0`。
 - 本次主机完整 Docker 构建被 Docker Desktop BuildKit 的基础镜像 metadata size validation 异常阻断；未清理共享构建缓存，而是基于现有健康 backend 镜像覆盖 3 个 Python 文件和 `config.json`，生成并部署镜像 `sha256:e08a8f...82afec`。代码仓库和 Compose 已是完整正式配置，但该主机后续执行全量 `--build` 前仍需单独修复 Docker 基础镜像缓存。
 
+### 固化经验：新增 App 的驱动名称与文件对话框适配
+
+- 名称和隔离必须分开理解：`client-name=Workspace` 负责消除 Windows 组合标题左侧乱码，`drive-name=用户空间` 负责共享名和 `\\tsclient\用户空间`，真正的用户隔离仍是 `/drive/portal_u{user_id}`。截图中的 `鐢ㄦ埛绌洪棿` 是“用户空间”的 UTF-8 被错误解码，不是 Portal 用户姓名。
+- Windows 原生 RDPDR 项由系统组合成 `{client-name} 上的 {drive-name}`。当前所有新增 App 的标准结果是 `Workspace 上的 用户空间`；Guacamole、Portal 或 MountPoints2 没有受支持参数可以只删除左侧前缀并保留同一原生 RDPDR 设备。
+- `client-name` 不得为空，也不得使用中文、用户名、`display_name`、空格或零宽字符。空值会被 Portal/FreeRDP 默认值替换，特殊字符在不同 Windows/FreeRDP 版本中不稳定，不能作为隐藏机制。
+- 新 App 首次接入先不写专用 Launcher：保持全局标签、per-user `drive-path` 和空 `remote_app_dir`，用真实新会话打开应用自己的文件对话框。如果 `Workspace 上的 用户空间` 和默认目录可以接受，接入完成。
+- 只有 App 忽略启动工作目录、持续回到本地盘、要求固定盘符或必须只显示“用户空间”时，才增加专用 Launcher。Launcher 映射 `U:` 只能增加稳定入口，不能单独隐藏原生 RDPDR 项；FreeCAD 的成功条件是“映射 U: + 设置 FileOpenSavePath + 强制 Qt 非原生文件对话框”三项同时成立。
+- 如果应用没有非原生文件对话框或可配置 sidebar，就接受通用原生显示 `Workspace 上的 用户空间`。为所有 App 强制只显示一个纯名称，需要停用 RDPDR 并改为会话级 SMB/WebDAV/WinFsp 等映射，属于新的认证、隔离、配额、审计和断线恢复架构，不能作为普通接入修改。
+- 修改 `drive-name` 会同时改变 UNC，必须同步 `remote-app-dir`、VSCode 工作区、Launcher 目标、Known Folder、迁移兼容值、环境示例、测试和文档；仅为视觉效果不得随意修改。修改 `client-name` 虽不改变 UNC，也必须重建 backend、清空 `token_cache` 并注销全部旧 Windows 会话。
+- 验收不得只看 Portal 参数或代码：必须同时核对实时 JSON Auth 参数、真实 Windows 原生/应用文件对话框、当前用户目录落盘、第二用户目录隔离、应用退出清理和回滚路径。旧 token、旧会话、应用自身缓存和部署 EXE 中间态都可能制造“代码已改但画面未变”的假象。
+
 ### 边界与回滚
 
 - FreeCAD 的 Qt 文件对话框不再显示原生乱码 RDPDR 项；Windows Explorer 或其他原生文件对话框仍可能显示它。固定 `U:` 和 Qt 对话框只是 FreeCAD 正常入口，不是系统级隐藏、独立 Windows SID 或硬多租户隔离。
